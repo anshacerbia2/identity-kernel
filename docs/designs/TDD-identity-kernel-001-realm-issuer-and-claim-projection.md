@@ -3,7 +3,7 @@ doc_meta:
   id: TDD-identity-kernel-001
   title: Realm Topology, Issuer Identity, and Token Claim Projection
   owner: Identity Platform Team
-  version: 0.2.0
+  version: 1.0.0
   status: approved
   classification: restricted
   review_cycle_days: 90
