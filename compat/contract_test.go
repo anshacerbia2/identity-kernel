@@ -82,6 +82,21 @@ func TestQuestion1ProtocolMapperCoverage(t *testing.T) {
 			"extension or a standard amendment.", surfaces[0].principalID, surfaces[0].subjectType)
 	}
 
+	// The answer is now a contract. Question 1 was answered with outcome 1 against the pinned image,
+	// and realm/contract.json declares all four surfaces covered -- so a later release that drops the
+	// claim from any of them must fail here, not quietly report outcome 2 and pass. TDD-identity-
+	// kernel-001: "A release dropping the claim from a covered surface fails the suite."
+	for _, name := range declaredSurfaces(t) {
+		for _, s := range surfaces {
+			if s.name == name && !s.covered {
+				t.Errorf("REGRESSION: %s is declared covered in realm/contract.json and no longer carries "+
+					"principal_id and subject_type (principal_id=%q subject_type=%q). Downstream consumers "+
+					"build against this surface; a release that drops it is a breaking change.",
+					s.name, s.principalID, s.subjectType)
+			}
+		}
+	}
+
 	// Every covered surface must say the same thing. A surface carrying a different value is worse
 	// than one carrying none: a consumer reading it would resolve a different Principal.
 	for _, s := range surfaces {
@@ -97,6 +112,73 @@ func TestQuestion1ProtocolMapperCoverage(t *testing.T) {
 	}
 	t.Logf("question 1: outcome %d -- covered: %s; uncovered: %s",
 		outcome, strings.Join(covered, ", "), orNone(uncovered))
+}
+
+// The negative control. Every coverage verdict above is "the claim is present", and a probe that
+// could not see absence would report outcome 1 against any Keycloak at all. So the same mapper is
+// attached with every surface switched off, and the probe must find the claim missing from all
+// four. Without this, the regression assertion above is a check that cannot fail.
+func TestTheProbeSeesAnAbsentClaim(t *testing.T) {
+	a := requireKeycloak(t)
+
+	name := "compat-control-" + suffix()
+	_, err := a.call(http.MethodPost, "/admin/realms/"+realmName+"/client-scopes", map[string]any{
+		"name":       name,
+		"protocol":   "openid-connect",
+		"attributes": map[string]string{"include.in.token.scope": "true"},
+		"protocolMappers": []map[string]any{{
+			"name":           "principal_id",
+			"protocol":       "openid-connect",
+			"protocolMapper": "oidc-usermodel-attribute-mapper",
+			"config": map[string]string{
+				"user.attribute":            "scnehaux_principal_id",
+				"claim.name":                "principal_id",
+				"jsonType.label":            "String",
+				"access.token.claim":        "false",
+				"id.token.claim":            "false",
+				"userinfo.token.claim":      "false",
+				"introspection.token.claim": "false",
+			},
+		}},
+	}, http.StatusCreated)
+	if err != nil {
+		t.Fatalf("creating the control scope: %v", err)
+	}
+
+	control := clientWithScope(t, a, "compat-control-"+suffix(), name)
+	resource := resourceServerFor(t, a, control)
+	who := createPrincipal(t, a)
+	issued := passwordGrant(t, a, control, who)
+
+	for surfaceName, claims := range map[string]map[string]any{
+		"access token":  jwtClaims(t, issued.AccessToken),
+		"ID token":      jwtClaims(t, issued.IDToken),
+		"UserInfo":      userInfo(t, a, issued.AccessToken),
+		"introspection": introspect(t, a, resource, issued.AccessToken),
+	} {
+		if value, present := claims["principal_id"]; present {
+			t.Errorf("%s carries principal_id=%v from a mapper with that surface switched off: the probe "+
+				"cannot tell a covered surface from an uncovered one", surfaceName, value)
+		}
+	}
+}
+
+func declaredSurfaces(t *testing.T) []string {
+	t.Helper()
+	raw, err := readFile("contract.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var contract struct {
+		ClaimSurfaces []string `json:"claim_surfaces"`
+	}
+	if err := json.Unmarshal(raw, &contract); err != nil {
+		t.Fatalf("parsing realm/contract.json: %v", err)
+	}
+	if len(contract.ClaimSurfaces) == 0 {
+		t.Fatal("realm/contract.json declares no claim surfaces; the regression check would assert nothing")
+	}
+	return contract.ClaimSurfaces
 }
 
 // ---------------------------------------------------------------------------------------------

@@ -1,0 +1,17 @@
+{
+  "_comment": [
+    "The declared realm contract: what other repositories build against (TDD-identity-kernel-001).",
+    "Changing a surface listed here is a breaking change under SAD-001 section 11, and a Keycloak",
+    "release that stops covering one fails compat/ -- that is what makes the list a contract rather",
+    "than a note about what happened to work once."
+  ],
+  "claim_surfaces": ["access token", "ID token", "UserInfo", "introspection"],
+  "question_1": {
+    "outcome": 1,
+    "meaning": "all four surfaces carry principal_id and subject_type through supported mappers",
+    "answered_against": "quay.io/keycloak/keycloak@sha256:82a77884f3af238beab1e7afd63b5f530e1b5c0590bd7aa60b40a40463e29b2c",
+    "keycloak_version": "26.7.4",
+    "answered_on": "2026-09-25",
+    "evidence": "identity-kernel compat run 36105049194"
+  }
+}
