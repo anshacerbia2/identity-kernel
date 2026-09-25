@@ -3,7 +3,7 @@ doc_meta:
   id: TDD-identity-kernel-001
   title: Realm Topology, Issuer Identity, and Token Claim Projection
   owner: Identity Platform Team
-  version: 1.4.0
+  version: 1.5.0
   status: approved
   classification: restricted
   review_cycle_days: 90
@@ -147,17 +147,27 @@ configuration that turns them into the STD-IAM-002 contract:
 
 | Source attribute | Claim | Profile |
 | :-- | :-- | :-- |
-| `scnehaux_principal_id` | `principal_id` | internal, privileged, workload |
-| `scnehaux_subject_type` | `subject_type` | internal, privileged, workload |
+| `scnehaux_principal_id` | `principal_id` | internal, privileged, provider, workload |
+| `scnehaux_subject_type` | `subject_type` | internal, privileged, provider, workload |
 | `scnehaux_workload_owner` | `workload_owner` | workload only |
+| `scnehaux_provider_scope` | `provider_scope` | provider only |
+| authentication session (`AUTH_TIME` note), authentication level | `auth_time`, `acr` | privileged, provider |
 | projected active Tenant | `tenant_id` | internal, privileged, tenant-scoped workload |
 | projected active Workspace | `workspace_id` | optional internal/privileged/workload |
 | projected Membership version | `membership_version` | whenever `tenant_id` is present |
 | projected Tenant security version | `tenant_security_version` | whenever `tenant_id` is present |
 
-These mappers live in `scnehaux-internal`, `scnehaux-privileged`, and
-`scnehaux-workload` client scopes. `scnehaux-external` contains none of them and uses a
-pairwise `sub`. No enterprise mapper is attached as a realm default, because doing so
+These mappers live in the audience client scopes of STD-IAM-002 §3.2.1:
+`scnehaux-internal`, `scnehaux-privileged`, `scnehaux-provider`, and `scnehaux-workload`.
+`scnehaux-external` contains none of them and uses a pairwise `sub`.
+
+`scnehaux-provider` is the provider-scope form of the privileged profile (§3.1.1). It carries
+`principal_id`, `subject_type`, `provider_scope`, `acr`, and `auth_time`, and never `tenant_id` or a
+version claim, because a provider operation belongs to no Tenant. It is what identity-control
+accepts to mint a Principal. `provider_scope` is written only by identity-control's bootstrap
+ceremony, and like every `scnehaux_*` attribute it is admin-managed and not user-editable.
+`auth_time` exists only for an authentication ceremony, so a direct grant cannot produce a
+conformant provider token. No enterprise mapper is attached as a realm default, because doing so
 would leak stable correlation and Tenant context into external tokens.
 
 | Surface | Requirement |
@@ -205,7 +215,7 @@ is closed here, by configuration rather than by policy:
 | User registration | disabled | Self-registration |
 | Identity provider first-login flow | no automatic user creation | Federated auto-creation |
 | Declarative user profile `scnehaux_principal_id` | admin-managed, not user-editable | Attribute mutation through account self-service |
-| Declarative user profile `scnehaux_subject_type` and `scnehaux_workload_owner` | admin-managed, not user-editable | Claim-source mutation through account self-service |
+| Declarative user profile `scnehaux_subject_type`, `scnehaux_workload_owner`, and `scnehaux_provider_scope` | admin-managed, not user-editable | Claim-source mutation through account self-service |
 | Admin Console user creation | restricted to break-glass roles | Direct console creation |
 
 Keycloak enforces no uniqueness on user attributes, so the uniqueness invariant for
@@ -396,7 +406,8 @@ persisted against, so they are asserted rather than observed.
 | `scnehaux_principal_id` | admin-managed, not user-editable, single-valued | Preserves immutability |
 | `scnehaux_subject_type` | admin-managed, not user-editable, single-valued | Distinguishes human and workload Principals |
 | `scnehaux_workload_owner` | admin-managed, workload only, single-valued | Carries workload accountability |
-| Audience client scopes | exactly one of internal, privileged, workload, external | Applies the STD-IAM-002 claim allowlist |
+| `scnehaux_provider_scope` | admin-managed, not user-editable, single-valued | Names the bounded provider authority of a provider-scope token |
+| Audience client scopes | exactly one of internal, privileged, provider, workload, external | Applies the STD-IAM-002 claim allowlist |
 | Signing algorithm | `PS256` | STD-IAM-002 §3.2.2 initial baseline |
 | Preview features | disabled | ADR-IAM-001 §5.8 requires a separate ADR to enable any |
 | Image | pinned by digest | SAD-001 §7.6 |
@@ -413,6 +424,9 @@ compatibility suite rather than left to operational discipline.
 
 - A created Principal carries `scnehaux_principal_id` in its Keycloak representation.
 - A human internal access token carries `principal_id` and `subject_type=human`.
+- A provider token, obtained by Authorization Code with PKCE, carries `principal_id`,
+  `subject_type`, `provider_scope`, `acr`, and the `auth_time` of the login, and no `tenant_id`,
+  version claim, or `workload_owner`.
 - A workload token carries `principal_id`, `subject_type=workload`, and
   `workload_owner`.
 - Every surface the adopted configuration claims to cover carries the profile's claim
