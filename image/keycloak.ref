@@ -1,0 +1,11 @@
+# The upstream Keycloak image, pinned by digest. TDD-identity-kernel-005.
+#
+# A tag is mutable: `26.7.4` can point at different bytes tomorrow, and a proof-of-concept answer
+# recorded against a tag is an answer about an image nobody can fetch again. The digest is the
+# identity; the version is recorded beside it for the reader.
+#
+# Resolved from quay.io's registry API on 2026-09-25 (26.7.4, published 2026-09-16). Changing it is
+# an upgrade, and an upgrade runs the compatibility suite in compat/ before it is accepted.
+#
+# The first non-comment line is the reference CI runs.
+quay.io/keycloak/keycloak@sha256:82a77884f3af238beab1e7afd63b5f530e1b5c0590bd7aa60b40a40463e29b2c

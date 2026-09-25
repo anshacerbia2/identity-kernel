@@ -1,0 +1,13 @@
+# Local environment. Never committed: it holds this machine's credentials.
+.env
+
+# Build and test output.
+*.out
+coverage
+
+# Editor and OS noise.
+.idea/
+.vscode/
+*.swp
+.DS_Store
+Thumbs.db

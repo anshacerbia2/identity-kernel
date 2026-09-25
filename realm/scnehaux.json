@@ -1,0 +1,12 @@
+{
+  "realm": "scnehaux",
+  "enabled": true,
+  "registrationAllowed": false,
+  "registrationEmailAsUsername": false,
+  "editUsernameAllowed": false,
+  "resetPasswordAllowed": false,
+  "loginWithEmailAllowed": true,
+  "duplicateEmailsAllowed": false,
+  "defaultSignatureAlgorithm": "PS256",
+  "sslRequired": "external"
+}
