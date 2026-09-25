@@ -3,7 +3,7 @@ doc_meta:
   id: TDD-identity-kernel-001
   title: Realm Topology, Issuer Identity, and Token Claim Projection
   owner: Identity Platform Team
-  version: 1.3.0
+  version: 1.4.0
   status: approved
   classification: restricted
   review_cycle_days: 90
@@ -112,6 +112,28 @@ decision is recorded either way rather than inherited by default:
 
 The second outcome is not a failure. It is a cost accepted with open eyes, and
 recording it means a future migration is planned rather than discovered.
+
+**Settled: the path form is retained.** Against 26.7.4 on 2026-09-25 (compat run
+36113564506), Keycloak composes `iss` as `{frontend URL}/realms/{realm name}`. Its two
+supported inputs set only the prefix:
+
+- the server hostname, which may carry a path;
+- a realm's `frontendUrl`, with or without a path.
+
+No supported configuration removes the segment. A reverse-proxy rewrite does not either,
+because `iss` is composed inside Keycloak rather than read from the request path. Removing
+it would take a custom issuer extension, which is a restricted extension under
+ADR-IAM-001 rather than configuration.
+
+Renaming the realm moves its issuer too, so the realm name is as irreversible as the
+hostname. Two things follow for production:
+
+- **The hostname and the realm name are decided together, once, before the first token:**
+  `https://identity.scnehaux.com/realms/scnehaux`.
+- **A development server's issuer is not the production issuer.** Nothing may store a
+  development `iss` as though it were the production one.
+
+`compat/` asserts the composed form on every candidate release.
 
 `iss` is retained in evidence records alongside `principal_id` and `sub`, so
 protocol-level and enterprise-level identity stay reconcilable across any future
@@ -501,4 +523,5 @@ standard amendment.
    §Declarative User Profile.
 4. **Issuer URI form.** Whether `/realms/{name}` can be removed while remaining
    supported. Irreversible once tokens are issued, so it is decided either way before
-   the first token rather than inherited.
+   the first token rather than inherited. **Answered 2026-09-25: path form retained**.
+   See §Issuer Identity.

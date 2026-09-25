@@ -120,7 +120,10 @@ unused.
 - Key ceremony rehearsed, sealed keystore in the secret manager
 - `kid` derived as the RFC 7638 thumbprint, asserted at startup
 - Startup refuses to serve when custody is unreachable
-- Question 4 executed and recorded
+- ✅ Question 4 executed and recorded — **path form retained**. `iss` is
+  `{frontend URL}/realms/{realm name}`, and a realm rename moves it too (compat run 36113564506).
+  The production hostname and realm name are therefore fixed together before the first token.
+  Answered early because it is irreversible and cheap to ask
 - Questions 5, 6, 7 exercised and handed to the consuming repositories
 
 **Exit:** a token signed by one replica verifies against every other replica; a replica
