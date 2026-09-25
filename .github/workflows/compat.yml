@@ -53,6 +53,9 @@ jobs:
       - name: go vet
         run: go vet ./...
 
+      - name: unit tests
+        run: go test ./internal/... -count=1
+
       # A step rather than a service container: services cannot be given a command, and Keycloak
       # needs one (start-dev). The reference is read from the file and checked for the digest form,
       # so a tag slipped into image/keycloak.ref fails here instead of being run.
@@ -83,8 +86,22 @@ jobs:
           docker logs keycloak
           exit 1
 
+      # The realm is applied by the tool a server is applied with, so the suite asserts what that
+      # tool produces. The plan that follows proves the apply converged: nothing left to change, and
+      # the recorded revision read back from git reproduces what was applied.
+      - name: apply the realm definition
+        run: go run ./cmd/realm-apply -environment ci -apply
+
+      - name: a second run changes nothing
+        run: go run ./cmd/realm-apply -environment ci -require-in-sync
+
       - name: realm contract and proof-of-concept questions
         run: go test ./compat -count=1 -v
+
+      # The suite changes the realm and must put it back; a test that left drift behind would be
+      # asserting against a realm the definition does not describe.
+      - name: the suite left the realm as the definition describes it
+        run: go run ./cmd/realm-apply -environment ci -require-in-sync
 
       - name: Keycloak log
         if: failure()

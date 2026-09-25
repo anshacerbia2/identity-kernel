@@ -84,6 +84,8 @@ Realm configuration, extensions, theme, image
 | Path | Contents |
 | :-- | :-- |
 | `realm/` | Declarative realm configuration per environment |
+| `cmd/realm-apply/` | Plans and applies `realm/` against a live Keycloak; detects console drift |
+| `internal/` | The Admin API client and the plan/apply logic behind it |
 | `extensions/event-listener/` | Minimal event listener, JVM |
 | `themes/scnehaux/` | Hosted login, MFA, and recovery theme |
 | `image/` | Container build, digest pinning, extension packaging |
@@ -118,3 +120,50 @@ definition does not.
 That diff is what detects unmanaged console drift. ADR-IAM-001 §5.7 prohibits it, and
 SAD-001 §9.4 requires it to be caught before an upgrade rather than discovered during
 one.
+
+### Applying the realm: `cmd/realm-apply`
+
+CI applies the realm with this tool, and a server is applied with the same tool.
+Credentials come from the environment, never from a flag:
+
+- **Service account:** `KEYCLOAK_ADMIN_CLIENT_ID` and `KEYCLOAK_ADMIN_CLIENT_SECRET`, for
+  a master-realm service account. Use this on a long-lived server.
+- **Bootstrap administrator:** `KEYCLOAK_ADMIN_USER` and `KEYCLOAK_ADMIN_PASSWORD`.
+
+```sh
+# plan: read-only, prints what applying would change
+go run ./cmd/realm-apply -environment development -url https://identity.dev.example
+
+# apply, from a committed tree
+go run ./cmd/realm-apply -environment development -url https://identity.dev.example -apply
+```
+
+**How drift is told apart from a definition change.** Each apply records its git revision
+and a digest of the definition in the realm's attributes. The next run reads the
+definition at that revision with `git show` and compares it with the live realm:
+
+- **A difference between the two** was made outside the tool. The run refuses with exit
+  code 2.
+- **A difference between the live realm and the current definition** is what the new
+  commit changed. The run applies it.
+
+To resolve drift, revert it in Keycloak, or commit it to `realm/` and apply with `-adopt`.
+`-apply` refuses an uncommitted tree, because the revision it would record could not
+reproduce what it applied.
+
+| Rule | Why |
+| :-- | :-- |
+| Only `local`, `ci`, and `development` are accepted | `signing-key.generated.json` has Keycloak generate the signing key in-process, which TDD-identity-kernel-002 prohibits wherever real tokens are served. It is 3072-bit because `foundation-platform`'s verifier silently discards smaller keys |
+| A client scope's mapper set is closed | A mapper added by hand is how `principal_id` would reach an audience it is kept from, so an undeclared mapper is drift, and applying removes it |
+| Nothing else is deleted | Removing a user-profile attribute makes Keycloak discard its values from every user on their next write. Removing a client scope strips its claims from every client using it. Both are migrations, not configuration changes |
+| The drift check reaches only what `realm/` declares | A console change to an undeclared field is not seen. Declaring a field is what guards it |
+| After applying, the tool re-plans before recording | A value Keycloak normalises or drops on write fails the apply, instead of reading as drift on the next run |
+
+Exit codes:
+
+| Code | Meaning |
+| :-- | :-- |
+| 0 | Success |
+| 1 | Error |
+| 2 | Refused: drift, or a realm this tool never applied |
+| 3 | Changes are pending, reported under `-require-in-sync` |

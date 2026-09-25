@@ -46,8 +46,11 @@ and context switch mechanism — are exercised here but decided in `identity-con
 - ⏳ Digest-pinned Keycloak running from a reproducible image build — **the upstream image is
   pinned by digest** (`image/keycloak.ref`, 26.7.4) and runs in CI; there is no image of our own
   yet, because there are no extensions to package. The reproducible build lands with the first one
-- ⏳ Realm definition rendered, applied, and diffed by the pipeline — **applied** through the Admin
-  API by `compat/`; rendering per environment and the drift diff are not built
+- ✅ Realm definition applied and diffed by the pipeline — `cmd/realm-apply`. CI applies the realm
+  with it, and a second run must find nothing to change, before the suite and again after it.
+  Console drift is judged against the definition at the recorded revision and refused. Rendering
+  per environment is only an environment guard so far, because nothing in `realm/` varies by
+  environment yet. The first value that does is the hostname of a long-lived server
 - ✅ Question 1 executed and reported — **outcome 1**, all four surfaces covered; see below
 - ✅ Questions 2 and 3 executed — **search is exact**; **immutability is detected, not enforced**;
   see below
