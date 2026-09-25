@@ -119,6 +119,7 @@ jobs:
             echo "POSTGRES_PASSWORD=$(openssl rand -hex 16)"
             echo "KC_BOOTSTRAP_ADMIN_USERNAME=admin"
             echo "KC_BOOTSTRAP_ADMIN_PASSWORD=$(openssl rand -hex 16)"
+            echo "KEYCLOAK_ADMIN_URL=http://localhost:8081"
           } > .env
 
       - name: start the stack in tunnel mode
@@ -127,6 +128,23 @@ jobs:
       - name: create the realm-apply service account
         run: bash ./create-apply-client.sh > "$RUNNER_TEMP/client.env"
 
+      # The admin login, not just the console page. KC_HOSTNAME_ADMIN moves the console to the private
+      # port, but the master realm's login is built from KC_HOSTNAME, so the form posts to the public
+      # port -- where /realms/master is refused. Found on the development server, behind the real
+      # tunnel; the console-page check below passed throughout. Asserted red before tunnel-admin.sh and
+      # green after it, so the check is known to see the failure it exists for.
+      - name: the admin login is broken until tunnel-admin.sh runs
+        run: |
+          if ADMIN_URL=http://localhost:8081 python3 ../../.github/scripts/admin-login.py; then
+            echo "::error::the admin login succeeded before tunnel-admin.sh; the check cannot tell the difference"
+            exit 1
+          fi
+
+      - name: serve the master realm's login from the admin port
+        run: bash ./tunnel-admin.sh
+
+      - name: an administrator can log in on the private port
+        run: ADMIN_URL=http://localhost:8081 python3 ../../.github/scripts/admin-login.py
       - name: apply the realm through the private port, then find nothing left to change
         working-directory: .
         run: |
