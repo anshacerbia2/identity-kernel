@@ -2,7 +2,7 @@
 
 This is a long-lived Keycloak for developing against from a local machine. It runs the
 same pinned image that `compat/` asserts, in production mode (`start`) on Postgres, behind
-Caddy for TLS. The realm is applied with `cmd/realm-apply`, the same tool CI uses.
+Caddy for TLS. The realm is applied by `cmd/realm-apply`, which runs as a one-shot job on every `docker compose up`, the same tool CI uses.
 
 It is **development only**:
 
@@ -37,20 +37,20 @@ On the server:
 ```sh
 git clone https://github.com/anshacerbia2/identity-kernel && cd identity-kernel/deploy/dev
 cp .env.example .env        # fill it in: hostname, your IP, two generated secrets
-docker compose up -d --wait
-./create-apply-client.sh    # prints KEYCLOAK_ADMIN_CLIENT_ID and _SECRET, once
+docker compose up -d
+docker compose logs realm-apply   # the plan it applied, ending in "applied revision ..."
+./create-apply-client.sh          # optional: a service account for realm-apply, printed once
 ```
 
-Keep the two printed lines somewhere safe. They are the credential `realm-apply` uses.
+Every `docker compose up` runs the one-shot `realm-apply` job once Keycloak is healthy. It brings
+the realm to `realm/` and exits. It runs as the bootstrap administrator, or as the service account
+if `KEYCLOAK_ADMIN_CLIENT_ID` and `KEYCLOAK_ADMIN_CLIENT_SECRET` are put in `.env`.
 
-On your machine, from a clean checkout of `identity-kernel` and from an address in
-`ADMIN_ALLOW_CIDRS`:
+To see a plan without changing anything, run from a clean checkout on your machine, from an
+address in `ADMIN_ALLOW_CIDRS`:
 
 ```sh
-export KEYCLOAK_ADMIN_CLIENT_ID=realm-apply
-export KEYCLOAK_ADMIN_CLIENT_SECRET=...        # from create-apply-client.sh
-go run ./cmd/realm-apply -environment development -url https://<KEYCLOAK_HOSTNAME>          # plan
-go run ./cmd/realm-apply -environment development -url https://<KEYCLOAK_HOSTNAME> -apply   # apply
+go run ./cmd/realm-apply -environment development -url https://<KEYCLOAK_HOSTNAME>   # no -apply: read only
 ```
 
 The issuer is then `https://<KEYCLOAK_HOSTNAME>/realms/scnehaux`.
@@ -121,7 +121,8 @@ devtunnel connect scnehaux-dev    # forwards 8080 and 8081 to localhost; keep it
 ```
 
 - **Admin Console:** `http://localhost:8081/admin`, or the tunnel's own URL for port 8081 in a browser (devtunnel asks for the owner's GitHub login), after setting `KEYCLOAK_ADMIN_URL` to that URL in `.env`
-- **Realm apply:** `go run ./cmd/realm-apply -environment development -url http://localhost:8081 -apply`
+- **Realm apply:** automatic on every `docker compose up`. For a read-only plan from your machine:
+  `go run ./cmd/realm-apply -environment development -url http://localhost:8081`
 - **Issuer for your apps:** `https://<KEYCLOAK_HOSTNAME>/realms/scnehaux`
 
 The tunnel host is the issuer. If the tunnel is recreated under another host, every token and
@@ -142,10 +143,20 @@ Keycloak's hostname fixes `iss` whichever address a request arrives on.
 
 ## Changing the realm
 
-Change `realm/`, commit, and run `realm-apply -apply` again. A change made in the Admin
-Console makes the next run refuse with exit code 2 and list what differs. Either revert
-it in the console, or commit it to `realm/` and apply with `-adopt`. See the repository
-README.
+Change `realm/` and merge. Then, on the server, run `git pull` and `docker compose up -d`. The
+`realm-apply` job applies the change, and `docker compose logs realm-apply` shows what it did.
+
+A change made in the Admin Console makes the next job refuse, exiting 2 and changing nothing, with
+the differences listed in its log. It is refused rather than overwritten, so someone looks at it.
+Either revert it in the console and run `docker compose up -d` again, or commit it to `realm/` and
+adopt it once:
+
+```sh
+docker compose run --rm realm-apply -environment=development -definition=/repo/realm \
+  -url=http://keycloak:8080 -apply -adopt
+```
+
+See the repository README.
 
 ## Upgrading Keycloak
 

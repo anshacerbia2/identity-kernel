@@ -51,18 +51,46 @@ jobs:
             echo "KC_BOOTSTRAP_ADMIN_PASSWORD=$(openssl rand -hex 16)"
           } > .env
 
-      - name: start the stack
-        run: docker compose -f compose.yaml -f compose.ci.yaml up -d --wait --wait-timeout 300
+      - name: start the stack, which applies the realm
+        run: |
+          docker compose -f compose.yaml -f compose.ci.yaml up -d --wait --wait-timeout 300 postgres keycloak caddy
+          # The realm-apply job is one-shot, so it is waited on by exit code rather than by --wait.
+          docker compose -f compose.yaml -f compose.ci.yaml up -d realm-apply
+          code="$(docker wait "$(docker compose -f compose.yaml -f compose.ci.yaml ps -aq realm-apply)")"
+          docker compose -f compose.yaml -f compose.ci.yaml logs --no-color realm-apply
+          [ "$code" = "0" ] || { echo "::error::the realm-apply job exited $code"; exit 1; }
 
       - name: create the realm-apply service account
         run: bash ./create-apply-client.sh > "$RUNNER_TEMP/client.env"
 
-      - name: apply the realm through the service account, then find nothing left to change
+      - name: the job left nothing to change, as the service account sees it
         working-directory: .
         run: |
           set -a; . "$RUNNER_TEMP/client.env"; set +a
-          go run ./cmd/realm-apply -environment development -url http://localhost:8080 -apply
           go run ./cmd/realm-apply -environment development -url http://localhost:8080 -require-in-sync
+
+      # The job must refuse drift, not overwrite it: a declared value changed in Keycloak by hand makes
+      # the next up fail and leaves the change in place for someone to look at. Reverted, the next up
+      # succeeds again.
+      - name: console drift makes the next up fail, and changes nothing
+        run: |
+          files="-f compose.yaml -f compose.ci.yaml"
+          set -a; . ./.env; set +a
+          kc() { docker compose $files exec -T keycloak /opt/keycloak/bin/kcadm.sh "$@" --config /tmp/kcadm-ci.config; }
+          rerun() {
+            docker compose $files up -d --force-recreate realm-apply >/dev/null
+            code="$(docker wait "$(docker compose $files ps -aq realm-apply)")"
+            docker compose $files logs --no-color realm-apply | tail -n 5
+            echo "$code"
+          }
+          kc config credentials --server http://localhost:8080 --realm master --user admin --password "$KC_BOOTSTRAP_ADMIN_PASSWORD" >/dev/null
+          kc update realms/scnehaux -s registrationAllowed=true
+          code="$(rerun | tail -n 1)"
+          if [ "$code" = "0" ]; then echo "::error::the job applied over console drift"; exit 1; fi
+          kc get realms/scnehaux --fields registrationAllowed | grep -q true || { echo "::error::the refused job changed the drifted value"; exit 1; }
+          kc update realms/scnehaux -s registrationAllowed=false
+          code="$(rerun | tail -n 1)"
+          [ "$code" = "0" ] || { echo "::error::the job still refuses after the drift was reverted"; exit 1; }
 
       - name: the proxy serves the realm on its public issuer
         run: |
@@ -122,8 +150,14 @@ jobs:
             echo "KEYCLOAK_ADMIN_URL=http://localhost:8081"
           } > .env
 
-      - name: start the stack in tunnel mode
-        run: docker compose -f compose.yaml -f compose.tunnel.yaml up -d --wait --wait-timeout 300
+      - name: start the stack in tunnel mode, which applies the realm
+        run: |
+          docker compose -f compose.yaml -f compose.tunnel.yaml up -d --wait --wait-timeout 300 postgres keycloak caddy
+          # The realm-apply job is one-shot, so it is waited on by exit code rather than by --wait.
+          docker compose -f compose.yaml -f compose.tunnel.yaml up -d realm-apply
+          code="$(docker wait "$(docker compose -f compose.yaml -f compose.tunnel.yaml ps -aq realm-apply)")"
+          docker compose -f compose.yaml -f compose.tunnel.yaml logs --no-color realm-apply
+          [ "$code" = "0" ] || { echo "::error::the realm-apply job exited $code"; exit 1; }
 
       - name: create the realm-apply service account
         run: bash ./create-apply-client.sh > "$RUNNER_TEMP/client.env"
@@ -145,11 +179,10 @@ jobs:
 
       - name: an administrator can log in on the private port
         run: ADMIN_URL=http://localhost:8081 python3 ../../.github/scripts/admin-login.py
-      - name: apply the realm through the private port, then find nothing left to change
+      - name: the job left nothing to change, seen through the private port
         working-directory: .
         run: |
           set -a; . "$RUNNER_TEMP/client.env"; set +a
-          go run ./cmd/realm-apply -environment development -url http://localhost:8081 -apply
           go run ./cmd/realm-apply -environment development -url http://localhost:8081 -require-in-sync
 
       - name: the public port serves the realm on the tunnel's issuer
