@@ -128,6 +128,14 @@ CI brings this mode up too. It asserts the public issuer on port `8080`, that se
 administration paths answer `404` there, and that the console is served on port `8081` pointing
 its login at that port.
 
+## Other services on this server
+
+A service that talks to Keycloak from the same host, such as `identity-control`'s Admin API client, joins the
+external network `scnehaux-identity-api` and reaches Keycloak as `http://keycloak:8080`. It does not join
+`internal`. Only Keycloak sits on `api`, so a joining service can reach Keycloak and nothing else in this
+stack: not its Postgres, and not the proxy. Tokens it verifies still carry the public issuer, because
+Keycloak's hostname fixes `iss` whichever address a request arrives on.
+
 ## Changing the realm
 
 Change `realm/`, commit, and run `realm-apply -apply` again. A change made in the Admin
