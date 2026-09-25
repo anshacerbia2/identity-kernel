@@ -5,8 +5,8 @@
 #
 # Two loopback ports, and the tunnel decides who reaches each:
 #
-#   127.0.0.1:8080 -> Caddy -> Keycloak, administration refused   forward PUBLIC: relying parties
-#   127.0.0.1:8081 -> Keycloak directly, administration served    forward PRIVATE: you only
+#   127.0.0.1:8080 -> Caddy -> Keycloak, administration refused   tunnel port anonymous: relying parties
+#   127.0.0.1:8081 -> Keycloak directly, administration served    tunnel port owner-only: you, via devtunnel connect
 #
 # KEYCLOAK_HOSTNAME is the tunnel's host for port 8080, e.g. abcd1234-8080.asse.devtunnels.ms, so the
 # issuer is https://<that>/realms/scnehaux. ADMIN_ALLOW_CIDRS is unused in this mode.

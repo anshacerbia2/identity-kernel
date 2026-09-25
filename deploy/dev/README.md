@@ -66,12 +66,12 @@ DNS-name setup above does not fit a tunnel:
 
 Tunnel mode therefore splits the two audiences across two loopback ports:
 
-| Server port | Serves | VS Code port visibility |
+| Server port | Serves | Tunnel access |
 | :-- | :-- | :-- |
-| `8080` | Caddy → Keycloak, with `/admin` and `/realms/master` answering `404` to everyone | **Public**: your local apps and anything else use this |
-| `8081` | Keycloak directly, including the Admin Console | **Private**: VS Code forwards it to `localhost:8081` on your machine only |
+| `8080` | Caddy → Keycloak, with `/admin` and `/realms/master` answering `404` to everyone | **anonymous**: your local apps and anything else use this |
+| `8081` | Keycloak directly, including the Admin Console | **owner only**: reached as `localhost:8081` through `devtunnel connect` |
 
-On the server:
+Start the stack on the server:
 
 ```sh
 cd identity-kernel/deploy/dev
@@ -82,13 +82,43 @@ docker compose -f compose.yaml -f compose.tunnel.yaml up -d --wait
 ./create-apply-client.sh          # once
 ```
 
-Then in VS Code, under **Ports**, make `8080` Public and keep `8081` Private.
+**A persistent tunnel, with anonymous access on one port only.** Also on the server:
 
-From your machine, while VS Code is connected:
+```sh
+devtunnel user login -g -d                                # GitHub, device code
+devtunnel create scnehaux-dev                              # persistent: the host, and so the issuer, survive restarts
+devtunnel port create scnehaux-dev -p 8080 --protocol http
+devtunnel port create scnehaux-dev -p 8081 --protocol http
+devtunnel access create scnehaux-dev --port 8080 --anonymous
+devtunnel host scnehaux-dev                               # prints the https URL for each port
+```
+
+Three mistakes to avoid:
+
+- **`devtunnel host -p 8080 --allow-anonymous` creates a temporary tunnel.** Its ID, and
+  therefore the issuer, is new every time the command restarts.
+- **`devtunnel create -a` makes every port anonymous, 8081 included.** Anonymous access must
+  be granted per port, as above.
+- **Check an existing tunnel for tunnel-wide anonymous access** with
+  `devtunnel access list <id>`. If it has it, clear it with `devtunnel access reset <id>`
+  before granting port 8080.
+
+A persistent tunnel still expires after a period without hosting. Keep `devtunnel host` running
+under a service manager such as systemd.
+
+From your machine:
+
+```sh
+devtunnel user login -g           # the same account that owns the tunnel
+devtunnel connect scnehaux-dev    # forwards 8080 and 8081 to localhost; keep it running
+```
 
 - **Admin Console:** `http://localhost:8081/admin`
 - **Realm apply:** `go run ./cmd/realm-apply -environment development -url http://localhost:8081 -apply`
 - **Issuer for your apps:** `https://<KEYCLOAK_HOSTNAME>/realms/scnehaux`
+
+The same split works with VS Code's port forwarding instead of the CLI: make `8080` Public and
+keep `8081` Private.
 
 The tunnel host is the issuer. If the tunnel is recreated under another host, every token and
 every app's configuration changes with it. That is acceptable on a development server and one
