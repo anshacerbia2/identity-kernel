@@ -1,0 +1,12 @@
+{
+  "name": "rsa-ps256-3072",
+  "providerId": "rsa-generated",
+  "providerType": "org.keycloak.keys.KeyProvider",
+  "config": {
+    "priority": ["200"],
+    "keySize": ["3072"],
+    "algorithm": ["PS256"],
+    "active": ["true"],
+    "enabled": ["true"]
+  }
+}

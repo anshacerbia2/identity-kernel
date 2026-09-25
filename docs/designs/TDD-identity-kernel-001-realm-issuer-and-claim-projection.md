@@ -3,7 +3,7 @@ doc_meta:
   id: TDD-identity-kernel-001
   title: Realm Topology, Issuer Identity, and Token Claim Projection
   owner: Identity Platform Team
-  version: 1.2.0
+  version: 1.3.0
   status: approved
   classification: restricted
   review_cycle_days: 90
@@ -325,6 +325,24 @@ apply:
 The diff step is what detects unmanaged console drift. ADR-IAM-001 §5.7 prohibits
 unmanaged Admin Console changes to controller-owned configuration, and SAD-001 §9.4
 requires drift to be detected before an upgrade rather than discovered during one.
+
+A live realm can differ from the definition for two reasons. The definition changed, and
+the difference should be applied. Or someone changed the realm by hand, and the apply
+should be refused. The two can only be told apart by knowing what was applied last.
+
+`cmd/realm-apply` therefore records the applied git revision and a digest of the
+definition in the realm's own attributes. The next run reads the definition at that
+revision and compares it with the live realm; any difference was made outside the
+pipeline. Keeping this state in the realm means every operator and every pipeline reads
+the same baseline, with no state file to lose or diverge.
+
+Two limits are part of the design rather than gaps in it:
+
+- **The drift check reaches only what the definition declares.** An undeclared field is
+  not compared. The exception is a client scope's mapper set, which is closed.
+- **The apply deletes nothing but undeclared mappers.** Removing a user-profile attribute
+  discards its values from every user, and removing a client scope strips its claims from
+  every client using it. Both are migrations.
 
 ### Upgrade Compatibility
 
