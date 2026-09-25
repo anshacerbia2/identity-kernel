@@ -60,7 +60,10 @@ services:
       timeout: 5s
       retries: 30
       start_period: 60s
-    networks: [internal]
+    # api is the one network other development services join to reach Keycloak -- identity-control's
+    # Admin API client, for one. They join it rather than internal, so they reach Keycloak and
+    # nothing else here: not its Postgres, not the proxy.
+    networks: [internal, api]
 
   caddy:
     # caddy:2.11.4-alpine
@@ -89,3 +92,7 @@ volumes:
 
 networks:
   internal:
+  # A fixed name, so a stack in another repository can declare it external. If the host's address
+  # ranges overlap Docker's defaults, pin its subnet in a local override as for internal.
+  api:
+    name: scnehaux-identity-api
