@@ -1,0 +1,93 @@
+name: deploy-dev
+
+# Brings up deploy/dev exactly as a server runs it -- production-mode Keycloak on Postgres behind
+# Caddy -- applies the realm through the service account the setup script creates, and asserts the
+# two properties the stack exists for: the realm is served on its public issuer, and administration
+# is hidden from any address outside the allowlist.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+env:
+  GO_VERSION: "1.26"
+
+jobs:
+  stack:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: deploy/dev
+
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+
+      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          check-latest: false
+
+      - name: the server runs the image the suite asserts
+        run: |
+          ref="$(grep -v '^[[:space:]]*#' ../../image/keycloak.ref | grep -v '^[[:space:]]*$' | head -n 1 | tr -d '[:space:]')"
+          if ! grep -Eq "^[[:space:]]*image:[[:space:]]*${ref}[[:space:]]*$" compose.yaml; then
+            echo "::error::deploy/dev/compose.yaml does not run $ref from image/keycloak.ref"
+            exit 1
+          fi
+
+      # The allowlist names a documentation address (RFC 5737) the runner never has, so every
+      # request from the runner is "outside" it.
+      - name: configure the stack
+        run: |
+          {
+            echo "KEYCLOAK_HOSTNAME=localhost"
+            echo "ADMIN_ALLOW_CIDRS=192.0.2.1/32"
+            echo "POSTGRES_PASSWORD=$(openssl rand -hex 16)"
+            echo "KC_BOOTSTRAP_ADMIN_USERNAME=admin"
+            echo "KC_BOOTSTRAP_ADMIN_PASSWORD=$(openssl rand -hex 16)"
+          } > .env
+
+      - name: start the stack
+        run: docker compose -f compose.yaml -f compose.ci.yaml up -d --wait --wait-timeout 300
+
+      - name: create the realm-apply service account
+        run: bash ./create-apply-client.sh > "$RUNNER_TEMP/client.env"
+
+      - name: apply the realm through the service account, then find nothing left to change
+        working-directory: .
+        run: |
+          set -a; . "$RUNNER_TEMP/client.env"; set +a
+          go run ./cmd/realm-apply -environment development -url http://localhost:8080 -apply
+          go run ./cmd/realm-apply -environment development -url http://localhost:8080 -require-in-sync
+
+      - name: the proxy serves the realm on its public issuer
+        run: |
+          discovery="$(curl -sfk https://localhost/realms/scnehaux/.well-known/openid-configuration)"
+          issuer="$(printf '%s' "$discovery" | python3 -c 'import json,sys; print(json.load(sys.stdin)["issuer"])')"
+          if [ "$issuer" != "https://localhost/realms/scnehaux" ]; then
+            echo "::error::issuer through the proxy is '$issuer', want https://localhost/realms/scnehaux"
+            exit 1
+          fi
+
+      - name: administration is hidden outside the allowlist
+        run: |
+          failed=0
+          for path in /admin /admin/ /admin/master/console/ /admin/realms/scnehaux \
+                      /realms/master /realms/master/.well-known/openid-configuration \
+                      /realms/master/protocol/openid-connect/token; do
+            status="$(curl -sk -o /dev/null -w '%{http_code}' "https://localhost$path")"
+            echo "$path -> $status"
+            if [ "$status" != "404" ]; then
+              echo "::error::$path answered $status through the proxy to an address outside ADMIN_ALLOW_CIDRS"
+              failed=1
+            fi
+          done
+          exit "$failed"
+
+      - name: stack logs
+        if: failure()
+        run: docker compose -f compose.yaml -f compose.ci.yaml logs --no-color

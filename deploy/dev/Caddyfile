@@ -1,0 +1,23 @@
+# TLS termination for the development Keycloak, with a certificate obtained automatically for
+# KEYCLOAK_HOSTNAME.
+#
+# Administration is reachable only from ADMIN_ALLOW_CIDRS: the Admin Console and REST API under
+# /admin, and the master realm under /realms/master, where administrators log in. SAD-001 §7.2
+# restricts Admin Console access, and a login form for the realm that administers every other one
+# is not something to leave open to the internet on a development server either. Everything a
+# relying party or a developer's local application needs lives under /realms/scnehaux.
+#
+# Anything else answers 404 rather than 403, so the path does not confirm it exists.
+#
+# Caddy replaces incoming X-Forwarded-* headers from any client it does not trust, and trusts none
+# here, so Keycloak's KC_PROXY_HEADERS=xforwarded reads values only this proxy wrote.
+
+{$KEYCLOAK_HOSTNAME} {
+	@administration {
+		path /admin /admin/* /realms/master /realms/master/*
+		not remote_ip {$ADMIN_ALLOW_CIDRS}
+	}
+	respond @administration 404
+
+	reverse_proxy keycloak:8080
+}

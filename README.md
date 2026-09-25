@@ -86,6 +86,7 @@ Realm configuration, extensions, theme, image
 | `realm/` | Declarative realm configuration per environment |
 | `cmd/realm-apply/` | Plans and applies `realm/` against a live Keycloak; detects console drift |
 | `internal/` | The Admin API client and the plan/apply logic behind it |
+| `deploy/dev/` | A long-lived development server: pinned Keycloak on Postgres behind Caddy, administration allowlisted |
 | `extensions/event-listener/` | Minimal event listener, JVM |
 | `themes/scnehaux/` | Hosted login, MFA, and recovery theme |
 | `image/` | Container build, digest pinning, extension packaging |
