@@ -98,6 +98,29 @@ func TestAnUndeclaredMapperIsADifference(t *testing.T) {
 	}
 }
 
+// A declared null is a governed absence. The definition makes firstName optional by declaring
+// required: null, and Keycloak's default still carrying required must read as a difference --
+// otherwise the plan would call the realm in sync and never apply the change.
+func TestADeclaredNullIsComparedLikeAnyValue(t *testing.T) {
+	d := definition(t)
+	l := liveFrom(d)
+	for _, attribute := range listOfMaps(l.profile["attributes"]) {
+		if name(attribute) == "firstName" {
+			attribute["required"] = map[string]any{"roles": []any{"user"}}
+			attribute["validations"] = map[string]any{"length": map[string]any{"max": 255.0}}
+		}
+	}
+	change := find(t, compare(d, l), KindAttribute, "firstName")
+	if change.Action != Update || !has(change.Diffs, "required") {
+		t.Fatalf("a required firstName against a definition declaring it optional: %s %v", change.Action, change.Diffs)
+	}
+	for _, diff := range change.Diffs {
+		if strings.Contains(diff, "validations") {
+			t.Errorf("a field the definition does not declare was compared: %s", diff)
+		}
+	}
+}
+
 func TestAMissingProfileAttributeIsACreate(t *testing.T) {
 	d := definition(t)
 	l := liveFrom(d)

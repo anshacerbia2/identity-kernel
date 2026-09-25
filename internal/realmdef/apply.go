@@ -181,8 +181,14 @@ func applyScope(ctx context.Context, c *admin.Client, base string, scope map[str
 }
 
 // applyProfile writes the declared attributes into the live profile by name, leaving every other
-// attribute -- Keycloak's username, email, first and last name among them -- as it is. PUT replaces
-// the whole configuration, so the live one is read and edited rather than replaced.
+// attribute as it is. PUT replaces the whole configuration, so the live one is read and edited rather
+// than replaced.
+//
+// A declared attribute is laid over the live one rather than substituted for it: the definition states
+// what it governs and Keycloak keeps the rest, the same rule the comparison follows. That is what lets
+// the definition govern one field of a built-in attribute -- firstName's required, for one -- without
+// restating, and silently discarding, the validations Keycloak ships it with. A declared null removes
+// the field.
 func applyProfile(ctx context.Context, c *admin.Client, base string, declared []map[string]any) error {
 	path := base + "/users/profile"
 	var profile map[string]any
@@ -194,7 +200,7 @@ func applyProfile(ctx context.Context, c *admin.Client, base string, declared []
 		replaced := false
 		for i := range attributes {
 			if name(attributes[i]) == name(attribute) {
-				attributes[i] = attribute
+				attributes[i] = overlay(attributes[i], attribute)
 				replaced = true
 			}
 		}

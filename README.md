@@ -157,6 +157,7 @@ reproduce what it applied.
 | Only `local`, `ci`, and `development` are accepted | `signing-key.generated.json` has Keycloak generate the signing key in-process, which TDD-identity-kernel-002 prohibits wherever real tokens are served. It is 3072-bit because `foundation-platform`'s verifier silently discards smaller keys |
 | A client scope's mapper set is closed | A mapper added by hand is how `principal_id` would reach an audience it is kept from, so an undeclared mapper is drift, and applying removes it |
 | Nothing else is deleted | Removing a user-profile attribute makes Keycloak discard its values from every user on their next write. Removing a client scope strips its claims from every client using it. Both are migrations, not configuration changes |
+| A declared attribute is laid over the live one | The definition governs the fields it names and Keycloak keeps the rest, the same rule the comparison follows. So one field of a built-in attribute can be governed without restating its validations. `firstName`'s `required: null` is the case in point, and a declared null removes the field |
 | The drift check reaches only what `realm/` declares | A console change to an undeclared field is not seen. Declaring a field is what guards it |
 | After applying, the tool re-plans before recording | A value Keycloak normalises or drops on write fails the apply, instead of reading as drift on the next run |
 

@@ -3,7 +3,7 @@ doc_meta:
   id: TDD-identity-kernel-001
   title: Realm Topology, Issuer Identity, and Token Claim Projection
   owner: Identity Platform Team
-  version: 1.5.0
+  version: 1.6.0
   status: approved
   classification: restricted
   review_cycle_days: 90
@@ -407,6 +407,7 @@ persisted against, so they are asserted rather than observed.
 | `scnehaux_subject_type` | admin-managed, not user-editable, single-valued | Distinguishes human and workload Principals |
 | `scnehaux_workload_owner` | admin-managed, workload only, single-valued | Carries workload accountability |
 | `scnehaux_provider_scope` | admin-managed, not user-editable, single-valued | Names the bounded provider authority of a provider-scope token |
+| `firstName`, `lastName` | optional; Keycloak's own validations kept | PAD-PLT-001 minimizes personal data by purpose and lists no name among a Principal's PII. identity-control's API accepts none. A required family name shuts out every person with a single name. Keycloak's default requires both, which interrupted every login of a Principal identity-control created |
 | Audience client scopes | exactly one of internal, privileged, provider, workload, external | Applies the STD-IAM-002 claim allowlist |
 | Signing algorithm | `PS256` | STD-IAM-002 §3.2.2 initial baseline |
 | Preview features | disabled | ADR-IAM-001 §5.8 requires a separate ADR to enable any |
@@ -423,6 +424,8 @@ compatibility suite rather than left to operational discipline.
 ### Realm Contract
 
 - A created Principal carries `scnehaux_principal_id` in its Keycloak representation.
+- A Principal with no name logs in without the kernel interrupting the flow to collect one, and
+  the name attributes keep Keycloak's validations.
 - A human internal access token carries `principal_id` and `subject_type=human`.
 - A provider token, obtained by Authorization Code with PKCE, carries `principal_id`,
   `subject_type`, `provider_scope`, `acr`, and the `auth_time` of the login, and no `tenant_id`,
