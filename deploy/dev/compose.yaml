@@ -1,0 +1,91 @@
+# A long-lived development Keycloak: the pinned image in production mode, on Postgres, behind a
+# TLS proxy that keeps administration off the public internet. See README.md in this directory.
+#
+# Every image is pinned by digest. The Keycloak one must equal image/keycloak.ref; CI fails when
+# they differ, so the server never runs a release the compatibility suite has not asserted.
+
+name: scnehaux-identity-dev
+
+services:
+  postgres:
+    # postgres:17.11-alpine
+    image: postgres@sha256:b0f9560a2de083e2cc7382e75f808c7381a32852a7ec49117deedb300e552b24
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: keycloak
+      POSTGRES_USER: keycloak
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}
+    volumes:
+      - postgres:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U keycloak -d keycloak"]
+      interval: 5s
+      timeout: 3s
+      retries: 30
+    networks: [internal]
+
+  keycloak:
+    # quay.io/keycloak/keycloak:26.7.4 -- the digest in image/keycloak.ref
+    image: quay.io/keycloak/keycloak@sha256:82a77884f3af238beab1e7afd63b5f530e1b5c0590bd7aa60b40a40463e29b2c
+    restart: unless-stopped
+    # start, not start-dev: production mode, with its hostname, proxy and cache behaviour. A
+    # development server that runs start-dev tests a Keycloak nobody deploys.
+    command: ["start"]
+    environment:
+      KC_DB: postgres
+      KC_DB_URL: jdbc:postgresql://postgres:5432/keycloak
+      KC_DB_USERNAME: keycloak
+      KC_DB_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}
+      # The public URL fixes the issuer. Every token's iss is derived from it, so changing it later
+      # is an issuer migration for everything that stored one (TDD-identity-kernel-001).
+      KC_HOSTNAME: https://${KEYCLOAK_HOSTNAME:?set KEYCLOAK_HOSTNAME in .env}
+      # Plain HTTP only on the internal network, where the proxy terminates TLS.
+      KC_HTTP_ENABLED: "true"
+      KC_PROXY_HEADERS: xforwarded
+      KC_HEALTH_ENABLED: "true"
+      KC_BOOTSTRAP_ADMIN_USERNAME: ${KC_BOOTSTRAP_ADMIN_USERNAME:-admin}
+      KC_BOOTSTRAP_ADMIN_PASSWORD: ${KC_BOOTSTRAP_ADMIN_PASSWORD:?set KC_BOOTSTRAP_ADMIN_PASSWORD in .env}
+    depends_on:
+      postgres:
+        condition: service_healthy
+    # The image carries bash and no curl, so readiness is read from the management port with
+    # bash's own /dev/tcp. Port 9000 is never published.
+    healthcheck:
+      test:
+        - CMD
+        - bash
+        - -c
+        - exec 3<>/dev/tcp/127.0.0.1/9000 && printf 'GET /health/ready HTTP/1.0\r\n\r\n' >&3 && read -r status <&3 && [[ $$status == *" 200 "* ]]
+      interval: 10s
+      timeout: 5s
+      retries: 30
+      start_period: 60s
+    networks: [internal]
+
+  caddy:
+    # caddy:2.11.4-alpine
+    image: caddy@sha256:6aeddd44c3078b0f9a35206472a11420648a79c184603ef95957d0a20044cb2b
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+      - "443:443/udp"
+    environment:
+      KEYCLOAK_HOSTNAME: ${KEYCLOAK_HOSTNAME:?set KEYCLOAK_HOSTNAME in .env}
+      ADMIN_ALLOW_CIDRS: ${ADMIN_ALLOW_CIDRS:?set ADMIN_ALLOW_CIDRS in .env}
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy-data:/data
+      - caddy-config:/config
+    depends_on:
+      keycloak:
+        condition: service_healthy
+    networks: [internal]
+
+volumes:
+  postgres:
+  caddy-data:
+  caddy-config:
+
+networks:
+  internal:

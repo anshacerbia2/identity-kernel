@@ -1,0 +1,7 @@
+# CI only: publishes Keycloak on the runner's loopback so realm-apply can reach it without the
+# proxy, which in CI allowlists nobody -- the job asserts that administration is hidden from the
+# outside and reaches it directly. Never used on a server.
+services:
+  keycloak:
+    ports:
+      - "127.0.0.1:8080:8080"
