@@ -54,6 +54,9 @@ and context switch mechanism — are exercised here but decided in `identity-con
 - ✅ Question 1 executed and reported — **outcome 1**, all four surfaces covered; see below
 - ✅ Questions 2 and 3 executed — **search is exact**; **immutability is detected, not enforced**;
   see below
+- ✅ The provider-scope profile — `scnehaux-provider` and the `scnehaux_provider_scope` attribute, as
+  STD-IAM-002 §3.2.1 requires. It is what identity-control accepts to mint a Principal, and `compat/`
+  asserts it with a real Authorization Code + PKCE login, because `auth_time` exists only for one
 
 **Exit:** the declared realm contract is asserted by test — issuer form, claim presence
 per covered surface, and the four closed creation paths.

@@ -18,6 +18,12 @@
       "displayName": "Scnehaux Workload Owner",
       "permissions": { "view": ["admin"], "edit": ["admin"] },
       "multivalued": false
+    },
+    {
+      "name": "scnehaux_provider_scope",
+      "displayName": "Scnehaux Provider Scope",
+      "permissions": { "view": ["admin"], "edit": ["admin"] },
+      "multivalued": false
     }
   ]
 }
