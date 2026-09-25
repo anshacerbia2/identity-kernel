@@ -1,0 +1,29 @@
+# Tunnel mode: layered over compose.yaml when the server is reached through a VS Code dev tunnel
+# rather than a DNS name of its own.
+#
+#   docker compose -f compose.yaml -f compose.tunnel.yaml up -d --wait
+#
+# Two loopback ports, and the tunnel decides who reaches each:
+#
+#   127.0.0.1:8080 -> Caddy -> Keycloak, administration refused   forward PUBLIC: relying parties
+#   127.0.0.1:8081 -> Keycloak directly, administration served    forward PRIVATE: you only
+#
+# KEYCLOAK_HOSTNAME is the tunnel's host for port 8080, e.g. abcd1234-8080.asse.devtunnels.ms, so the
+# issuer is https://<that>/realms/scnehaux. ADMIN_ALLOW_CIDRS is unused in this mode.
+
+services:
+  keycloak:
+    environment:
+      # The admin console and its login live on the private port. Without this the console would
+      # send the browser to the public host, where /realms/master is refused.
+      KC_HOSTNAME_ADMIN: ${KEYCLOAK_ADMIN_URL:-http://localhost:8081}
+    ports:
+      - "127.0.0.1:8081:8080"
+
+  caddy:
+    ports: !override
+      - "127.0.0.1:8080:80"
+    volumes: !override
+      - ./Caddyfile.tunnel:/etc/caddy/Caddyfile:ro
+      - caddy-data:/data
+      - caddy-config:/config

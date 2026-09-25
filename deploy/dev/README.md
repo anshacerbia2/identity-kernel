@@ -55,6 +55,49 @@ go run ./cmd/realm-apply -environment development -url https://<KEYCLOAK_HOSTNAM
 
 The issuer is then `https://<KEYCLOAK_HOSTNAME>/realms/scnehaux`.
 
+## Behind a VS Code dev tunnel instead of a DNS name
+
+A tunnel terminates TLS itself and delivers every request from the same agent. So the
+DNS-name setup above does not fit a tunnel:
+
+- Caddy cannot obtain a certificate for the tunnel's host.
+- The address allowlist cannot tell one client from another.
+- A tunnel pointed straight at Keycloak exposes the Admin Console to anyone holding the URL.
+
+Tunnel mode therefore splits the two audiences across two loopback ports:
+
+| Server port | Serves | VS Code port visibility |
+| :-- | :-- | :-- |
+| `8080` | Caddy → Keycloak, with `/admin` and `/realms/master` answering `404` to everyone | **Public**: your local apps and anything else use this |
+| `8081` | Keycloak directly, including the Admin Console | **Private**: VS Code forwards it to `localhost:8081` on your machine only |
+
+On the server:
+
+```sh
+cd identity-kernel/deploy/dev
+# .env: KEYCLOAK_HOSTNAME is the tunnel host for port 8080, without https://, for example
+#   KEYCLOAK_HOSTNAME=gqr8l4jz-8080.asse.devtunnels.ms
+# ADMIN_ALLOW_CIDRS is unused in this mode; leave any value, e.g. 127.0.0.1/32
+docker compose -f compose.yaml -f compose.tunnel.yaml up -d --wait
+./create-apply-client.sh          # once
+```
+
+Then in VS Code, under **Ports**, make `8080` Public and keep `8081` Private.
+
+From your machine, while VS Code is connected:
+
+- **Admin Console:** `http://localhost:8081/admin`
+- **Realm apply:** `go run ./cmd/realm-apply -environment development -url http://localhost:8081 -apply`
+- **Issuer for your apps:** `https://<KEYCLOAK_HOSTNAME>/realms/scnehaux`
+
+The tunnel host is the issuer. If the tunnel is recreated under another host, every token and
+every app's configuration changes with it. That is acceptable on a development server and one
+more reason its issuer is never the production one.
+
+CI brings this mode up too. It asserts the public issuer on port `8080`, that seven
+administration paths answer `404` there, and that the console is served on port `8081` pointing
+its login at that port.
+
 ## Changing the realm
 
 Change `realm/`, commit, and run `realm-apply -apply` again. A change made in the Admin
