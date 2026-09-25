@@ -148,6 +148,28 @@ with an empty secret-manager response exits non-zero and signs nothing.
 **Exit:** a candidate release that changes the issuer form, drops a claim from a
 covered surface, or reopens a creation path fails the suite.
 
+## Development server
+
+✅ A long-lived development Keycloak, so local applications have a real issuer to develop against.
+[`deploy/dev/`](deploy/dev/README.md) runs the pinned image in production mode on Postgres. The realm
+is applied with `cmd/realm-apply`. Two access modes, and CI brings up both:
+
+- **A DNS name:** Caddy obtains the certificate, and administration is allowlisted by address.
+- **A dev tunnel (the current server):**
+  - The public tunnel port reaches Caddy, which refuses `/admin` and `/realms/master` to everyone.
+  - Administration uses an owner-only tunnel port.
+  - An address allowlist cannot work behind a tunnel, because every request arrives from the tunnel
+    agent.
+
+It is development only:
+
+- `realm-apply` refuses any environment that serves real tokens, because the signing key is generated
+  in-process.
+- The tunnel host is the issuer, so it is not the production issuer, and nothing may store a
+  development `iss` as though it were.
+- Until `identity-control` is deployed beside it, users carrying `scnehaux_principal_id` are created by
+  hand in the Admin Console.
+
 ## Not this repository
 
 Recorded so scope creep is visible rather than convenient:
