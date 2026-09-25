@@ -174,6 +174,9 @@ type declaredContract struct {
 		WriteOnceAchievable       bool `json:"write_once_achievable"`
 		PartialPutKeepsIdentifier bool `json:"partial_put_keeps_identifier"`
 	} `json:"question_3"`
+	Question4 struct {
+		PathFormRetained bool `json:"path_form_retained"`
+	} `json:"question_4"`
 }
 
 func loadContract(t *testing.T) declaredContract {

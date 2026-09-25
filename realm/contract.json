@@ -36,5 +36,15 @@
     "keycloak_version": "26.7.4",
     "answered_on": "2026-09-25",
     "evidence": "identity-kernel compat run 36106484382"
+  },
+  "question_4": {
+    "path_form_retained": true,
+    "issuer_form": "{frontend URL}/realms/{realm name}",
+    "realm_rename_moves_issuer": true,
+    "meaning": "path form retained: the supported inputs (server hostname, realm frontendUrl) set only the prefix, and the realm name is part of every issuer; changing either is an issuer migration",
+    "answered_against": "quay.io/keycloak/keycloak@sha256:82a77884f3af238beab1e7afd63b5f530e1b5c0590bd7aa60b40a40463e29b2c",
+    "keycloak_version": "26.7.4",
+    "answered_on": "2026-09-25",
+    "evidence": "identity-kernel compat run 36113564506"
   }
 }
