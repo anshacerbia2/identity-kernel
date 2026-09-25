@@ -89,7 +89,7 @@ devtunnel user login -g -d                                # GitHub, device code
 devtunnel create scnehaux-dev                              # persistent: the host, and so the issuer, survive restarts
 devtunnel port create scnehaux-dev -p 8080 --protocol http
 devtunnel port create scnehaux-dev -p 8081 --protocol http
-devtunnel access create scnehaux-dev --port 8080 --anonymous
+devtunnel access create scnehaux-dev -p 8080 --anonymous   # -p is --port-number; --port is refused
 devtunnel host scnehaux-dev                               # prints the https URL for each port
 ```
 
