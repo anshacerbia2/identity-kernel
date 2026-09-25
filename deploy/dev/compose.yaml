@@ -85,6 +85,37 @@ services:
         condition: service_healthy
     networks: [internal]
 
+  # Brings the realm to realm/ on every `docker compose up`, once Keycloak is healthy, and exits.
+  # It refuses -- exits non-zero and changes nothing -- when the live realm carries changes the
+  # definition at the last applied revision does not: console drift surfaces at the next up rather
+  # than being overwritten. `docker compose logs realm-apply` shows the plan it acted on.
+  #
+  # The checkout is mounted read-only: realm-apply reads the definition at the recorded revision with
+  # git, and refuses to apply from uncommitted changes under realm/. Credentials are a master-realm
+  # service account when KEYCLOAK_ADMIN_CLIENT_ID is set (create-apply-client.sh), else the bootstrap
+  # administrator.
+  realm-apply:
+    build:
+      context: ../..
+      dockerfile: deploy/dev/realm-apply.Dockerfile
+    restart: "no"
+    command:
+      - -environment=${REALM_ENVIRONMENT:-development}
+      - -definition=/repo/realm
+      - -url=http://keycloak:8080
+      - -apply
+    environment:
+      KEYCLOAK_ADMIN_CLIENT_ID: ${KEYCLOAK_ADMIN_CLIENT_ID:-}
+      KEYCLOAK_ADMIN_CLIENT_SECRET: ${KEYCLOAK_ADMIN_CLIENT_SECRET:-}
+      KEYCLOAK_ADMIN_USER: ${KC_BOOTSTRAP_ADMIN_USERNAME:-admin}
+      KEYCLOAK_ADMIN_PASSWORD: ${KC_BOOTSTRAP_ADMIN_PASSWORD:?set KC_BOOTSTRAP_ADMIN_PASSWORD in .env}
+    volumes:
+      - ../..:/repo:ro
+    depends_on:
+      keycloak:
+        condition: service_healthy
+    networks: [internal]
+
 volumes:
   postgres:
   caddy-data:

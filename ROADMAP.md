@@ -46,7 +46,9 @@ and context switch mechanism — are exercised here but decided in `identity-con
 - ⏳ Digest-pinned Keycloak running from a reproducible image build — **the upstream image is
   pinned by digest** (`image/keycloak.ref`, 26.7.4) and runs in CI; there is no image of our own
   yet, because there are no extensions to package. The reproducible build lands with the first one
-- ✅ Realm definition applied and diffed by the pipeline — `cmd/realm-apply`. CI applies the realm
+- ✅ Realm definition applied and diffed by the pipeline — `cmd/realm-apply`, which the development
+  server runs as a one-shot job on every `docker compose up`, so a pulled change reaches the realm without
+  a remembered command, and console drift fails the next up instead of being overwritten. CI applies the realm
   with it, and a second run must find nothing to change, before the suite and again after it.
   Console drift is judged against the definition at the recorded revision and refused. Rendering
   per environment is only an environment guard so far, because nothing in `realm/` varies by
