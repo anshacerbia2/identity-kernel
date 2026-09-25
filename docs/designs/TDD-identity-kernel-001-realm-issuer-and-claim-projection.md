@@ -3,12 +3,12 @@ doc_meta:
   id: TDD-identity-kernel-001
   title: Realm Topology, Issuer Identity, and Token Claim Projection
   owner: Identity Platform Team
-  version: 1.0.0
+  version: 1.1.0
   status: approved
   classification: restricted
   review_cycle_days: 90
   created_date: 2026-08-11
-  last_reviewed: 2026-08-14
+  last_reviewed: 2026-09-25
   parent_sad: SAD-001
 ---
 
@@ -145,8 +145,20 @@ would leak stable correlation and Tenant context into external tokens.
 | UserInfo | Target |
 | Introspection | Target |
 
-Coverage is settled by proof-of-concept, and the outcome is pre-decided so a partial
-result needs no unplanned amendment:
+**Settled: outcome 1.** Against Keycloak 26.7.4,
+`quay.io/keycloak/keycloak@sha256:82a77884f3af238beab1e7afd63b5f530e1b5c0590bd7aa60b40a40463e29b2c`,
+on 2026-09-25, all four surfaces carry `principal_id` and `subject_type` through the supported
+`oidc-usermodel-attribute-mapper`, with identical values. The target configuration is adopted, and
+`realm/contract.json` declares the four surfaces as the contract `compat/` asserts on every upgrade.
+
+Introspection is audience-restricted in that release: a client may introspect only a token whose
+`aud` names it, and any other client receives `{"active":false}`. A consumer that resolves identity
+through introspection must therefore introspect as the protected resource the token is for. The
+failure mode of getting this wrong is every token reading as inactive — closed rather than open,
+and a total outage for that consumer.
+
+Coverage was settled by proof-of-concept, and the outcome was pre-decided so a partial
+result would need no unplanned amendment:
 
 1. All four covered — adopt the target configuration.
 2. Access token covered, one or more of the others not — adopt access-token-only,
@@ -414,6 +426,9 @@ standard amendment.
 1. **Protocol mapper coverage.** Which of access token, ID token, UserInfo, and
    introspection can carry each audience profile's required claim set through supported
    mappers. Any mandatory access-token claim uncovered is the escalation case.
+   **Answered 2026-09-25: outcome 1, all four covered** — see §Claim Projection. Answered for
+   the internal human profile; the workload profile's `workload_owner` is exercised when the
+   workload path is built.
 2. **Attribute search semantics.** Whether `q=scnehaux_principal_id:{id}` is
    exact-match and how it paginates. Determines the recovery mechanism in
    `TDD-identity-control-001`; the creation path is unaffected either way.
