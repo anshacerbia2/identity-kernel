@@ -36,6 +36,13 @@ import (
 func TestQuestion1ProtocolMapperCoverage(t *testing.T) {
 	a := requireKeycloak(t)
 	client := internalClient(t, a)
+	// The party that introspects is a resource server named in the token's audience, as it is in
+	// production (aud=["hcm-api"] in TDD-identity-kernel-001's token shape). Keycloak 26.7.4 refuses
+	// introspection by any client outside aud -- found by this suite's first run, which introspected
+	// with the issuing client and was told {"active":false} with the event reason "Client ... is not
+	// in the token audience". Adding the issuing client to its own audience would have made the probe
+	// pass by describing a deployment nobody runs.
+	resource := resourceServerFor(t, a, client)
 	who := createPrincipal(t, a)
 
 	issued := passwordGrant(t, a, client, who)
@@ -43,7 +50,7 @@ func TestQuestion1ProtocolMapperCoverage(t *testing.T) {
 		{name: "access token", claims: jwtClaims(t, issued.AccessToken)},
 		{name: "ID token", claims: jwtClaims(t, issued.IDToken)},
 		{name: "UserInfo", claims: userInfo(t, a, issued.AccessToken)},
-		{name: "introspection", claims: introspect(t, a, client, issued.AccessToken)},
+		{name: "introspection", claims: introspect(t, a, resource, issued.AccessToken)},
 	}
 
 	var covered, uncovered []string
@@ -205,7 +212,7 @@ func TestNoEnterpriseScopeIsARealmDefault(t *testing.T) {
 // it exists only on clients this suite creates for itself.
 
 type client struct {
-	id, secret string
+	uuid, id, secret string
 }
 
 type principal struct {
@@ -241,7 +248,48 @@ func clientWithScope(t *testing.T, a *admin, clientID, scope string) client {
 		nil, http.StatusNoContent); err != nil {
 		t.Fatalf("attaching %s to %s: %v", scope, clientID, err)
 	}
-	return client{id: clientID, secret: secret}
+	return client{uuid: clientUUID, id: clientID, secret: secret}
+}
+
+// resourceServerFor creates a resource server and puts it in the audience of tokens issued to
+// `issuer`, the way a product API receives tokens in production.
+//
+// The audience mapper sits on the issuing client rather than in scnehaux-internal: which API a token
+// is for is a property of the client relationship, while the scope carries the claim allowlist.
+// Folding the audience into the scope would make every internal token valid at every API.
+func resourceServerFor(t *testing.T, a *admin, issuer client) client {
+	t.Helper()
+	resourceID := "compat-resource-" + suffix()
+	secret := "compat-" + suffix()
+	response, err := a.call(http.MethodPost, "/admin/realms/"+realmName+"/clients", map[string]any{
+		"clientId":                  resourceID,
+		"protocol":                  "openid-connect",
+		"publicClient":              false,
+		"secret":                    secret,
+		"standardFlowEnabled":       false,
+		"directAccessGrantsEnabled": false,
+		"serviceAccountsEnabled":    false,
+	}, http.StatusCreated)
+	if err != nil {
+		t.Fatalf("creating resource server %s: %v", resourceID, err)
+	}
+	resource := client{uuid: created(response), id: resourceID, secret: secret}
+
+	if _, err := a.call(http.MethodPost,
+		"/admin/realms/"+realmName+"/clients/"+issuer.uuid+"/protocol-mappers/models", map[string]any{
+			"name":           "audience-" + resourceID,
+			"protocol":       "openid-connect",
+			"protocolMapper": "oidc-audience-mapper",
+			"config": map[string]string{
+				"included.client.audience":  resourceID,
+				"access.token.claim":        "true",
+				"id.token.claim":            "false",
+				"introspection.token.claim": "true",
+			},
+		}, http.StatusCreated); err != nil {
+		t.Fatalf("adding %s to the audience of %s: %v", resourceID, issuer.id, err)
+	}
+	return resource
 }
 
 func scopeIDByName(t *testing.T, a *admin, name string) string {
