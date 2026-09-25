@@ -13,5 +13,28 @@
     "keycloak_version": "26.7.4",
     "answered_on": "2026-09-25",
     "evidence": "identity-kernel compat run 36105049194"
+  },
+  "question_2": {
+    "exact_match": true,
+    "case_sensitive": false,
+    "disabled_users_found": true,
+    "paging_complete": true,
+    "duplicates_accepted": true,
+    "meaning": "q=scnehaux_principal_id:{id} is an exact, case-insensitive match that finds disabled users and pages without loss; Keycloak does not enforce uniqueness",
+    "answered_against": "quay.io/keycloak/keycloak@sha256:82a77884f3af238beab1e7afd63b5f530e1b5c0590bd7aa60b40a40463e29b2c",
+    "keycloak_version": "26.7.4",
+    "answered_on": "2026-09-25",
+    "evidence": "identity-kernel compat run 36106484382"
+  },
+  "question_3": {
+    "self_service_edit_refused": true,
+    "admin_edit_under_declared_profile": "applied",
+    "write_once_achievable": false,
+    "partial_put_keeps_identifier": true,
+    "meaning": "detected, not enforced: an attribute nobody may edit is silently dropped at creation, so no declarative profile gives write-once; immutability against administrators rests on who holds manage-users plus reconciler detection",
+    "answered_against": "quay.io/keycloak/keycloak@sha256:82a77884f3af238beab1e7afd63b5f530e1b5c0590bd7aa60b40a40463e29b2c",
+    "keycloak_version": "26.7.4",
+    "answered_on": "2026-09-25",
+    "evidence": "identity-kernel compat run 36106484382"
   }
 }

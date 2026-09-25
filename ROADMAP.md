@@ -49,7 +49,8 @@ and context switch mechanism — are exercised here but decided in `identity-con
 - ⏳ Realm definition rendered, applied, and diffed by the pipeline — **applied** through the Admin
   API by `compat/`; rendering per environment and the drift diff are not built
 - ✅ Question 1 executed and reported — **outcome 1**, all four surfaces covered; see below
-- ⏳ Questions 2 and 3 executed
+- ✅ Questions 2 and 3 executed — **search is exact**; **immutability is detected, not enforced**;
+  see below
 
 **Exit:** the declared realm contract is asserted by test — issuer form, claim presence
 per covered surface, and the four closed creation paths.
@@ -72,6 +73,37 @@ a client may introspect only a token whose `aud` names it, and anything else get
 with the estate's model — tokens are audience-scoped, and the party that introspects is the API
 they are for — but a consumer that introspects with a client outside `aud` will read every token
 as inactive, which is a fail-closed outage rather than a leak. Recorded in TDD-identity-kernel-001.
+
+### Questions 2 and 3, answered
+
+Same image, same date, compat run 36106484382.
+
+**Question 2, attribute search.** Search is exact: no prefix, substring, or extension
+matches. It also finds disabled users, pages through `first`/`max` without loss, and
+`/users/count` honours `q`. Recovery may branch on the count as returned. Two findings
+land in `identity-control`:
+
+- **Search is case-insensitive.** Identifiers must always be written in canonical
+  lowercase.
+- **Keycloak accepts two users holding one identifier.** The many-match branch and the
+  reconciler are needed, as designed.
+
+**Question 3, immutability.** It is detected, not enforced.
+
+- **Self-service is closed.** The account API answers `400 error-user-attribute-read-only`.
+- **An administrator's change is applied.**
+- **No declarative profile gives write-once.** An attribute nobody may edit is dropped at
+  creation, silently, behind a `201`.
+
+The guarantee therefore rests on who holds `manage-users`. That role can already reset
+any user's credentials, so rewriting an identifier grants its holder nothing new.
+Reconciler detection sits behind it. A disable by partial PUT keeps the identifier, so
+quarantine may send only `{"enabled": false}`.
+
+Both answers are in `realm/contract.json`. `compat/` fails a release that loosens the
+match or starts erasing attributes on a partial update. It logs a release that makes
+write-once achievable, so question 3 gets re-answered rather than the improvement going
+unused.
 
 ### What building it found
 

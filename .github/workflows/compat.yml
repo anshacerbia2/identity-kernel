@@ -83,7 +83,7 @@ jobs:
           docker logs keycloak
           exit 1
 
-      - name: realm contract and proof-of-concept question 1
+      - name: realm contract and proof-of-concept questions
         run: go test ./compat -count=1 -v
 
       - name: Keycloak log
