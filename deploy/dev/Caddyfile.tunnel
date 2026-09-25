@@ -1,0 +1,28 @@
+# The development Keycloak behind a public VS Code dev tunnel.
+#
+# The tunnel terminates TLS and forwards plain HTTP to this listener, so Caddy serves HTTP only and
+# obtains no certificate. Every request arrives from the tunnel agent, which makes an address
+# allowlist meaningless here: the allowlist in Caddyfile cannot tell one internet client from
+# another behind a tunnel. So administration is not allowlisted; it is absent. /admin and
+# /realms/master answer 404 to everyone on this listener, and administrators reach Keycloak through
+# the private port instead (compose.tunnel.yaml, KC_HOSTNAME_ADMIN).
+#
+# Anything else answers 404 rather than 403, so the path does not confirm it exists.
+
+{
+	auto_https off
+}
+
+:80 {
+	@administration {
+		path /admin /admin/* /realms/master /realms/master/*
+	}
+	respond @administration 404
+
+	# The tunnel's TLS is the client's TLS. Caddy replaces any X-Forwarded-* a client sent and states
+	# what it knows: the scheme the client used, and the public host.
+	reverse_proxy keycloak:8080 {
+		header_up X-Forwarded-Proto https
+		header_up X-Forwarded-Host {$KEYCLOAK_HOSTNAME}
+	}
+}

@@ -55,6 +55,79 @@ go run ./cmd/realm-apply -environment development -url https://<KEYCLOAK_HOSTNAM
 
 The issuer is then `https://<KEYCLOAK_HOSTNAME>/realms/scnehaux`.
 
+## Behind a VS Code dev tunnel instead of a DNS name
+
+A tunnel terminates TLS itself and delivers every request from the same agent. So the
+DNS-name setup above does not fit a tunnel:
+
+- Caddy cannot obtain a certificate for the tunnel's host.
+- The address allowlist cannot tell one client from another.
+- A tunnel pointed straight at Keycloak exposes the Admin Console to anyone holding the URL.
+
+Tunnel mode therefore splits the two audiences across two loopback ports:
+
+| Server port | Serves | Tunnel access |
+| :-- | :-- | :-- |
+| `8080` | Caddy → Keycloak, with `/admin` and `/realms/master` answering `404` to everyone | **anonymous**: your local apps and anything else use this |
+| `8081` | Keycloak directly, including the Admin Console | **owner only**: reached as `localhost:8081` through `devtunnel connect` |
+
+Start the stack on the server:
+
+```sh
+cd identity-kernel/deploy/dev
+# .env: KEYCLOAK_HOSTNAME is the tunnel host for port 8080, without https://, for example
+#   KEYCLOAK_HOSTNAME=gqr8l4jz-8080.asse.devtunnels.ms
+# ADMIN_ALLOW_CIDRS is unused in this mode; leave any value, e.g. 127.0.0.1/32
+docker compose -f compose.yaml -f compose.tunnel.yaml up -d --wait
+./create-apply-client.sh          # once
+```
+
+**A persistent tunnel, with anonymous access on one port only.** Also on the server:
+
+```sh
+devtunnel user login -g -d                                # GitHub, device code
+devtunnel create scnehaux-dev                              # persistent: the host, and so the issuer, survive restarts
+devtunnel port create scnehaux-dev -p 8080 --protocol http
+devtunnel port create scnehaux-dev -p 8081 --protocol http
+devtunnel access create scnehaux-dev --port 8080 --anonymous
+devtunnel host scnehaux-dev                               # prints the https URL for each port
+```
+
+Three mistakes to avoid:
+
+- **`devtunnel host -p 8080 --allow-anonymous` creates a temporary tunnel.** Its ID, and
+  therefore the issuer, is new every time the command restarts.
+- **`devtunnel create -a` makes every port anonymous, 8081 included.** Anonymous access must
+  be granted per port, as above.
+- **Check an existing tunnel for tunnel-wide anonymous access** with
+  `devtunnel access list <id>`. If it has it, clear it with `devtunnel access reset <id>`
+  before granting port 8080.
+
+A persistent tunnel still expires after a period without hosting. Keep `devtunnel host` running
+under a service manager such as systemd.
+
+From your machine:
+
+```sh
+devtunnel user login -g           # the same account that owns the tunnel
+devtunnel connect scnehaux-dev    # forwards 8080 and 8081 to localhost; keep it running
+```
+
+- **Admin Console:** `http://localhost:8081/admin`
+- **Realm apply:** `go run ./cmd/realm-apply -environment development -url http://localhost:8081 -apply`
+- **Issuer for your apps:** `https://<KEYCLOAK_HOSTNAME>/realms/scnehaux`
+
+The same split works with VS Code's port forwarding instead of the CLI: make `8080` Public and
+keep `8081` Private.
+
+The tunnel host is the issuer. If the tunnel is recreated under another host, every token and
+every app's configuration changes with it. That is acceptable on a development server and one
+more reason its issuer is never the production one.
+
+CI brings this mode up too. It asserts the public issuer on port `8080`, that seven
+administration paths answer `404` there, and that the console is served on port `8081` pointing
+its login at that port.
+
 ## Changing the realm
 
 Change `realm/`, commit, and run `realm-apply -apply` again. A change made in the Admin

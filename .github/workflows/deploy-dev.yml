@@ -91,3 +91,87 @@ jobs:
       - name: stack logs
         if: failure()
         run: docker compose -f compose.yaml -f compose.ci.yaml logs --no-color
+
+  # Tunnel mode: the same stack reached through a public dev tunnel instead of a DNS name. The runner
+  # stands in for the tunnel: http://localhost:8080 is what the public tunnel forwards to, and the
+  # issuer is fixed to https://localhost:8080 as the tunnel's TLS would make it. Administration must be
+  # refused there to everyone -- an allowlist cannot work behind a tunnel -- and served on the private
+  # port.
+  tunnel:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: deploy/dev
+
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+
+      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          check-latest: false
+
+      - name: configure the stack for a tunnel
+        run: |
+          {
+            echo "KEYCLOAK_HOSTNAME=localhost:8080"
+            echo "ADMIN_ALLOW_CIDRS=127.0.0.1/32"
+            echo "POSTGRES_PASSWORD=$(openssl rand -hex 16)"
+            echo "KC_BOOTSTRAP_ADMIN_USERNAME=admin"
+            echo "KC_BOOTSTRAP_ADMIN_PASSWORD=$(openssl rand -hex 16)"
+          } > .env
+
+      - name: start the stack in tunnel mode
+        run: docker compose -f compose.yaml -f compose.tunnel.yaml up -d --wait --wait-timeout 300
+
+      - name: create the realm-apply service account
+        run: bash ./create-apply-client.sh > "$RUNNER_TEMP/client.env"
+
+      - name: apply the realm through the private port, then find nothing left to change
+        working-directory: .
+        run: |
+          set -a; . "$RUNNER_TEMP/client.env"; set +a
+          go run ./cmd/realm-apply -environment development -url http://localhost:8081 -apply
+          go run ./cmd/realm-apply -environment development -url http://localhost:8081 -require-in-sync
+
+      - name: the public port serves the realm on the tunnel's issuer
+        run: |
+          discovery="$(curl -sf http://localhost:8080/realms/scnehaux/.well-known/openid-configuration)"
+          issuer="$(printf '%s' "$discovery" | python3 -c 'import json,sys; print(json.load(sys.stdin)["issuer"])')"
+          if [ "$issuer" != "https://localhost:8080/realms/scnehaux" ]; then
+            echo "::error::issuer through the public port is '$issuer', want https://localhost:8080/realms/scnehaux"
+            exit 1
+          fi
+          status="$(curl -s -o /dev/null -w '%{http_code}' http://localhost:8080/realms/scnehaux/account)"
+          [ "$status" = "200" ] || { echo "::error::the account console answered $status on the public port"; exit 1; }
+
+      - name: administration is refused on the public port, to everyone
+        run: |
+          failed=0
+          for path in /admin /admin/ /admin/master/console/ /admin/realms/scnehaux \
+                      /realms/master /realms/master/.well-known/openid-configuration \
+                      /realms/master/protocol/openid-connect/token; do
+            status="$(curl -s -o /dev/null -w '%{http_code}' "http://localhost:8080$path")"
+            echo "$path -> $status"
+            if [ "$status" != "404" ]; then
+              echo "::error::$path answered $status on the public port; a public tunnel would expose it"
+              failed=1
+            fi
+          done
+          exit "$failed"
+
+      # The positive control for the step above: a 404 on every path would also be what a proxy that
+      # served nothing returns. Here the console is served, and it points its login at the private
+      # port, which is what KC_HOSTNAME_ADMIN is for.
+      - name: administration is served on the private port
+        run: |
+          page="$(curl -sf http://localhost:8081/admin/master/console/)"
+          if ! printf '%s' "$page" | grep -q 'localhost:8081'; then
+            echo "::error::the admin console on the private port does not point at it; its login would go to the public host"
+            printf '%s' "$page" | head -c 2000
+            exit 1
+          fi
+
+      - name: stack logs
+        if: failure()
+        run: docker compose -f compose.yaml -f compose.tunnel.yaml logs --no-color
