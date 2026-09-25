@@ -1,0 +1,91 @@
+name: compat
+
+# The declared realm contract, asserted against the exact Keycloak image in image/keycloak.ref.
+#
+# It runs in CI rather than on a developer's machine by design, not only by necessity: the
+# proof-of-concept answers recorded here are answers about one image digest, and the runner is the
+# one place that fetches exactly those bytes every time. The job summary carries the answer and the
+# digest it was answered against.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  schedule:
+    - cron: "41 4 * * 1"
+
+permissions:
+  contents: read
+
+env:
+  GO_VERSION: "1.26"
+
+jobs:
+  contract:
+    runs-on: ubuntu-latest
+
+    env:
+      KEYCLOAK_URL: http://localhost:8080
+      # Throwaway credentials for a throwaway instance that lives for the length of this job.
+      KEYCLOAK_ADMIN_USER: admin
+      KEYCLOAK_ADMIN_PASSWORD: admin
+      # Turns a skipped suite into a failure. Without it, a Keycloak that never came up would leave
+      # every assertion unrun and the build green.
+      REQUIRE_INTEGRATION: "1"
+
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+
+      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          check-latest: false
+
+      - name: gofmt
+        run: |
+          unformatted=$(gofmt -l .)
+          if [ -n "$unformatted" ]; then
+            echo "::error::gofmt reports unformatted files:"
+            echo "$unformatted"
+            exit 1
+          fi
+
+      - name: go vet
+        run: go vet ./...
+
+      # A step rather than a service container: services cannot be given a command, and Keycloak
+      # needs one (start-dev). The reference is read from the file and checked for the digest form,
+      # so a tag slipped into image/keycloak.ref fails here instead of being run.
+      - name: start the pinned Keycloak
+        run: |
+          image="$(grep -v '^[[:space:]]*#' image/keycloak.ref | grep -v '^[[:space:]]*$' | head -n 1 | tr -d '[:space:]')"
+          if ! printf '%s' "$image" | grep -Eq '@sha256:[0-9a-f]{64}$'; then
+            echo "::error::image/keycloak.ref must pin the image by sha256 digest, found '$image'"
+            exit 1
+          fi
+          echo "starting $image"
+          docker run -d --name keycloak -p 8080:8080 -p 9000:9000 \
+            -e KC_BOOTSTRAP_ADMIN_USERNAME="$KEYCLOAK_ADMIN_USER" \
+            -e KC_BOOTSTRAP_ADMIN_PASSWORD="$KEYCLOAK_ADMIN_PASSWORD" \
+            -e KC_HEALTH_ENABLED=true \
+            "$image" start-dev
+
+      - name: wait for Keycloak to be ready
+        run: |
+          for i in $(seq 1 90); do
+            if curl -fsS http://localhost:9000/health/ready >/dev/null 2>&1; then
+              echo "ready after $((i * 2))s"
+              exit 0
+            fi
+            sleep 2
+          done
+          echo "::error::Keycloak did not report ready within 180s"
+          docker logs keycloak
+          exit 1
+
+      - name: realm contract and proof-of-concept question 1
+        run: go test ./compat -count=1 -v
+
+      - name: Keycloak log
+        if: failure()
+        run: docker logs keycloak

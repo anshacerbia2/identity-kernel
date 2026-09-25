@@ -1,0 +1,55 @@
+[
+  {
+    "name": "scnehaux-internal",
+    "description": "STD-IAM-002 internal profile. Carries principal_id and subject_type. Never a realm default.",
+    "protocol": "openid-connect",
+    "attributes": {
+      "include.in.token.scope": "true",
+      "display.on.consent.screen": "false"
+    },
+    "protocolMappers": [
+      {
+        "name": "principal_id",
+        "protocol": "openid-connect",
+        "protocolMapper": "oidc-usermodel-attribute-mapper",
+        "config": {
+          "user.attribute": "scnehaux_principal_id",
+          "claim.name": "principal_id",
+          "jsonType.label": "String",
+          "multivalued": "false",
+          "aggregate.attrs": "false",
+          "access.token.claim": "true",
+          "id.token.claim": "true",
+          "userinfo.token.claim": "true",
+          "introspection.token.claim": "true"
+        }
+      },
+      {
+        "name": "subject_type",
+        "protocol": "openid-connect",
+        "protocolMapper": "oidc-usermodel-attribute-mapper",
+        "config": {
+          "user.attribute": "scnehaux_subject_type",
+          "claim.name": "subject_type",
+          "jsonType.label": "String",
+          "multivalued": "false",
+          "aggregate.attrs": "false",
+          "access.token.claim": "true",
+          "id.token.claim": "true",
+          "userinfo.token.claim": "true",
+          "introspection.token.claim": "true"
+        }
+      }
+    ]
+  },
+  {
+    "name": "scnehaux-external",
+    "description": "External relying parties. Carries no enterprise or context claim, by construction.",
+    "protocol": "openid-connect",
+    "attributes": {
+      "include.in.token.scope": "true",
+      "display.on.consent.screen": "false"
+    },
+    "protocolMappers": []
+  }
+]

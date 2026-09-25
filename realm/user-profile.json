@@ -1,0 +1,23 @@
+{
+  "attributes": [
+    {
+      "name": "scnehaux_principal_id",
+      "displayName": "Scnehaux Principal Identifier",
+      "permissions": { "view": ["admin"], "edit": ["admin"] },
+      "required": { "roles": ["admin"] },
+      "multivalued": false
+    },
+    {
+      "name": "scnehaux_subject_type",
+      "displayName": "Scnehaux Subject Type",
+      "permissions": { "view": ["admin"], "edit": ["admin"] },
+      "multivalued": false
+    },
+    {
+      "name": "scnehaux_workload_owner",
+      "displayName": "Scnehaux Workload Owner",
+      "permissions": { "view": ["admin"], "edit": ["admin"] },
+      "multivalued": false
+    }
+  ]
+}
