@@ -396,17 +396,27 @@ func scopeIDByName(t *testing.T, a *admin, name string) string {
 // canonical identifier already minted and written as an attribute at creation.
 func createPrincipal(t *testing.T, a *admin) principal {
 	t.Helper()
+	p, err := newPrincipal(a, uuidV7(), true)
+	if err != nil {
+		t.Fatalf("creating a Principal: %v", err)
+	}
+	return p
+}
+
+// newPrincipal is createPrincipal without the verdict, for the probes whose question is whether
+// Keycloak accepts the user at all -- a second user carrying the same identifier, for one.
+func newPrincipal(a *admin, principalID string, enabled bool) (principal, error) {
 	p := principal{
 		username:    "compat-" + suffix(),
 		password:    "Compat-" + suffix() + "!",
-		principalID: uuidV7(),
+		principalID: principalID,
 	}
 	// email, first and last name are required for the user role in the default profile. Without
 	// them the first login demands a profile update, and the password grant refuses a login that has
 	// a required action pending.
 	response, err := a.call(http.MethodPost, "/admin/realms/"+realmName+"/users", map[string]any{
 		"username":      p.username,
-		"enabled":       true,
+		"enabled":       enabled,
 		"email":         p.username + "@compat.invalid",
 		"emailVerified": true,
 		"firstName":     "Compat",
@@ -421,10 +431,10 @@ func createPrincipal(t *testing.T, a *admin) principal {
 		"requiredActions": []string{},
 	}, http.StatusCreated)
 	if err != nil {
-		t.Fatalf("creating a Principal: %v", err)
+		return p, err
 	}
 	p.userID = created(response)
-	return p
+	return p, nil
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -567,11 +577,16 @@ func report(t *testing.T, surfaces []surface, outcome int) {
 		fmt.Fprintf(&b, "| %s | %s | %s | %s |\n", s.name, orDash(s.principalID), orDash(s.subjectType), mark)
 	}
 	fmt.Fprintf(&b, "\n**Outcome %d:** %s\n", outcome, meaning)
+	publish(t, b.String())
+}
 
-	t.Log("\n" + b.String())
+// publish logs a question's answer and, in CI, appends it to the job summary.
+func publish(t *testing.T, markdown string) {
+	t.Helper()
+	t.Log("\n" + markdown)
 	if path := os.Getenv("GITHUB_STEP_SUMMARY"); path != "" {
 		if file, err := os.OpenFile(path, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o644); err == nil {
-			_, _ = file.WriteString(b.String())
+			_, _ = file.WriteString(markdown + "\n")
 			_ = file.Close()
 		}
 	}

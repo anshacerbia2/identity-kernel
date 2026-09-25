@@ -161,27 +161,34 @@ func (a *admin) mergeUserProfile() error {
 		return fmt.Errorf("parsing user-profile.json: %w", err)
 	}
 
+	return a.editProfile(func(existing []any) []any {
+		present := map[string]bool{}
+		for _, attribute := range existing {
+			if m, ok := attribute.(map[string]any); ok {
+				if name, ok := m["name"].(string); ok {
+					present[name] = true
+				}
+			}
+		}
+		for _, attribute := range ours.Attributes {
+			if name, _ := attribute["name"].(string); !present[name] {
+				existing = append(existing, attribute)
+			}
+		}
+		return existing
+	})
+}
+
+// editProfile reads the live user profile, lets edit change its attribute list, and writes the
+// whole configuration back -- the only way the Admin API updates it.
+func (a *admin) editProfile(edit func(attributes []any) []any) error {
 	path := "/admin/realms/" + realmName + "/users/profile"
 	var live map[string]any
 	if err := a.getJSON(path, &live); err != nil {
 		return fmt.Errorf("reading the user profile: %w", err)
 	}
 	existing, _ := live["attributes"].([]any)
-	present := map[string]bool{}
-	for _, attribute := range existing {
-		if m, ok := attribute.(map[string]any); ok {
-			if name, ok := m["name"].(string); ok {
-				present[name] = true
-			}
-		}
-	}
-	for _, attribute := range ours.Attributes {
-		if name, _ := attribute["name"].(string); !present[name] {
-			existing = append(existing, attribute)
-		}
-	}
-	live["attributes"] = existing
-
+	live["attributes"] = edit(existing)
 	if _, err := a.call(http.MethodPut, path, live, http.StatusOK); err != nil {
 		return fmt.Errorf("writing the user profile: %w", err)
 	}
