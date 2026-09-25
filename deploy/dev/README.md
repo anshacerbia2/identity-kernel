@@ -55,7 +55,7 @@ go run ./cmd/realm-apply -environment development -url https://<KEYCLOAK_HOSTNAM
 
 The issuer is then `https://<KEYCLOAK_HOSTNAME>/realms/scnehaux`.
 
-## Behind a VS Code dev tunnel instead of a DNS name
+## Behind a dev tunnel instead of a DNS name
 
 A tunnel terminates TLS itself and delivers every request from the same agent. So the
 DNS-name setup above does not fit a tunnel:
@@ -113,12 +113,9 @@ devtunnel user login -g           # the same account that owns the tunnel
 devtunnel connect scnehaux-dev    # forwards 8080 and 8081 to localhost; keep it running
 ```
 
-- **Admin Console:** `http://localhost:8081/admin`
+- **Admin Console:** `http://localhost:8081/admin`, or the tunnel's own URL for port 8081 in a browser (devtunnel asks for the owner's GitHub login), after setting `KEYCLOAK_ADMIN_URL` to that URL in `.env`
 - **Realm apply:** `go run ./cmd/realm-apply -environment development -url http://localhost:8081 -apply`
 - **Issuer for your apps:** `https://<KEYCLOAK_HOSTNAME>/realms/scnehaux`
-
-The same split works with VS Code's port forwarding instead of the CLI: make `8080` Public and
-keep `8081` Private.
 
 The tunnel host is the issuer. If the tunnel is recreated under another host, every token and
 every app's configuration changes with it. That is acceptable on a development server and one
