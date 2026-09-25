@@ -67,6 +67,13 @@ func TestQuestion2AttributeSearchSemantics(t *testing.T) {
 	} else {
 		rows = append(rows, [3]string{"exact match", "**no** -- a near miss matches",
 			"identity-control must keep only hits whose attribute equals the identifier before counting"})
+		// Answered exact against the pinned release, and identity-control counts the result as
+		// returned on the strength of that answer. A release that loosens the match hands recovery a
+		// stranger's user to adopt.
+		if loadContract(t).Question2.ExactMatch {
+			t.Error("REGRESSION: realm/contract.json records attribute search as exact-match and a near miss " +
+				"now matches; identity-control's recovery counts hits as returned and would adopt the wrong user")
+		}
 	}
 
 	caseSensitive := !holds(searchByPrincipalID(t, a, strings.ToUpper(id), 0, 10), target.userID)

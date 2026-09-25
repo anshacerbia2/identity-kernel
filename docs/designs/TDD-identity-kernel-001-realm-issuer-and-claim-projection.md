@@ -3,7 +3,7 @@ doc_meta:
   id: TDD-identity-kernel-001
   title: Realm Topology, Issuer Identity, and Token Claim Projection
   owner: Identity Platform Team
-  version: 1.1.0
+  version: 1.2.0
   status: approved
   classification: restricted
   review_cycle_days: 90
@@ -222,11 +222,52 @@ settings are the primary one.
 }
 ```
 
-`edit` excludes `user`, which is what removes the self-service mutation path. Whether
-the declarative profile also prevents an administrator from editing the value is
-settled by proof-of-concept; if it does not, immutability rests on the narrow Admin
-API role set in `TDD-identity-control-001` plus reconciler detection, and that
-reduced guarantee is recorded here rather than assumed away.
+`edit` excludes `user`, which is what removes the self-service mutation path. Against
+26.7.4 the account API refuses the change with `error-user-attribute-read-only` and
+does not show the attribute to its user.
+
+**Settled: detected, not enforced.** The declarative profile does not prevent an
+administrator from editing the value, and no declarative configuration can. With
+`edit=["admin"]` an administrator's change is applied, as it must be for
+`identity-control` to write the attribute at creation. An attribute that nobody may
+edit is not a write-once alternative: the Admin API answers `201` to a creation
+carrying it and silently drops the value. So immutability against administrators rests
+on the narrow Admin API role set in `TDD-identity-control-001` plus reconciler
+detection. That is the reduced guarantee, recorded rather than assumed away.
+
+The reduced guarantee is narrower than it first appears. The capability that can
+rewrite the attribute, `manage-users`, can already reset any user's credentials, so
+rewriting an identifier gives its holder nothing that role does not already give.
+Immutability here is therefore a property of who holds `manage-users`, not a separate
+control. Until the sweep runs, a rewritten identifier is carried into tokens:
+
+- A fresh value reads as an orphan.
+- Another Principal's value reads as a duplicate.
+
+Both are disabled on the next sweep.
+
+A disable sent as the partial representation `{"enabled": false}` keeps the
+identifier and the profile fields. Quarantine may therefore send only what it
+changes, and `compat/` fails any release that starts erasing attributes on a partial
+update.
+
+### Attribute Search
+
+`q=scnehaux_principal_id:{id}` is the recovery index in `TDD-identity-control-001`.
+Against 26.7.4 it behaves as follows:
+
+- **Exact.** No prefix, substring, or one-character extension of the value matches.
+- **Case-insensitive.** A value differing only in case does match.
+- **Disabled users.** It finds them.
+- **Paging.** It pages through `first` and `max` without loss or overlap.
+- **Count.** `/users/count` honours `q`.
+- **Uniqueness.** Keycloak does not enforce it: two users holding one value are both
+  accepted and both returned.
+
+Case-insensitivity is harmless while identifiers are written in canonical lowercase,
+which `identity-control` must therefore always do. Two stored values that differ only
+in case are one identifier to the index, so recovery would quarantine both. `compat/`
+fails a release that loosens the match.
 
 ### Token Shape
 
@@ -362,6 +403,8 @@ compatibility suite rather than left to operational discipline.
 
 - The compatibility suite passes against the candidate release before promotion.
 - A release dropping the claim from a covered surface fails the suite.
+- A release loosening attribute search beyond exact match, or erasing the identifier on
+  a partial update, fails the suite.
 - Rollback is rehearsed, and the database migration boundary beyond which rollback is
   unavailable is recorded for the candidate release.
 
@@ -432,9 +475,12 @@ standard amendment.
 2. **Attribute search semantics.** Whether `q=scnehaux_principal_id:{id}` is
    exact-match and how it paginates. Determines the recovery mechanism in
    `TDD-identity-control-001`; the creation path is unaffected either way.
+   **Answered 2026-09-25: exact, case-insensitive, finds disabled users, pages without
+   loss** — see §Attribute Search.
 3. **Attribute immutability.** Whether the declarative user profile prevents
    administrator edits as well as self-service edits. Determines whether immutability
-   is enforced or detected.
+   is enforced or detected. **Answered 2026-09-25: detected, not enforced** — see
+   §Declarative User Profile.
 4. **Issuer URI form.** Whether `/realms/{name}` can be removed while remaining
    supported. Irreversible once tokens are issued, so it is decided either way before
    the first token rather than inherited.

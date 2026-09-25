@@ -163,22 +163,39 @@ func TestTheProbeSeesAnAbsentClaim(t *testing.T) {
 	}
 }
 
-func declaredSurfaces(t *testing.T) []string {
+// declaredContract is the part of realm/contract.json the suite asserts against. Each field is an
+// answer other repositories now build on, so a release that changes one fails as a regression.
+type declaredContract struct {
+	ClaimSurfaces []string `json:"claim_surfaces"`
+	Question2     struct {
+		ExactMatch bool `json:"exact_match"`
+	} `json:"question_2"`
+	Question3 struct {
+		WriteOnceAchievable       bool `json:"write_once_achievable"`
+		PartialPutKeepsIdentifier bool `json:"partial_put_keeps_identifier"`
+	} `json:"question_3"`
+}
+
+func loadContract(t *testing.T) declaredContract {
 	t.Helper()
 	raw, err := readFile("contract.json")
 	if err != nil {
 		t.Fatal(err)
 	}
-	var contract struct {
-		ClaimSurfaces []string `json:"claim_surfaces"`
-	}
+	var contract declaredContract
 	if err := json.Unmarshal(raw, &contract); err != nil {
 		t.Fatalf("parsing realm/contract.json: %v", err)
 	}
-	if len(contract.ClaimSurfaces) == 0 {
+	return contract
+}
+
+func declaredSurfaces(t *testing.T) []string {
+	t.Helper()
+	surfaces := loadContract(t).ClaimSurfaces
+	if len(surfaces) == 0 {
 		t.Fatal("realm/contract.json declares no claim surfaces; the regression check would assert nothing")
 	}
-	return contract.ClaimSurfaces
+	return surfaces
 }
 
 // ---------------------------------------------------------------------------------------------

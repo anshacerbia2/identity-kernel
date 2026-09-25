@@ -177,6 +177,11 @@ func TestQuestion3AdministratorImmutability(t *testing.T) {
 	} else {
 		rows = append(rows, [3]string{"disable by partial PUT", fmt.Sprintf("**identifier erased** (holds %v)", got),
 			"quarantine must PUT the full representation it just read, never a partial one"})
+		if loadContract(t).Question3.PartialPutKeepsIdentifier {
+			t.Error("REGRESSION: realm/contract.json records that a partial PUT keeps the identifier, and " +
+				"disabling a user with {\"enabled\": false} now erases it -- identity-control's quarantine " +
+				"would destroy the recovery index of every Principal it quarantines")
+		}
 	}
 	if disabled.Email == "" || disabled.FirstName == "" {
 		rows = append(rows, [3]string{"disable by partial PUT", fmt.Sprintf("**profile fields erased** "+
@@ -188,6 +193,12 @@ func TestQuestion3AdministratorImmutability(t *testing.T) {
 	if storedAtCreate && !changedAfter {
 		verdict = "**enforceable** -- an attribute nobody may edit is still written at creation through the " +
 			"Admin API and refused afterwards; declaring scnehaux_principal_id that way makes Keycloak enforce it"
+		// Not a failure: a release that makes enforcement possible improves on the recorded answer.
+		// It is logged loudly so question 3 is re-answered rather than the improvement going unused.
+		if !loadContract(t).Question3.WriteOnceAchievable {
+			t.Log("QUESTION 3 CAN BE RE-ANSWERED: realm/contract.json records write-once as unachievable and " +
+				"this release achieves it; declaring the identifier edit-for-nobody would make immutability enforced")
+		}
 	}
 
 	var b strings.Builder
