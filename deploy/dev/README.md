@@ -80,7 +80,14 @@ cd identity-kernel/deploy/dev
 # ADMIN_ALLOW_CIDRS is unused in this mode; leave any value, e.g. 127.0.0.1/32
 docker compose -f compose.yaml -f compose.tunnel.yaml up -d --wait
 ./create-apply-client.sh          # once
+./tunnel-admin.sh                 # after every change to KEYCLOAK_ADMIN_URL
 ```
+
+`tunnel-admin.sh` points the master realm's `frontendUrl` at `KEYCLOAK_ADMIN_URL` (default
+`http://localhost:8081`). `KC_HOSTNAME_ADMIN` alone moves only the Admin Console. The master realm's
+login page is still built from `KC_HOSTNAME`, so its form would post to the public port, where
+`/realms/master` answers 404. The value lives in Keycloak's database and `realm-apply` does not manage the
+master realm, so the script sets it from `.env`. The `scnehaux` issuer is unaffected.
 
 **A persistent tunnel, with anonymous access on one port only.** Also on the server:
 
