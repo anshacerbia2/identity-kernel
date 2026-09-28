@@ -8,5 +8,10 @@
   "loginWithEmailAllowed": true,
   "duplicateEmailsAllowed": false,
   "defaultSignatureAlgorithm": "PS256",
-  "sslRequired": "external"
+  "sslRequired": "external",
+  "adminEventsEnabled": true,
+  "adminEventsDetailsEnabled": true,
+  "attributes": {
+    "adminEventsExpiration": "604800"
+  }
 }

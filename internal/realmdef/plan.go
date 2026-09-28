@@ -12,7 +12,8 @@ import (
 	"github.com/anshacerbia2/identity-kernel/internal/admin"
 )
 
-// The realm attributes the apply step records. Written only by Apply, and refused in a definition.
+// The realm attributes the apply step records. Written only by Apply, and refused in a definition,
+// which may declare any other realm attribute.
 const (
 	AttrRevision = "scnehaux.definition.revision"
 	AttrDigest   = "scnehaux.definition.digest"

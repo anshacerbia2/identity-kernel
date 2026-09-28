@@ -144,9 +144,41 @@ func TestTheDigestFollowsTheContent(t *testing.T) {
 
 func TestParseRefusesWhatOnlyTheApplyStepMayWrite(t *testing.T) {
 	files := files(t)
-	files["scnehaux.json"] = []byte(`{"realm":"scnehaux","attributes":{"scnehaux.definition.revision":"x"}}`)
+	for _, attribute := range []string{AttrRevision, AttrDigest} {
+		files["scnehaux.json"] = []byte(`{"realm":"scnehaux","attributes":{"` + attribute + `":"x"}}`)
+		if _, err := Parse(files); err == nil {
+			t.Errorf("a definition declaring %s parsed; it could forge the applied revision", attribute)
+		}
+	}
+}
+
+// Admin-event retention has no top-level key; Keycloak keeps it as a realm attribute.
+func TestParseAcceptsAnyOtherRealmAttributeAsAString(t *testing.T) {
+	files := files(t)
+	files["scnehaux.json"] = []byte(`{"realm":"scnehaux","attributes":{"adminEventsExpiration":"604800"}}`)
+	if _, err := Parse(files); err != nil {
+		t.Errorf("a definition declaring admin-event retention was refused: %v", err)
+	}
+	files["scnehaux.json"] = []byte(`{"realm":"scnehaux","attributes":{"adminEventsExpiration":604800}}`)
 	if _, err := Parse(files); err == nil {
-		t.Error("a definition declaring realm attributes parsed; it could forge the applied revision")
+		t.Error("a realm attribute declared as a number parsed; Keycloak returns it as a string, so it would read as drift")
+	}
+}
+
+// A console change to a declared realm attribute is a difference like any other; an attribute the
+// definition does not declare, the recorded revision among them, is not compared.
+func TestADeclaredRealmAttributeIsCompared(t *testing.T) {
+	d := definition(t)
+	l := liveFrom(d)
+	attributes := l.realm["attributes"].(map[string]any)
+	attributes[AttrRevision] = "abc123"
+	if change := find(t, compare(d, l), KindRealm, d.Name()); change.Action != InSync {
+		t.Fatalf("an undeclared realm attribute reads as %s %v", change.Action, change.Diffs)
+	}
+	attributes["adminEventsExpiration"] = "60"
+	change := find(t, compare(d, l), KindRealm, d.Name())
+	if change.Action != Update || !strings.Contains(strings.Join(change.Diffs, " "), "attributes.adminEventsExpiration") {
+		t.Errorf("a shortened admin-event retention reads as %s %v, want an update naming it", change.Action, change.Diffs)
 	}
 }
 

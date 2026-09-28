@@ -62,7 +62,7 @@ func Apply(ctx context.Context, c *admin.Client, plan Plan, options Options) err
 		var err error
 		switch change.Kind {
 		case KindRealm:
-			err = applyRealm(ctx, c, d, change.Action)
+			err = applyRealm(ctx, c, d, plan.live, change.Action)
 		case KindKey:
 			err = applyKey(ctx, c, base, d.Key, plan.live, change.Action)
 		case KindScope:
@@ -105,13 +105,21 @@ func Apply(ctx context.Context, c *admin.Client, plan Plan, options Options) err
 	return record(ctx, c, base, d, options.Revision)
 }
 
-func applyRealm(ctx context.Context, c *admin.Client, d Definition, action Action) error {
+func applyRealm(ctx context.Context, c *admin.Client, d Definition, l *live, action Action) error {
 	if action == Create {
 		_, err := c.Call(ctx, http.MethodPost, "/admin/realms", d.Realm, http.StatusCreated)
 		return err
 	}
-	// A partial representation: Keycloak updates the fields present and leaves the rest.
-	_, err := c.Call(ctx, http.MethodPut, "/admin/realms/"+url.PathEscape(d.Name()), d.Realm, http.StatusNoContent)
+	// A partial representation: Keycloak updates the fields present and leaves the rest. The
+	// attributes are the exception, sent as one map, so the declared ones are laid over the live
+	// ones rather than sent alone -- the recorded revision among them, which the drift check
+	// depends on.
+	body := d.Clone().Realm
+	if declared, ok := body["attributes"].(map[string]any); ok {
+		liveAttributes, _ := l.realm["attributes"].(map[string]any)
+		body["attributes"] = overlay(liveAttributes, declared)
+	}
+	_, err := c.Call(ctx, http.MethodPut, "/admin/realms/"+url.PathEscape(d.Name()), body, http.StatusNoContent)
 	return err
 }
 
