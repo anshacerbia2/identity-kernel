@@ -143,17 +143,16 @@ with an empty secret-manager response exits non-zero and signs nothing.
 
 **Exit:** an event dropped in transit is detected by reconciliation rather than lost.
 
-Admin events are not yet enabled in `realm/`. TDD-identity-kernel-003 specifies them: enabled, with
-representation details, and with retention above the reconcile interval times a safety factor.
-Proof B depends on them too. identity-control tells a sanctioned console change from drift through
-the admin event that recorded it (identity-control ROADMAP §Proof B, step 1).
+✅ Admin events are enabled in `realm/`, as TDD-identity-kernel-003 specifies: with representation
+details (`adminEventsEnabled`, `adminEventsDetailsEnabled`), and kept 7 days
+(`adminEventsExpiration`, 604800 seconds). Proof B depends on them. identity-control tells a
+sanctioned console change from drift through the admin event that recorded it (identity-control
+ROADMAP §Proof B, step 1). `compat/events_test.go` asserts that a change made by hand is recorded
+with the user who made it and what it changed to.
 
-One limit to know before building: `realmdef` refuses realm `attributes`, because the applied
-revision lives there. Enabling admin events (`adminEventsEnabled`,
-`adminEventsDetailsEnabled`) uses top-level realm keys and fits the definition as it is.
-Admin-event retention (`adminEventsExpiration`) is believed to be stored as a realm attribute rather
-than a top-level key. Verify that against the pinned 26.7.4 before building: if it is an attribute,
-`realmdef` must manage that one attribute alongside the ones it records.
+Retention has no top-level key: Keycloak keeps it as a realm attribute. So `realmdef` now accepts
+declared realm attributes, as strings, except the two that record the applied revision. It lays
+them over the live attributes on apply, so the record is never dropped.
 
 ## Week 4 · Theme and upgrade suite
 

@@ -131,6 +131,55 @@ func TestADefinitionChangeIsAnUpdateNotDrift(t *testing.T) {
 	}
 }
 
+// A declared realm attribute changed in the definition is applied as an update, and the update keeps
+// every attribute the realm already held. They are written as one map, so sending the declared ones
+// alone would drop the rest, Keycloak's own among them. CI creates the realm from nothing, so without
+// this test only a server that already has it would take this path.
+func TestARealmAttributeUpdateKeepsTheOtherAttributes(t *testing.T) {
+	a := requireKeycloak(t)
+	definition := loadDefinition(t)
+	changed := definition.Clone()
+	changed.Realm["attributes"].(map[string]any)["adminEventsExpiration"] = "1209600"
+
+	before := realmAttributes(t, a)
+	for _, step := range []struct {
+		name           string
+		target, before realmdef.Definition
+		want           string
+	}{
+		{"forward", changed, definition, "1209600"},
+		{"back", definition, changed, "604800"},
+	} {
+		plan := newPlan(t, a, step.target, &step.before)
+		if len(plan.Drift) > 0 {
+			t.Fatalf("%s: a definition change reads as drift:\n  %s", step.name, strings.Join(plan.Drift, "\n  "))
+		}
+		if err := realmdef.Apply(context.Background(), a.client, plan, options(t, a)); err != nil {
+			t.Fatalf("%s: applying a realm attribute change: %v", step.name, err)
+		}
+		after := realmAttributes(t, a)
+		if after["adminEventsExpiration"] != step.want {
+			t.Errorf("%s: admin-event retention is %q, want %q", step.name, after["adminEventsExpiration"], step.want)
+		}
+		for key := range before {
+			if _, kept := after[key]; !kept {
+				t.Errorf("%s: the update dropped the realm attribute %s", step.name, key)
+			}
+		}
+	}
+}
+
+func realmAttributes(t *testing.T, a *admin) map[string]string {
+	t.Helper()
+	var realm struct {
+		Attributes map[string]string `json:"attributes"`
+	}
+	if err := a.getJSON("/admin/realms/"+realmName, &realm); err != nil {
+		t.Fatalf("reading the realm: %v", err)
+	}
+	return realm.Attributes
+}
+
 func loadDefinition(t *testing.T) realmdef.Definition {
 	t.Helper()
 	definition, err := realmdef.Load(filepath.Join("..", "realm"))

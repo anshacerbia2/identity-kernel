@@ -131,9 +131,24 @@ func (d Definition) validate() error {
 	if d.Name() == "" {
 		return errors.New("scnehaux.json names no realm")
 	}
-	if _, present := d.Realm["attributes"]; present {
-		return errors.New("scnehaux.json declares realm attributes; they hold the applied revision and " +
-			"are written only by the apply step")
+	// Realm attributes are where Keycloak keeps some settings with no top-level key, admin-event
+	// retention among them, so the definition may declare them. Not the two that hold the applied
+	// revision: a definition that declared those could forge the baseline drift is judged by.
+	if declared, present := d.Realm["attributes"]; present {
+		attributes, ok := declared.(map[string]any)
+		if !ok {
+			return errors.New("scnehaux.json declares realm attributes that are not an object")
+		}
+		for key, value := range attributes {
+			if key == AttrRevision || key == AttrDigest {
+				return fmt.Errorf("scnehaux.json declares the realm attribute %s; it holds the applied "+
+					"revision and is written only by the apply step", key)
+			}
+			if _, isString := value.(string); !isString {
+				return fmt.Errorf("scnehaux.json declares the realm attribute %s as %v; Keycloak keeps "+
+					"realm attributes as strings, so anything else would read as drift", key, value)
+			}
+		}
 	}
 	if name(d.Key) == "" || d.Key["providerId"] == nil {
 		return errors.New("signing-key.generated.json needs a name and a providerId")
