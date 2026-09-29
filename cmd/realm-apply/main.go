@@ -5,8 +5,9 @@
 //	realm-apply -environment development -url https://identity.dev.example -apply     # apply
 //
 // Credentials come from the environment, never from a flag, so they stay out of shell history:
-// KEYCLOAK_ADMIN_CLIENT_ID and KEYCLOAK_ADMIN_CLIENT_SECRET for a master-realm service account, or
-// KEYCLOAK_ADMIN_USER and KEYCLOAK_ADMIN_PASSWORD for the bootstrap administrator.
+// KEYCLOAK_ADMIN_CLIENT_ID and KEYCLOAK_ADMIN_CLIENT_KEY_FILE for a master-realm service account
+// that authenticates with its private key, or KEYCLOAK_ADMIN_USER and KEYCLOAK_ADMIN_PASSWORD for
+// the bootstrap administrator of a throwaway instance.
 //
 // The applied revision is recorded in the realm. The next run reads the definition at that
 // revision from git and compares it with the live realm; any difference was made outside this
@@ -63,12 +64,11 @@ func run(args []string, stdout, stderr io.Writer) int {
 	if err != nil {
 		return fail("%v", err)
 	}
-	client, err := admin.New(*baseURL, nil, admin.Credentials{
-		ClientID:     os.Getenv("KEYCLOAK_ADMIN_CLIENT_ID"),
-		ClientSecret: os.Getenv("KEYCLOAK_ADMIN_CLIENT_SECRET"),
-		Username:     os.Getenv("KEYCLOAK_ADMIN_USER"),
-		Password:     os.Getenv("KEYCLOAK_ADMIN_PASSWORD"),
-	})
+	credentials, err := admin.CredentialsFromEnv()
+	if err != nil {
+		return fail("%v", err)
+	}
+	client, err := admin.New(*baseURL, nil, credentials)
 	if err != nil {
 		return fail("%v", err)
 	}

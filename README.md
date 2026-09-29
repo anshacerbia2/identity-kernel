@@ -127,9 +127,28 @@ one.
 CI applies the realm with this tool, and a server is applied with the same tool.
 Credentials come from the environment, never from a flag:
 
-- **Service account:** `KEYCLOAK_ADMIN_CLIENT_ID` and `KEYCLOAK_ADMIN_CLIENT_SECRET`, for
-  a master-realm service account. Use this on a long-lived server.
-- **Bootstrap administrator:** `KEYCLOAK_ADMIN_USER` and `KEYCLOAK_ADMIN_PASSWORD`.
+- **Service account:** `KEYCLOAK_ADMIN_CLIENT_ID` and `KEYCLOAK_ADMIN_CLIENT_KEY_FILE`, the
+  path of its PEM private key. Use this on a long-lived server. It authenticates by signed JWT
+  (`private_key_jwt`), because no client in a shared environment holds a client secret
+  (`ADR-IAM-001 §5.12`, `STD-IAM-001 §3.2`). The assertion's audience is read from the master
+  realm's discovery document, so a fixed hostname or tunnel frontend URL needs no configuration.
+  With the client ID set, a key that fails to load is an error, never a fall back to the password.
+- **Bootstrap administrator:** `KEYCLOAK_ADMIN_USER` and `KEYCLOAK_ADMIN_PASSWORD`, for a
+  throwaway instance such as CI's.
+
+### Client keys: `cmd/client-key`
+
+Confidential clients created before identity-control can register them use this tool. That covers
+realm-apply's account, identity-control's own clients, the development caller, and the BFFs.
+
+- `client-key new -out NAME.pem` makes a 3072-bit RSA pair. It writes the private key (mode 0600)
+  and prints the public JWK beside it. The `kid` is the key's RFC 7638 thumbprint, so a deployable
+  is configured with its key file and nothing else.
+- `client-key install` sets a client to authenticate with exactly the JWKs it is given: two during
+  a rotation. It regenerates the client's old secret without printing it.
+
+`deploy/dev/new-client-key.sh` and `deploy/dev/set-client-key.sh` run the tool from the realm-apply
+image, so a server needs only Docker.
 
 ```sh
 # plan: read-only, prints what applying would change

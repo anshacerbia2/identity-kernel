@@ -176,14 +176,27 @@ credential already manages. The test deletes its client, and the suite's closing
 **The answer is now the decision.** The following record it:
 
 - `ADR-IAM-001 §5.12` and `STD-IAM-001 §3.2` in scnehaux-architecture: confidential and workload
-  clients authenticate with `private_key_jwt`, and client secrets are prohibited for registered
-  clients.
+  clients authenticate with `private_key_jwt`, and no client in a shared environment holds a client
+  secret, development included.
 - `TDD-identity-control-003` §Client Key Records and §Client Key Rotation.
 - `TDD-identity-kernel-002` §Scope, which puts client keys out of its custody: the kernel holds only
   their public halves.
 
 The test stays in the suite. A release that stops honouring the overlap or the removal fails
 `compat/` rather than silently breaking rotation.
+
+✅ **This repository's own client uses a key.** realm-apply's master-realm service account
+authenticates by signed JWT:
+
+- `internal/admin` signs the assertion, and reads its audience from the master realm's discovery,
+  so a tunnel's frontend URL needs no configuration. Client-secret support is removed.
+- `cmd/client-key` makes key pairs and installs public keys on any client. The development server's
+  other clients use it too: identity-control's and the BFF's.
+- `compat/admin_key_test.go` proves the path end to end: a service account with a registered key
+  administers the realm, and a replaced key is refused at once.
+
+The bootstrap administrator's password remains for a throwaway instance, such as CI's, and for the
+first start of a server, before the service account exists.
 
 **Exit:** a token signed by one replica verifies against every other replica; a replica
 with an empty secret-manager response exits non-zero and signs nothing.

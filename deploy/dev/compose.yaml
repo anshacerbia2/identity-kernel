@@ -106,11 +106,14 @@ services:
       - -apply
     environment:
       KEYCLOAK_ADMIN_CLIENT_ID: ${KEYCLOAK_ADMIN_CLIENT_ID:-}
-      KEYCLOAK_ADMIN_CLIENT_SECRET: ${KEYCLOAK_ADMIN_CLIENT_SECRET:-}
+      # The service account's private key, mounted from ./keys. With KEYCLOAK_ADMIN_CLIENT_ID set,
+      # the key is required and the password below is never used.
+      KEYCLOAK_ADMIN_CLIENT_KEY_FILE: /keys/${KEYCLOAK_ADMIN_CLIENT_ID:-realm-apply}.pem
       KEYCLOAK_ADMIN_USER: ${KC_BOOTSTRAP_ADMIN_USERNAME:-admin}
       KEYCLOAK_ADMIN_PASSWORD: ${KC_BOOTSTRAP_ADMIN_PASSWORD:?set KC_BOOTSTRAP_ADMIN_PASSWORD in .env}
     volumes:
       - ../..:/repo:ro
+      - ./keys:/keys:ro
     depends_on:
       keycloak:
         condition: service_healthy

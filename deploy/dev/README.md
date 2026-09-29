@@ -39,12 +39,44 @@ git clone https://github.com/anshacerbia2/identity-kernel && cd identity-kernel/
 cp .env.example .env        # fill it in: hostname, your IP, two generated secrets
 docker compose up -d
 docker compose logs realm-apply   # the plan it applied, ending in "applied revision ..."
-./create-apply-client.sh          # optional: a service account for realm-apply, printed once
+./new-client-key.sh realm-apply   # the service account's key pair, in ./keys; the private key stays here
+./create-apply-client.sh          # the service account, authenticating with that key; then set
+                                  # KEYCLOAK_ADMIN_CLIENT_ID in .env and docker compose up -d again
 ```
 
 Every `docker compose up` runs the one-shot `realm-apply` job once Keycloak is healthy. It brings
-the realm to `realm/` and exits. It runs as the bootstrap administrator, or as the service account
-if `KEYCLOAK_ADMIN_CLIENT_ID` and `KEYCLOAK_ADMIN_CLIENT_SECRET` are put in `.env`.
+the realm to `realm/` and exits. It runs as the service account once `KEYCLOAK_ADMIN_CLIENT_ID` is
+in `.env`, signing with `./keys/<that id>.pem`. Until then, on the first start only, it runs as
+the bootstrap administrator.
+
+**No client here holds a client secret** (`STD-IAM-001 §3.2`). Every confidential client on this
+server authenticates with its own key by signed JWT. That covers realm-apply's account,
+identity-control's clients, and the Identity Experience BFF. Two scripts manage the keys, and both
+run `client-key` from the realm-apply image, so the host needs Docker only:
+
+| Script | Does |
+| :-- | :-- |
+| `./new-client-key.sh NAME [DIR] [OWNER]` | Makes `DIR/NAME.pem`, mode 0600 and owned by the container user that signs with it, and `DIR/NAME.jwk.json`, its public half. It never overwrites a key. |
+| `./set-client-key.sh REALM CLIENT JWK [JWK]` | Sets an existing client to authenticate with exactly those public keys, two during a rotation. It regenerates the client's old secret without printing it. |
+
+**Moving an existing client from a secret to a key.** This applies to a server set up before keys:
+
+1. Make the key where the client runs.
+2. Run `./set-client-key.sh`.
+3. Point the client at its key and restart it.
+
+The client cannot authenticate between steps 2 and 3, so run them together. For realm-apply:
+
+```sh
+./new-client-key.sh realm-apply
+./set-client-key.sh master realm-apply keys/realm-apply.jwk.json
+# .env: keep KEYCLOAK_ADMIN_CLIENT_ID=realm-apply, delete KEYCLOAK_ADMIN_CLIENT_SECRET
+docker compose up -d
+```
+
+**Rotating a key.** Make the new pair and install both public keys, so the old and the new key
+are accepted together. Move the client to the new private key. Then install the new public key
+alone.
 
 To see a plan without changing anything, run from a clean checkout on your machine, from an
 address in `ADMIN_ALLOW_CIDRS`:
