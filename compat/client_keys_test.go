@@ -1,8 +1,9 @@
 package compat
 
-// Client key rotation, asked by identity-control: TDD-identity-control-003 §Credential Rotation
+// Client key rotation, asked by identity-control: TDD-identity-control-003 §Client Key Rotation
 // requires the old and new credential of a confidential or workload client to be valid together
-// through an overlap window, and the retiring one to stop working when it is revoked.
+// through an overlap window, and the retiring one to stop working when it is revoked. This test is
+// the evidence behind ADR-IAM-001 §5.12, and it keeps asserting it on every upgrade.
 //
 // A client secret cannot do that in this release without a preview feature: Keycloak holds one
 // secret per client, and its secret-rotation policy (`client-secret-rotation`) is classified

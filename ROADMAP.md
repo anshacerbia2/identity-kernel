@@ -135,9 +135,9 @@ unused.
 
 ### Client key rotation, asked by identity-control
 
-TDD-identity-control-003 §Credential Rotation requires a confidential or workload client's old and
-new credential to be valid together through an overlap window, and the retiring one to stop
-working when revoked. A client secret cannot do that in 26.7.4 without a preview feature:
+TDD-identity-control-003 required a confidential or workload client's old and new credential to be
+valid together through an overlap window, and the retiring one to stop working when revoked. It
+first specified client secrets. A client secret cannot do that in 26.7.4 without a preview feature:
 Keycloak holds one secret per client, and its secret-rotation policy (`client-secret-rotation`) is
 classified preview, "not recommended for use in production".
 
@@ -172,6 +172,18 @@ So identity-control can build rotation on supported features. The mechanism:
 No realm setting is needed. The keys are client attributes, which identity-control's registration
 credential already manages. The test deletes its client, and the suite's closing `realm-apply
 -require-in-sync` step passed.
+
+**The answer is now the decision.** The following record it:
+
+- `ADR-IAM-001 §5.12` and `STD-IAM-001 §3.2` in scnehaux-architecture: confidential and workload
+  clients authenticate with `private_key_jwt`, and client secrets are prohibited for registered
+  clients.
+- `TDD-identity-control-003` §Client Key Records and §Client Key Rotation.
+- `TDD-identity-kernel-002` §Scope, which puts client keys out of its custody: the kernel holds only
+  their public halves.
+
+The test stays in the suite. A release that stops honouring the overlap or the removal fails
+`compat/` rather than silently breaking rotation.
 
 **Exit:** a token signed by one replica verifies against every other replica; a replica
 with an empty secret-manager response exits non-zero and signs nothing.
