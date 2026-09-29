@@ -3,12 +3,12 @@ doc_meta:
   id: TDD-identity-kernel-002
   title: Signing Key Custody, Identity, and Rotation
   owner: Identity Platform Team
-  version: 1.0.0
+  version: 1.0.1
   status: approved
   classification: restricted
   review_cycle_days: 90
   created_date: 2026-08-11
-  last_reviewed: 2026-08-14
+  last_reviewed: 2026-09-30
   parent_sad: SAD-001
 ---
 
@@ -53,8 +53,11 @@ possibility rather than prohibiting the behavior.
 - Token lifetime classes, owned by STD-IAM-002.
 - Database, backup, and TLS certificate custody, which follow the enterprise secret
   and certificate lifecycle.
-- Client secrets and federation keys, which use the same custody mechanism but a
-  different lifecycle.
+- Federation keys, which use the same custody mechanism but a different lifecycle.
+- Client keys. A registered confidential or workload client authenticates with its own key
+  pair (`private_key_jwt`, `ADR-IAM-001 §5.12`). The client keeps the private key, and the
+  kernel holds only the public keys, as client attributes that `identity-control` registers
+  (`TDD-identity-control-003` §Client Key Rotation). Nothing here takes custody of them.
 
 ## Technical Context
 

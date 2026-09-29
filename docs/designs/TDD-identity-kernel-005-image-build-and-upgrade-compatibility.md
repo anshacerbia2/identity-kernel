@@ -3,12 +3,12 @@ doc_meta:
   id: TDD-identity-kernel-005
   title: Image Build, Digest Pinning, and Upgrade Compatibility
   owner: Identity Platform Team
-  version: 1.1.0
+  version: 1.1.1
   status: approved
   classification: restricted
   review_cycle_days: 90
   created_date: 2026-08-11
-  last_reviewed: 2026-08-14
+  last_reviewed: 2026-09-30
   parent_sad: SAD-001
 ---
 
@@ -228,9 +228,10 @@ about identity.
 | Realm application | pipeline only, above local development | ADR-IAM-001 §5.7 |
 | Promotion | same image digest across environments | EAD-005 §6.5 |
 
-The database credential, the client secrets, and the signing keystore are resolved at
-runtime from the approved secret manager and are never present in the image, in the
-realm export, or in the build context.
+The database credential, the administration client's credential, and the signing keystore
+are resolved at runtime from the approved secret manager and are never present in the
+image, in the realm export, or in the build context. Registered clients hold no secret in
+the kernel at all. They authenticate with registered public keys (`ADR-IAM-001 §5.12`).
 
 ## Testing Strategy
 
