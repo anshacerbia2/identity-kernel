@@ -154,8 +154,19 @@ application served on a tunnel port without such a proxy, one that checks its ow
 origin's host. A port reached only from code, such as a database or an API behind a BFF, needs
 neither flag.
 
-Four mistakes to avoid:
+Five mistakes to avoid:
 
+- **Do not set the realm's `sslRequired` to `none`.** `realm/` declares `external`, and it holds
+  in both modes. Keycloak judges whether a request is secure by the scheme of `KC_HOSTNAME`,
+  which is `https://` behind a DNS name and behind a tunnel alike, so every request passes. The
+  dev server once ran a local `none`. Its Keycloak was then reached over plain HTTP on Tailscale,
+  with `KC_HOSTNAME=http://…`. `external` exempts only RFC 1918 addresses, and Tailscale's
+  100.64.0.0/10 is not one of them, so every endpoint answered 403 "HTTPS required".
+  - The fix is TLS in front of Keycloak, as both modes here provide, not a realm that accepts
+    plain HTTP from anywhere.
+  - On 2026-09-30 the realm ran with `external` behind the tunnel. The public token endpoint, the
+    private port, and the private port with forged `X-Forwarded-For` and `X-Forwarded-Proto` all
+    passed the check, and a full login succeeded. The local `none` was then removed.
 - **`devtunnel host -p 8080 --allow-anonymous` creates a temporary tunnel.** Its ID, and
   therefore the issuer, is new every time the command restarts.
 - **`devtunnel create -a` makes every port anonymous, 8081 included.** Anonymous access must
