@@ -94,13 +94,31 @@ master realm, so the script sets it from `.env`. The `scnehaux` issuer is unaffe
 ```sh
 devtunnel user login -g -d                                # GitHub, device code
 devtunnel create scnehaux-dev                              # persistent: the host, and so the issuer, survive restarts
-devtunnel port create scnehaux-dev -p 8080 --protocol http
-devtunnel port create scnehaux-dev -p 8081 --protocol http
+devtunnel port create scnehaux-dev -p 8080 --protocol http --origin-header unchanged
+devtunnel port create scnehaux-dev -p 8081 --protocol http --origin-header unchanged
 devtunnel access create scnehaux-dev -p 8080 --anonymous   # -p is --port-number; --port is refused
 devtunnel host scnehaux-dev                               # prints the https URL for each port
 ```
 
-Three mistakes to avoid:
+**`--origin-header unchanged` is required on every port a browser reaches.** By default devtunnel
+replaces a browser's `Origin` with `http(s)://localhost`. Keycloak compares that origin with the
+client's web origins, so every browser application that signs in through the tunnel fails with
+`Invalid origin`: the Account Console, the Admin Console, and any BFF or SPA served on a tunnel
+port. For a port that already exists:
+
+```sh
+devtunnel port update scnehaux-dev -p 8080 --origin-header unchanged
+devtunnel port update scnehaux-dev -p 8081 --origin-header unchanged
+```
+
+devtunnel rewrites `Host` to `localhost` by default as well. Keycloak is unaffected: behind port
+8080, Caddy states the public host in `X-Forwarded-Host`, and `KC_HOSTNAME` fixes the issuer. An
+application served on a tunnel port without such a proxy, one that checks its own host, also needs
+`--host-header unchanged`. The Identity Experience BFF is one: it answers only on its public
+origin's host. A port reached only from code, such as a database or an API behind a BFF, needs
+neither flag.
+
+Four mistakes to avoid:
 
 - **`devtunnel host -p 8080 --allow-anonymous` creates a temporary tunnel.** Its ID, and
   therefore the issuer, is new every time the command restarts.
@@ -109,6 +127,10 @@ Three mistakes to avoid:
 - **Check an existing tunnel for tunnel-wide anonymous access** with
   `devtunnel access list <id>`. If it has it, clear it with `devtunnel access reset <id>`
   before granting port 8080.
+- **Do not run a local app on a forwarded port number.** A laptop app redirected to
+  `http://localhost:8080/...` has the redirect rewritten to the tunnel's own URL, so the browser
+  lands back on Keycloak rather than on the app. Identity Experience's BFF runs on
+  `127.0.0.1:8090` for this reason (its `scripts/dev-local.ps1`).
 
 A persistent tunnel still expires after a period without hosting. Keep `devtunnel host` running
 under a service manager such as systemd.
