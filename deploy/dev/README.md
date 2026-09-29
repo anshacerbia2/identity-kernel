@@ -78,12 +78,16 @@ docker compose up -d
 are accepted together. Move the client to the new private key. Then install the new public key
 alone.
 
-To see a plan without changing anything, run from a clean checkout on your machine, from an
-address in `ADMIN_ALLOW_CIDRS`:
+To see a plan without changing anything, run the job on the server without `-apply`:
 
 ```sh
-go run ./cmd/realm-apply -environment development -url https://<KEYCLOAK_HOSTNAME>   # no -apply: read only
+docker compose run --rm realm-apply -environment=development -definition=/repo/realm -url=http://keycloak:8080
 ```
+
+It runs in the container because it authenticates as the service account, whose key
+`./keys/realm-apply.pem` is readable by the container's user (65534) alone. That key never leaves the
+server. `go run ./cmd/realm-apply` from a host works only against a throwaway instance, as the
+bootstrap administrator.
 
 The issuer is then `https://<KEYCLOAK_HOSTNAME>/realms/scnehaux`.
 
@@ -175,8 +179,12 @@ devtunnel connect scnehaux-dev    # forwards 8080 and 8081 to localhost; keep it
 ```
 
 - **Admin Console:** `http://localhost:8081/admin`, or the tunnel's own URL for port 8081 in a browser (devtunnel asks for the owner's GitHub login), after setting `KEYCLOAK_ADMIN_URL` to that URL in `.env`
-- **Realm apply:** automatic on every `docker compose up`. For a read-only plan from your machine:
-  `go run ./cmd/realm-apply -environment development -url http://localhost:8081`
+- **Realm apply:** automatic on every `docker compose up`. For a read-only plan, run it on the
+  server, in its container:
+  `docker compose run --rm realm-apply -environment=development -definition=/repo/realm -url=http://keycloak:8080`.
+  Leaving out `-apply` makes it read only. It must run in the container, because the service account's key,
+  `./keys/realm-apply.pem`, belongs to the container's user (65534) and no other process can read
+  it. The key never leaves the server, so a laptop has no credential for this.
 - **Issuer for your apps:** `https://<KEYCLOAK_HOSTNAME>/realms/scnehaux`
 
 The tunnel host is the issuer. If the tunnel is recreated under another host, every token and
