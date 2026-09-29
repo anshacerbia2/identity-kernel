@@ -1,6 +1,10 @@
 # Local environment. Never committed: it holds this machine's credentials.
 .env
 
+# Client private keys made by deploy/dev/new-client-key.sh. They never leave the host that made them.
+keys/
+*.pem
+
 # Build and test output.
 *.out
 coverage

@@ -60,13 +60,18 @@ jobs:
           docker compose -f compose.yaml -f compose.ci.yaml logs --no-color realm-apply
           [ "$code" = "0" ] || { echo "::error::the realm-apply job exited $code"; exit 1; }
 
-      - name: create the realm-apply service account
-        run: bash ./create-apply-client.sh > "$RUNNER_TEMP/client.env"
+      # The key is owned by the runner here, because the check below runs realm-apply on the runner
+      # rather than in its container. On a server it belongs to the container's user, the default.
+      - name: create the realm-apply service account, with its key
+        run: |
+          bash ./new-client-key.sh realm-apply ./keys "$(id -u):$(id -g)"
+          bash ./create-apply-client.sh > "$RUNNER_TEMP/client.env"
 
       - name: the job left nothing to change, as the service account sees it
         working-directory: .
         run: |
           set -a; . "$RUNNER_TEMP/client.env"; set +a
+          export KEYCLOAK_ADMIN_CLIENT_KEY_FILE=deploy/dev/keys/realm-apply.pem
           go run ./cmd/realm-apply -environment development -url http://localhost:8080 -require-in-sync
 
       # The job must refuse drift, not overwrite it: a declared value changed in Keycloak by hand makes
@@ -159,8 +164,10 @@ jobs:
           docker compose -f compose.yaml -f compose.tunnel.yaml logs --no-color realm-apply
           [ "$code" = "0" ] || { echo "::error::the realm-apply job exited $code"; exit 1; }
 
-      - name: create the realm-apply service account
-        run: bash ./create-apply-client.sh > "$RUNNER_TEMP/client.env"
+      - name: create the realm-apply service account, with its key
+        run: |
+          bash ./new-client-key.sh realm-apply ./keys "$(id -u):$(id -g)"
+          bash ./create-apply-client.sh > "$RUNNER_TEMP/client.env"
 
       # The admin login, not just the console page. KC_HOSTNAME_ADMIN moves the console to the private
       # port, but the master realm's login is built from KC_HOSTNAME, so the form posts to the public
@@ -183,6 +190,9 @@ jobs:
         working-directory: .
         run: |
           set -a; . "$RUNNER_TEMP/client.env"; set +a
+          export KEYCLOAK_ADMIN_CLIENT_KEY_FILE=deploy/dev/keys/realm-apply.pem
+          # The master realm's frontend URL is now the private port, so the assertion's audience is
+          # not the address realm-apply reaches Keycloak on. Discovery supplies it.
           go run ./cmd/realm-apply -environment development -url http://localhost:8081 -require-in-sync
 
       - name: the public port serves the realm on the tunnel's issuer
