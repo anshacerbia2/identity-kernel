@@ -130,7 +130,8 @@ unused.
   The production hostname and realm name are therefore fixed together before the first token.
   Answered early because it is irreversible and cheap to ask
 - Questions 5, 6, 7 exercised and handed to the consuming repositories
-- ⏳ Client key rotation, asked by identity-control: see below
+- ✅ Client key rotation, asked by identity-control — **signed-JWT keys overlap and revoke at
+  once**; see below
 
 ### Client key rotation, asked by identity-control
 
@@ -150,8 +151,27 @@ The test covers four steps:
 3. With A removed, A is refused at once and B still authenticates.
 4. An assertion already used is refused.
 
-The answer decides whether identity-control builds credential issuance on keys or on secrets
-without overlap.
+**Answered.** Against `quay.io/keycloak/keycloak@sha256:82a77884…29b2c` (26.7.4) on 2026-09-29,
+compat run 36606481342, every step held:
+
+| Step | Accepted |
+| :-- | :-- |
+| A only registered, signed with A | yes |
+| A and B registered, signed with A | yes |
+| A and B registered, signed with B | yes |
+| A removed, signed with A | **no**: refused on the next request |
+| A removed, signed with B | yes |
+| The same assertion used twice | **no**: the second is refused |
+
+So identity-control can build rotation on supported features. The mechanism:
+
+- Rotation adds a key to the client's JWKS.
+- Revocation removes the key, and Keycloak refuses it on the next request.
+- A captured assertion cannot be replayed.
+
+No realm setting is needed. The keys are client attributes, which identity-control's registration
+credential already manages. The test deletes its client, and the suite's closing `realm-apply
+-require-in-sync` step passed.
 
 **Exit:** a token signed by one replica verifies against every other replica; a replica
 with an empty secret-manager response exits non-zero and signs nothing.
