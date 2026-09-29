@@ -130,6 +130,28 @@ unused.
   The production hostname and realm name are therefore fixed together before the first token.
   Answered early because it is irreversible and cheap to ask
 - Questions 5, 6, 7 exercised and handed to the consuming repositories
+- ⏳ Client key rotation, asked by identity-control: see below
+
+### Client key rotation, asked by identity-control
+
+TDD-identity-control-003 §Credential Rotation requires a confidential or workload client's old and
+new credential to be valid together through an overlap window, and the retiring one to stop
+working when revoked. A client secret cannot do that in 26.7.4 without a preview feature:
+Keycloak holds one secret per client, and its secret-rotation policy (`client-secret-rotation`) is
+classified preview, "not recommended for use in production".
+
+`compat/client_keys_test.go` asks whether signed-JWT client authentication (`private_key_jwt`,
+RFC 7523), a supported feature, gives both instead. The client's public keys are held as a JWKS on
+the client, so identity-control registers them and no application has to serve a key endpoint.
+The test covers four steps:
+
+1. A client authenticates with key A.
+2. With A and B both registered, each authenticates.
+3. With A removed, A is refused at once and B still authenticates.
+4. An assertion already used is refused.
+
+The answer decides whether identity-control builds credential issuance on keys or on secrets
+without overlap.
 
 **Exit:** a token signed by one replica verifies against every other replica; a replica
 with an empty secret-manager response exits non-zero and signs nothing.
