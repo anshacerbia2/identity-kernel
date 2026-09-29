@@ -130,6 +130,48 @@ unused.
   The production hostname and realm name are therefore fixed together before the first token.
   Answered early because it is irreversible and cheap to ask
 - Questions 5, 6, 7 exercised and handed to the consuming repositories
+- ✅ Client key rotation, asked by identity-control — **signed-JWT keys overlap and revoke at
+  once**; see below
+
+### Client key rotation, asked by identity-control
+
+TDD-identity-control-003 §Credential Rotation requires a confidential or workload client's old and
+new credential to be valid together through an overlap window, and the retiring one to stop
+working when revoked. A client secret cannot do that in 26.7.4 without a preview feature:
+Keycloak holds one secret per client, and its secret-rotation policy (`client-secret-rotation`) is
+classified preview, "not recommended for use in production".
+
+`compat/client_keys_test.go` asks whether signed-JWT client authentication (`private_key_jwt`,
+RFC 7523), a supported feature, gives both instead. The client's public keys are held as a JWKS on
+the client, so identity-control registers them and no application has to serve a key endpoint.
+The test covers four steps:
+
+1. A client authenticates with key A.
+2. With A and B both registered, each authenticates.
+3. With A removed, A is refused at once and B still authenticates.
+4. An assertion already used is refused.
+
+**Answered.** Against `quay.io/keycloak/keycloak@sha256:82a77884…29b2c` (26.7.4) on 2026-09-29,
+compat run 36606481342, every step held:
+
+| Step | Accepted |
+| :-- | :-- |
+| A only registered, signed with A | yes |
+| A and B registered, signed with A | yes |
+| A and B registered, signed with B | yes |
+| A removed, signed with A | **no**: refused on the next request |
+| A removed, signed with B | yes |
+| The same assertion used twice | **no**: the second is refused |
+
+So identity-control can build rotation on supported features. The mechanism:
+
+- Rotation adds a key to the client's JWKS.
+- Revocation removes the key, and Keycloak refuses it on the next request.
+- A captured assertion cannot be replayed.
+
+No realm setting is needed. The keys are client attributes, which identity-control's registration
+credential already manages. The test deletes its client, and the suite's closing `realm-apply
+-require-in-sync` step passed.
 
 **Exit:** a token signed by one replica verifies against every other replica; a replica
 with an empty secret-manager response exits non-zero and signs nothing.
