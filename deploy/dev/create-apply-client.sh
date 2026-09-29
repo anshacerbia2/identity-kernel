@@ -52,7 +52,7 @@ kcadm add-roles -r master --uusername "service-account-$client_id" --rolename ad
 
 # The key is installed by the same tool every client uses, which also regenerates, unprinted, the
 # secret Keycloak gave the new client by default.
-./set-client-key.sh master "$client_id" "$jwk"
+./set-client-key.sh master "$client_id" "$jwk" >&2
 
 # stdout carries only the .env line, so it can be appended or sourced as it is.
 echo "Put this in .env, then docker compose up -d:" >&2
