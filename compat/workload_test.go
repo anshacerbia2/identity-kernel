@@ -13,9 +13,8 @@ package compat
 //     acr=1 in a client credentials token. A workload client therefore does not hold it:
 //     identity-control detaches it at registration, and this test detaches it the same way.
 //
-// For the first: So the claim-source attributes a workload's token carries are the attributes
-// of that service-account user, and this test writes them there, as identity-control must. It is
-// the question 1 evidence for the workload profile, which TDD-identity-kernel-001 left open until
+// Because of the first, a workload's claim-source attributes are those of its service-account user,
+// and this test writes them there, as identity-control must. It is the question 1 evidence for the workload profile, which TDD-identity-kernel-001 left open until
 // the workload path was built.
 
 import (
