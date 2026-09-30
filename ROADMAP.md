@@ -227,7 +227,7 @@ user's refresh token and a service-account token:
 8. After the deletion, a new client with the same `clientId` is accepted.
 
 **Answered.** Against `quay.io/keycloak/keycloak@sha256:82a77884…29b2c` (26.7.4) on 2026-09-30,
-compat run 36765130059, every required step held:
+compat run 36765561606, every required step held:
 
 | Step | Observed | Required |
 | :-- | :-- | :-- |
@@ -237,6 +237,8 @@ compat run 36765130059, every required step held:
 | Disabled: the access token issued before verifies offline | yes | yes |
 | Enabled again: client credentials | yes | yes |
 | Enabled again: the refresh token issued before | **yes** | recorded |
+| Not-before set while disabled, enabled again: the refresh token issued before | **no** | no |
+| Not-before set while disabled, enabled again: a new sign-in and its refresh | yes | yes |
 | Deleted: client credentials | **no** | no |
 | Deleted: the refresh token issued before | **no** | no |
 | Deleted: the access token issued before verifies offline | yes | yes |
@@ -247,8 +249,9 @@ The two recorded answers are design inputs for identity-control:
 
 - **A disable pauses a client's sessions; it does not end them.** A refresh token refused while the
   client was disabled is accepted again once it is enabled. So a suspension that contains a
-  compromised client cannot rest on the disable alone, and TDD-identity-control-003 decides what
-  else `:suspend` does.
+  compromised client cannot rest on the disable alone. Setting the client's not-before while it is
+  disabled does end them: the refresh token from before stays refused once the client is enabled
+  again, and a new sign-in works. TDD-identity-control-003 decides whether `:suspend` sets it.
 - **Deleting a client deletes its service-account user.** A workload's Keycloak user is that user
   (TDD-identity-kernel-001 §Claim Projection), so retiring a workload's client removes the
   workload's projection in the kernel as well, and TDD-identity-control-004 has to retire the
