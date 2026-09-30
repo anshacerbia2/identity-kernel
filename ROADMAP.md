@@ -60,6 +60,18 @@ and context switch mechanism — are exercised here but decided in `identity-con
   STD-IAM-002 §3.2.1 requires. It is what identity-control accepts to mint a Principal, and `compat/`
   asserts it with a real Authorization Code + PKCE login, because `auth_time` exists only for one
 
+- ✅ The workload profile — `scnehaux-workload`, carrying `principal_id`, `subject_type` and
+  `workload_owner` (STD-IAM-002 §3.2.1). A workload's token comes from the client credentials grant
+  and is issued for its client's service-account user, so identity-control writes the workload's
+  attributes there. The built-in `acr` scope, a realm default, puts `acr=1` in that token, which
+  STD-IAM-002 prohibits for a workload, so identity-control detaches it from a workload client
+  (compat run 36739171569 found it). `compat/workload_test.go` asserts the token with a real
+  key-signed grant and the scope detached, and that `workload_owner` reaches no internal token
+  (first passing run 36739629606, 26.7.4). It unblocks workload registration in
+  identity-control (TDD-identity-control-003) and TDD-identity-control-004. The tenant-scoped
+  privileged scope is still undeclared: it needs `tenant_id` and the version claims, which wait on
+  the context projection (questions 5 to 7)
+
 **Exit:** the declared realm contract is asserted by test — issuer form, claim presence
 per covered surface, and the four closed creation paths.
 

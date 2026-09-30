@@ -3,12 +3,12 @@ doc_meta:
   id: TDD-identity-kernel-001
   title: Realm Topology, Issuer Identity, and Token Claim Projection
   owner: Identity Platform Team
-  version: 1.6.0
+  version: 1.7.0
   status: approved
   classification: restricted
   review_cycle_days: 90
   created_date: 2026-08-11
-  last_reviewed: 2026-09-25
+  last_reviewed: 2026-09-30
   parent_sad: SAD-001
 ---
 
@@ -169,6 +169,26 @@ ceremony, and like every `scnehaux_*` attribute it is admin-managed and not user
 `auth_time` exists only for an authentication ceremony, so a direct grant cannot produce a
 conformant provider token. No enterprise mapper is attached as a realm default, because doing so
 would leak stable correlation and Tenant context into external tokens.
+
+`scnehaux-workload` is the workload profile. It carries `principal_id`, `subject_type` and
+`workload_owner`, and never `acr`, `auth_time`, `provider_scope` or, until the context projection
+exists, any Tenant claim. **A workload's claim-source attributes live on its client's
+service-account user.** A workload authenticates as its own client with the client credentials
+grant and a registered key (`ADR-IAM-001 §5.12`), and that grant issues its token for the
+client's service-account user, the user Keycloak creates with the client. No other user's
+attributes reach the token. identity-control therefore writes `scnehaux_principal_id`,
+`scnehaux_subject_type=workload` and `scnehaux_workload_owner` on that user, under the same
+declared profile as a human's. `workload_owner` is mapped by this scope alone, so a human who came
+to hold the attribute still receives no `workload_owner` claim.
+
+**A workload client does not hold the built-in `acr` scope.** Keycloak makes `acr` a realm default
+client scope, so every new client holds it, and it puts `acr=1` into a client credentials token,
+which STD-IAM-002 §3.2 prohibits for a workload. identity-control detaches it when it registers a
+workload (`TDD-identity-control-003`). The realm default is left as it is: removing it would change
+every client created after, and a provider token's `acr` comes from `scnehaux-provider` either way.
+`compat/workload_test.go` asserts the workload token, the detachment included, and the absence of
+`workload_owner` from an internal token. The tenant-scoped workload form waits on the context projection, as `tenant_id` does for
+every profile.
 
 | Surface | Requirement |
 | :-- | :-- |
@@ -527,8 +547,9 @@ standard amendment.
    introspection can carry each audience profile's required claim set through supported
    mappers. Any mandatory access-token claim uncovered is the escalation case.
    **Answered 2026-09-25: outcome 1, all four covered** — see §Claim Projection. Answered for
-   the internal human profile; the workload profile's `workload_owner` is exercised when the
-   workload path is built.
+   the internal human profile first. The workload profile's access token is asserted by
+   `compat/workload_test.go`: `principal_id`, `subject_type` and `workload_owner` from the
+   service-account user, and no `acr`, `auth_time` or Tenant claim.
 2. **Attribute search semantics.** Whether `q=scnehaux_principal_id:{id}` is
    exact-match and how it paginates. Determines the recovery mechanism in
    `TDD-identity-control-001`; the creation path is unaffected either way.
