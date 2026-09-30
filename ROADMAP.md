@@ -144,8 +144,9 @@ unused.
 - Questions 5, 6, 7 exercised and handed to the consuming repositories
 - ✅ Client key rotation, asked by identity-control — **signed-JWT keys overlap and revoke at
   once**; see below
-- ⏳ RFC 9068 access tokens, asked by STD-IAM-002 §3.2 — the `at+jwt` header and the RFC 9068
-  claims, for a user's token and a workload's; see below
+- ✅ RFC 9068 access tokens, asked by STD-IAM-002 §3.2 — **the kernel issues them once a client
+  carries the `at+jwt` attribute and a `client_id` mapper**; the realm's built-in default scopes put
+  claims the claim closure prohibits into both tokens; see below
 - ✅ Client suspension and deletion, asked by identity-control — **a disabled or deleted client
   gets no new token and no refresh**; an access token issued before verifies offline until it
   expires; see below
@@ -219,6 +220,36 @@ read from its source, decide who realizes it:
 and a workload's then conform, and whether the ID token stays distinguishable. It records, without
 requiring, whether the built-in scope alone gives a workload token its `client_id`, and every claim
 name the kernel issues, which STD-IAM-002's claim closure is measured against.
+
+**Answered.** Against `quay.io/keycloak/keycloak@sha256:82a77884…29b2c` (26.7.4) on 2026-09-30,
+compat run 36775603547, every required step held:
+
+| Step | Observed | Required |
+| :-- | :-- | :-- |
+| Realm alone: a workload token carries `client_id` | yes | recorded |
+| Realm alone: the header `typ` is `at+jwt` | **no** | recorded |
+| Workload token: `typ` `at+jwt`, PS256, the seven claims, `client_id` names the client | yes | yes |
+| User token: `typ` `at+jwt`, PS256, the seven claims, `client_id` names the client | yes | yes |
+| The ID token's `typ` is not `at+jwt` | yes | yes |
+
+So identity-control can make every token it registers a client for an RFC 9068 token: the
+attribute for the header, and the mapper for a user's `client_id`. A workload's `client_id` also
+comes from the built-in `service_account` scope.
+
+**The claim list is the finding that matters.** A client made in this realm holds Keycloak's
+built-in default scopes, because `realm/` does not declare the realm's default client scopes, and
+they put into its tokens:
+
+| Token | Claims beyond STD-IAM-002 §3.2 and RFC 9068 §2.2 |
+| :-- | :-- |
+| User | `email`, `email_verified`, `name`, `given_name`, `family_name`, `preferred_username`, `realm_access`, `resource_access`, `acr`, `azp`, `sid`, `typ` |
+| Workload | `clientHost`, `clientAddress`, `email_verified`, `preferred_username`, `realm_access`, `resource_access`, `acr`, `azp`, `typ` |
+
+Some come from scopes the realm attaches by default (`profile`, `email`, `roles`, and
+`service_account`'s client address), and some Keycloak writes itself (`azp`, `sid`, `typ`).
+STD-IAM-002 §3.2 prohibits personal data beyond what the audience requires and any claim it does
+not define, so the next step is a decision on both groups, recorded in STD-IAM-002 and realized in
+`realm/` and in identity-control. The test stays in the suite, and its claim list shows the effect.
 
 ### Client suspension and deletion, asked by identity-control
 
