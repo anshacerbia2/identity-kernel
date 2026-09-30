@@ -12,7 +12,9 @@ package compat
 //
 // Two answers are recorded and not required, because either is a design input rather than a
 // defect: whether a refresh token survives a disable and re-enable, and whether deleting a client
-// deletes its service-account user.
+// deletes its service-account user. Because the first is yes, the test also asks whether setting the
+// client's not-before while it is disabled ends the tokens issued before, so a suspension can
+// contain a client rather than pause it.
 
 import (
 	"crypto"
@@ -110,6 +112,22 @@ func TestASuspendedOrDeletedClientGetsNoNewToken(t *testing.T) {
 	require("enabled again: client credentials", ok, true, body)
 	ok, _ = refresh(session.RefreshToken)
 	record("enabled again: the refresh token issued before", ok)
+
+	// A client's not-before is Keycloak's revocation of every token it was issued before that time.
+	// Its unit is a second, and a token issued in the same second as the not-before is not before it,
+	// so the not-before is set a second after the session's tokens.
+	session = passwordGrantWithKey(t, a, clientID, key, user)
+	time.Sleep(1100 * time.Millisecond)
+	updateClient(t, a, clientUUID, func(c map[string]any) {
+		c["enabled"] = false
+		c["notBefore"] = time.Now().Unix()
+	})
+	updateClient(t, a, clientUUID, func(c map[string]any) { c["enabled"] = true })
+	ok, body = refresh(session.RefreshToken)
+	require("not-before set while disabled, enabled again: the refresh token issued before", ok, false, body)
+	fresh := passwordGrantWithKey(t, a, clientID, key, user)
+	ok, body = refresh(fresh.RefreshToken)
+	require("not-before set while disabled, enabled again: a new sign-in and its refresh", ok, true, body)
 
 	// A fresh session, so the deletion is asked of a refresh token that was valid a moment before.
 	session = passwordGrantWithKey(t, a, clientID, key, user)

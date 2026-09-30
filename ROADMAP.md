@@ -217,6 +217,9 @@ user's refresh token and a service-account token:
 3. Disabled, an access token issued before still verifies offline, until it expires.
 4. Enabled again, the client gets a token again. Whether the refresh token from before works again
    is recorded, not required: it decides whether a restored BFF's users sign in again.
+   - With the client's not-before set while it was disabled, the refresh token from before is
+     refused once it is enabled again, and a new sign-in works. Asked because the answer to 4 is
+     yes (below): it is how a suspension ends what it paused.
 5. Deleted, it gets no token, and its refresh token is refused.
 6. Deleted, an access token issued before still verifies offline.
 7. Deleted, its service-account user is gone with it. Recorded, not required: it decides what a
