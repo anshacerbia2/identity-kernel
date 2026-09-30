@@ -179,8 +179,15 @@ client's service-account user, the user Keycloak creates with the client. No oth
 attributes reach the token. identity-control therefore writes `scnehaux_principal_id`,
 `scnehaux_subject_type=workload` and `scnehaux_workload_owner` on that user, under the same
 declared profile as a human's. `workload_owner` is mapped by this scope alone, so a human who came
-to hold the attribute still receives no `workload_owner` claim. `compat/workload_test.go` asserts
-both. The tenant-scoped workload form waits on the context projection, as `tenant_id` does for
+to hold the attribute still receives no `workload_owner` claim.
+
+**A workload client does not hold the built-in `acr` scope.** Keycloak makes `acr` a realm default
+client scope, so every new client holds it, and it puts `acr=1` into a client credentials token,
+which STD-IAM-002 §3.2 prohibits for a workload. identity-control detaches it when it registers a
+workload (`TDD-identity-control-003`). The realm default is left as it is: removing it would change
+every client created after, and a provider token's `acr` comes from `scnehaux-provider` either way.
+`compat/workload_test.go` asserts the workload token, the detachment included, and the absence of
+`workload_owner` from an internal token. The tenant-scoped workload form waits on the context projection, as `tenant_id` does for
 every profile.
 
 | Surface | Requirement |

@@ -5,8 +5,15 @@ package compat
 // grant (ADR-IAM-001 §5.12). STD-IAM-002 §3.2 requires its access token to carry principal_id,
 // subject_type=workload and workload_owner, and never acr, auth_time or any Tenant claim.
 //
-// A token from the client credentials grant is issued for the client's service-account user, not
-// for any other user. So the claim-source attributes a workload's token carries are the attributes
+// Two things about the kernel decide how a workload is registered, and this test pins both:
+//
+//   - A token from the client credentials grant is issued for the client's service-account user, not
+//     for any other user.
+//   - The realm's built-in acr scope is a realm default, so every new client holds it, and it puts
+//     acr=1 in a client credentials token. A workload client therefore does not hold it:
+//     identity-control detaches it at registration, and this test detaches it the same way.
+//
+// For the first: So the claim-source attributes a workload's token carries are the attributes
 // of that service-account user, and this test writes them there, as identity-control must. It is
 // the question 1 evidence for the workload profile, which TDD-identity-kernel-001 left open until
 // the workload path was built.
@@ -33,6 +40,7 @@ func TestAWorkloadTokenMeetsTheContract(t *testing.T) {
 		nil, http.StatusNoContent); err != nil {
 		t.Fatalf("attaching scnehaux-workload: %v", err)
 	}
+	detachDefaultScope(t, a, clientUUID, "acr")
 
 	principalID, owner := uuidV7(), uuidV7()
 	serviceAccount := writeWorkloadIdentity(t, a, clientUUID, principalID, owner)
@@ -149,4 +157,28 @@ func writeWorkloadIdentity(t *testing.T, a *admin, clientUUID, principalID, owne
 		}
 	}
 	return userID
+}
+
+// detachDefaultScope removes a default client scope from a client, as identity-control does for the
+// built-in scopes a profile must not carry. A scope the client does not hold is not an error: a
+// release that stopped attaching it by default has nothing to detach.
+func detachDefaultScope(t *testing.T, a *admin, clientUUID, name string) {
+	t.Helper()
+	var attached []struct {
+		ID   string `json:"id"`
+		Name string `json:"name"`
+	}
+	path := "/admin/realms/" + realmName + "/clients/" + clientUUID + "/default-client-scopes"
+	if err := a.getJSON(path, &attached); err != nil {
+		t.Fatalf("reading the client's default scopes: %v", err)
+	}
+	for _, scope := range attached {
+		if scope.Name != name {
+			continue
+		}
+		t.Logf("the realm attached its %s scope to a new client by default; detaching it", name)
+		if _, err := a.call(http.MethodDelete, path+"/"+scope.ID, nil, http.StatusNoContent); err != nil {
+			t.Fatalf("detaching %s: %v", name, err)
+		}
+	}
 }
