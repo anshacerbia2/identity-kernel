@@ -144,6 +144,8 @@ unused.
 - Questions 5, 6, 7 exercised and handed to the consuming repositories
 - ✅ Client key rotation, asked by identity-control — **signed-JWT keys overlap and revoke at
   once**; see below
+- ⏳ RFC 9068 access tokens, asked by STD-IAM-002 §3.2 — the `at+jwt` header and the RFC 9068
+  claims, for a user's token and a workload's; see below
 - ✅ Client suspension and deletion, asked by identity-control — **a disabled or deleted client
   gets no new token and no refresh**; an access token issued before verifies offline until it
   expires; see below
@@ -199,6 +201,24 @@ credential already manages. The test deletes its client, and the suite's closing
 
 The test stays in the suite. A release that stops honouring the overlap or the removal fails
 `compat/` rather than silently breaking rotation.
+
+### RFC 9068 access tokens, asked by STD-IAM-002
+
+STD-IAM-002 §3.2 makes every access token an RFC 9068 token: header `typ` `at+jwt`, and the claims
+`iss`, `exp`, `aud`, `sub`, `client_id`, `iat` and `jti`. §3.5 has a verifier refuse any other
+type, which is what keeps an ID token from passing as an access token. Two properties of 26.7.4,
+read from its source, decide who realizes it:
+
+- The `at+jwt` header is a per-client attribute, `access.token.header.type.rfc9068`, off by
+  default (Keycloak 26.2 release notes, "New client configuration for access token header type").
+  identity-control sets it on every client it registers.
+- `client_id` reaches a service-account token through the built-in `service_account` scope, and
+  nothing puts it in a user's token. identity-control adds a hardcoded claim mapper per client.
+
+`compat/rfc9068_test.go` sets both the way identity-control will and asks whether a user's token
+and a workload's then conform, and whether the ID token stays distinguishable. It records, without
+requiring, whether the built-in scope alone gives a workload token its `client_id`, and every claim
+name the kernel issues, which STD-IAM-002's claim closure is measured against.
 
 ### Client suspension and deletion, asked by identity-control
 
