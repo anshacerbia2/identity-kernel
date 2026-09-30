@@ -144,6 +144,9 @@ unused.
 - Questions 5, 6, 7 exercised and handed to the consuming repositories
 - ✅ Client key rotation, asked by identity-control — **signed-JWT keys overlap and revoke at
   once**; see below
+- ✅ Client suspension and deletion, asked by identity-control — **a disabled or deleted client
+  gets no new token and no refresh**; an access token issued before verifies offline until it
+  expires; see below
 
 ### Client key rotation, asked by identity-control
 
@@ -196,6 +199,64 @@ credential already manages. The test deletes its client, and the suite's closing
 
 The test stays in the suite. A release that stops honouring the overlap or the removal fails
 `compat/` rather than silently breaking rotation.
+
+### Client suspension and deletion, asked by identity-control
+
+TDD-identity-control-003 is to stop a registered client in two ways. `:suspend` disables its
+Keycloak client and can be undone by `:restore`. `:retire` removes its keys and deletes the client,
+so its `client_key` can be registered again. Both rest on what the kernel does to a client that is
+disabled or deleted, and to the tokens it already holds. Consumers verify an access token locally
+(STD-IAM-002), so a token issued before the stop is outside the kernel's reach until it expires,
+and the design has to say so rather than assume it.
+
+`compat/client_lifecycle_test.go` asks it of a client that authenticates by signed JWT, holding a
+user's refresh token and a service-account token:
+
+1. Disabled, the client gets no token by the client credentials grant.
+2. Disabled, the refresh token it holds is refused.
+3. Disabled, an access token issued before still verifies offline, until it expires.
+4. Enabled again, the client gets a token again. Whether the refresh token from before works again
+   is recorded, not required: it decides whether a restored BFF's users sign in again.
+   - With the client's not-before set while it was disabled, the refresh token from before is
+     refused once it is enabled again, and a new sign-in works. Asked because the answer to 4 is
+     yes (below): it is how a suspension ends what it paused.
+5. Deleted, it gets no token, and its refresh token is refused.
+6. Deleted, an access token issued before still verifies offline.
+7. Deleted, its service-account user is gone with it. Recorded, not required: it decides what a
+   workload's retirement leaves behind.
+8. After the deletion, a new client with the same `clientId` is accepted.
+
+**Answered.** Against `quay.io/keycloak/keycloak@sha256:82a77884…29b2c` (26.7.4) on 2026-09-30,
+compat run 36765130059, every required step held:
+
+| Step | Observed | Required |
+| :-- | :-- | :-- |
+| Enabled: client credentials | yes | yes |
+| Disabled: client credentials | **no** | no |
+| Disabled: the refresh token issued before | **no** | no |
+| Disabled: the access token issued before verifies offline | yes | yes |
+| Enabled again: client credentials | yes | yes |
+| Enabled again: the refresh token issued before | **yes** | recorded |
+| Deleted: client credentials | **no** | no |
+| Deleted: the refresh token issued before | **no** | no |
+| Deleted: the access token issued before verifies offline | yes | yes |
+| Deleted: the service-account user is gone | **yes** | recorded |
+| After deletion: a new client with the same `clientId` | yes | yes |
+
+The two recorded answers are design inputs for identity-control:
+
+- **A disable pauses a client's sessions; it does not end them.** A refresh token refused while the
+  client was disabled is accepted again once it is enabled. So a suspension that contains a
+  compromised client cannot rest on the disable alone, and TDD-identity-control-003 decides what
+  else `:suspend` does.
+- **Deleting a client deletes its service-account user.** A workload's Keycloak user is that user
+  (TDD-identity-kernel-001 §Claim Projection), so retiring a workload's client removes the
+  workload's projection in the kernel as well, and TDD-identity-control-004 has to retire the
+  workload with it.
+
+An access token issued before either stop is outside the kernel's reach until it expires, which the
+lifetime class bounds (STD-IAM-002 §3.3). The test stays in the suite, so a release that changes any
+required answer fails `compat/`.
 
 ✅ **This repository's own client uses a key.** realm-apply's master-realm service account
 authenticates by signed JWT:
