@@ -125,6 +125,65 @@
     ]
   },
   {
+    "name": "scnehaux-workload",
+    "description": "STD-IAM-002 workload profile. Carries principal_id, subject_type and workload_owner, read from the workload client's service-account user; never acr or auth_time. Never a realm default.",
+    "protocol": "openid-connect",
+    "attributes": {
+      "include.in.token.scope": "true",
+      "display.on.consent.screen": "false"
+    },
+    "protocolMappers": [
+      {
+        "name": "principal_id",
+        "protocol": "openid-connect",
+        "protocolMapper": "oidc-usermodel-attribute-mapper",
+        "config": {
+          "user.attribute": "scnehaux_principal_id",
+          "claim.name": "principal_id",
+          "jsonType.label": "String",
+          "multivalued": "false",
+          "aggregate.attrs": "false",
+          "access.token.claim": "true",
+          "id.token.claim": "true",
+          "userinfo.token.claim": "true",
+          "introspection.token.claim": "true"
+        }
+      },
+      {
+        "name": "subject_type",
+        "protocol": "openid-connect",
+        "protocolMapper": "oidc-usermodel-attribute-mapper",
+        "config": {
+          "user.attribute": "scnehaux_subject_type",
+          "claim.name": "subject_type",
+          "jsonType.label": "String",
+          "multivalued": "false",
+          "aggregate.attrs": "false",
+          "access.token.claim": "true",
+          "id.token.claim": "true",
+          "userinfo.token.claim": "true",
+          "introspection.token.claim": "true"
+        }
+      },
+      {
+        "name": "workload_owner",
+        "protocol": "openid-connect",
+        "protocolMapper": "oidc-usermodel-attribute-mapper",
+        "config": {
+          "user.attribute": "scnehaux_workload_owner",
+          "claim.name": "workload_owner",
+          "jsonType.label": "String",
+          "multivalued": "false",
+          "aggregate.attrs": "false",
+          "access.token.claim": "true",
+          "id.token.claim": "true",
+          "userinfo.token.claim": "true",
+          "introspection.token.claim": "true"
+        }
+      }
+    ]
+  },
+  {
     "name": "scnehaux-external",
     "description": "External relying parties. Carries no enterprise or context claim, by construction.",
     "protocol": "openid-connect",
