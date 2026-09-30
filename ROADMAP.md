@@ -144,6 +144,8 @@ unused.
 - Questions 5, 6, 7 exercised and handed to the consuming repositories
 - ✅ Client key rotation, asked by identity-control — **signed-JWT keys overlap and revoke at
   once**; see below
+- ⏳ Client suspension and deletion, asked by identity-control — what a disabled and a deleted
+  client can still do; see below
 
 ### Client key rotation, asked by identity-control
 
@@ -196,6 +198,29 @@ credential already manages. The test deletes its client, and the suite's closing
 
 The test stays in the suite. A release that stops honouring the overlap or the removal fails
 `compat/` rather than silently breaking rotation.
+
+### Client suspension and deletion, asked by identity-control
+
+TDD-identity-control-003 is to stop a registered client in two ways. `:suspend` disables its
+Keycloak client and can be undone by `:restore`. `:retire` removes its keys and deletes the client,
+so its `client_key` can be registered again. Both rest on what the kernel does to a client that is
+disabled or deleted, and to the tokens it already holds. Consumers verify an access token locally
+(STD-IAM-002), so a token issued before the stop is outside the kernel's reach until it expires,
+and the design has to say so rather than assume it.
+
+`compat/client_lifecycle_test.go` asks it of a client that authenticates by signed JWT, holding a
+user's refresh token and a service-account token:
+
+1. Disabled, the client gets no token by the client credentials grant.
+2. Disabled, the refresh token it holds is refused.
+3. Disabled, an access token issued before still verifies offline, until it expires.
+4. Enabled again, the client gets a token again. Whether the refresh token from before works again
+   is recorded, not required: it decides whether a restored BFF's users sign in again.
+5. Deleted, it gets no token, and its refresh token is refused.
+6. Deleted, an access token issued before still verifies offline.
+7. Deleted, its service-account user is gone with it. Recorded, not required: it decides what a
+   workload's retirement leaves behind.
+8. After the deletion, a new client with the same `clientId` is accepted.
 
 ✅ **This repository's own client uses a key.** realm-apply's master-realm service account
 authenticates by signed JWT:
