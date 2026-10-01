@@ -106,3 +106,157 @@ jobs:
       - name: Keycloak log
         if: failure()
         run: docker logs keycloak
+
+  # The rollback boundary, determined by attempting the downgrade (TDD-identity-kernel-005
+  # §Determining the Rollback Boundary). On PostgreSQL, the database every server runs: the
+  # in-process database start-dev uses in the job above is not one anybody upgrades. The previous
+  # release creates the database, the candidate upgrades it, and the previous release is started on
+  # what the candidate left. The job summary is the release record.
+  upgrade:
+    runs-on: ubuntu-latest
+
+    env:
+      KEYCLOAK_URL: http://localhost:8080
+      KEYCLOAK_ADMIN_USER: admin
+      KEYCLOAK_ADMIN_PASSWORD: admin
+      PGHOST: localhost
+      PGUSER: keycloak
+      PGPASSWORD: keycloak
+      PGDATABASE: keycloak
+
+    services:
+      postgres:
+        # postgres:17.11-alpine, the digest deploy/dev/compose.yaml runs.
+        image: postgres@sha256:b0f9560a2de083e2cc7382e75f808c7381a32852a7ec49117deedb300e552b24
+        env:
+          POSTGRES_USER: keycloak
+          POSTGRES_PASSWORD: keycloak
+          POSTGRES_DB: keycloak
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U keycloak -d keycloak"
+          --health-interval 5s --health-timeout 3s --health-retries 30
+
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+
+      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          check-latest: false
+
+      - name: read the candidate and the previous release
+        run: |
+          ref() { grep -v '^[[:space:]]*#' "$1" | grep -v '^[[:space:]]*$' | head -n 1 | tr -d '[:space:]'; }
+          candidate="$(ref image/keycloak.ref)"
+          previous="$(ref image/keycloak.previous.ref)"
+          for r in "$candidate" "$previous"; do
+            if ! printf '%s' "$r" | grep -Eq '@sha256:[0-9a-f]{64}$'; then
+              echo "::error::both references must pin by sha256 digest, found '$r'"
+              exit 1
+            fi
+          done
+          if [ "$candidate" = "$previous" ]; then
+            echo "::error::image/keycloak.previous.ref equals image/keycloak.ref; it names the release this one replaces"
+            exit 1
+          fi
+          echo "CANDIDATE=$candidate" >> "$GITHUB_ENV"
+          echo "PREVIOUS=$previous" >> "$GITHUB_ENV"
+
+      # One Keycloak at a time, on the host network so it reaches the service's port. start-dev for
+      # the reason the job above gives; the migrations a release applies are the same under start.
+      - name: write the Keycloak helpers
+        run: |
+          cat > "$RUNNER_TEMP/keycloak.sh" <<'SH'
+          start() {
+            docker run -d --name keycloak --network host \
+              -e KC_DB=postgres -e KC_DB_URL=jdbc:postgresql://localhost:5432/keycloak \
+              -e KC_DB_USERNAME=keycloak -e KC_DB_PASSWORD=keycloak \
+              -e KC_BOOTSTRAP_ADMIN_USERNAME="$KEYCLOAK_ADMIN_USER" \
+              -e KC_BOOTSTRAP_ADMIN_PASSWORD="$KEYCLOAK_ADMIN_PASSWORD" \
+              -e KC_HEALTH_ENABLED=true \
+              "$1" start-dev >/dev/null
+          }
+          ready() {
+            for i in $(seq 1 90); do
+              if curl -fsS http://localhost:9000/health/ready >/dev/null 2>&1; then return 0; fi
+              if [ "$(docker inspect -f '{{.State.Running}}' keycloak)" != "true" ]; then return 1; fi
+              sleep 2
+            done
+            return 1
+          }
+          stop() {
+            docker logs keycloak > "$RUNNER_TEMP/keycloak-$1.log" 2>&1 || true
+            docker rm -f keycloak >/dev/null
+          }
+          changesets() { psql -Atc "SELECT id FROM databasechangelog ORDER BY id"; }
+          SH
+
+      - name: the previous release creates the database and the realm
+        run: |
+          . "$RUNNER_TEMP/keycloak.sh"
+          start "$PREVIOUS"
+          if ! ready; then
+            docker logs keycloak
+            echo "::error::the previous release did not start on an empty database: there is no upgrade to judge"
+            exit 1
+          fi
+          go run ./cmd/realm-apply -environment ci -apply
+          changesets > "$RUNNER_TEMP/changesets-before.txt"
+          stop previous
+
+      - name: the candidate upgrades it
+        run: |
+          . "$RUNNER_TEMP/keycloak.sh"
+          start "$CANDIDATE"
+          if ! ready; then
+            docker logs keycloak
+            echo "::error::the candidate did not start on the previous release's database"
+            exit 1
+          fi
+          changesets > "$RUNNER_TEMP/changesets-after.txt"
+          comm -13 "$RUNNER_TEMP/changesets-before.txt" "$RUNNER_TEMP/changesets-after.txt" > "$RUNNER_TEMP/applied.txt"
+          psql -Atc "SELECT version FROM migration_model ORDER BY update_time DESC LIMIT 1" > "$RUNNER_TEMP/model.txt"
+          go run ./cmd/realm-apply -environment ci -require-in-sync
+          stop candidate
+
+      - name: the previous release starts on the migrated database
+        run: |
+          . "$RUNNER_TEMP/keycloak.sh"
+          start "$PREVIOUS"
+          boundary=irreversible-after-start
+          if ready && go run ./cmd/realm-apply -environment ci -require-in-sync; then
+            boundary=reversible
+          fi
+          stop rollback
+          echo "BOUNDARY=$boundary" >> "$GITHUB_ENV"
+          if [ "$boundary" != reversible ]; then
+            echo "::warning::rollback boundary: irreversible-after-start; the recovery path is restore-from-backup"
+            tail -n 60 "$RUNNER_TEMP/keycloak-rollback.log"
+          fi
+
+      - name: release record
+        run: |
+          {
+            echo "## Release record"
+            echo
+            echo "| Field | Value |"
+            echo "| :-- | :-- |"
+            echo "| candidate | \`$CANDIDATE\` |"
+            echo "| previous | \`$PREVIOUS\` |"
+            echo "| migration model after the upgrade | \`$(cat "$RUNNER_TEMP/model.txt")\` |"
+            if [ -s "$RUNNER_TEMP/applied.txt" ]; then
+              echo "| schema_migration_applied | yes: \`$(paste -sd, "$RUNNER_TEMP/applied.txt" | sed 's/,/\`, \`/g')\` |"
+            else
+              echo "| schema_migration_applied | no |"
+            fi
+            echo "| realm in sync after the upgrade | yes |"
+            echo "| rollback_boundary | $BOUNDARY |"
+            echo "| rollback_rehearsed | yes: the previous release started on the migrated database |"
+            echo "| extension_versions | none: no extension is packaged yet |"
+            echo "| evaluated_at | $(date -u +%Y-%m-%dT%H:%M:%SZ) |"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Keycloak logs
+        if: failure()
+        run: tail -n 200 "$RUNNER_TEMP"/keycloak-*.log 2>/dev/null || docker logs keycloak

@@ -3,12 +3,12 @@ doc_meta:
   id: TDD-identity-kernel-005
   title: Image Build, Digest Pinning, and Upgrade Compatibility
   owner: Identity Platform Team
-  version: 1.1.1
+  version: 1.2.0
   status: approved
   classification: restricted
   review_cycle_days: 90
   created_date: 2026-08-11
-  last_reviewed: 2026-09-30
+  last_reviewed: 2026-10-01
   parent_sad: SAD-001
 ---
 
@@ -189,6 +189,31 @@ Recording it is what makes the difference. A team that believes rollback is avai
 plans a five-minute recovery; a team that knows it is not plans a restore and tests it
 first.
 
+**How CI determines it.** The `upgrade` job in `.github/workflows/compat.yml` runs the
+sequence on PostgreSQL, the database every server runs, rather than on the in-process
+database `start-dev` uses:
+
+```text
+previous := image/keycloak.previous.ref     -- the release the servers run before this one
+candidate := image/keycloak.ref
+start previous on an empty database; apply the realm; stop it
+start candidate on that database            -- the upgrade, with its migrations
+record the Liquibase changesets the candidate applied
+the realm is in sync after the upgrade (realm-apply -require-in-sync)
+stop it; start previous on the migrated database
+    ready within the bound, and the realm in sync:  reversible
+    otherwise:                                       irreversible-after-start
+write the release record to the job summary
+```
+
+Starting from the previous release rather than from an empty database is what makes it an
+upgrade: a server's database was migrated by the previous release, and the candidate's
+migrations run over that. The job fails when the previous release cannot start on an empty
+database or the candidate cannot start over it, because then there is no upgrade to judge.
+An `irreversible-after-start` finding does not fail it: it is recorded, as above.
+`image/keycloak.previous.ref` changes in the same commit as `image/keycloak.ref`, to the
+digest it replaces.
+
 ### Drift Detection Before Upgrade
 
 ```text
@@ -217,6 +242,12 @@ never deferred:        the declared realm contract and the closed creation paths
 The properties that may be deferred are those whose failure degrades experience. The
 properties that may not are those whose failure breaks another repository's assumption
 about identity.
+
+26.7.5 took this path on 2026-10-01: a patch release of the pinned minor line whose fixes
+include CVE-2026-93999, a token-exchange refresh that kept issuing tokens for a disabled
+audience client, and which carries one data changeset (`26.7.0-backfill-group-org-id`, a
+backfill of `KEYCLOAK_GROUP.ORG_ID` for Organizations). There is no theme or extension to
+defer yet. Its release record is in ROADMAP.md.
 
 ## Configuration
 
@@ -258,7 +289,10 @@ the kernel at all. They authenticate with registered public keys (`ADR-IAM-001 Â
 ### Rollback
 
 - The rollback boundary is determined by attempting the downgrade, not by reading
-  release notes.
+  release notes: the `upgrade` job starts the previous release on the database the
+  candidate migrated.
+- The candidate starts on a database the previous release created, and the realm is in
+  sync after the upgrade.
 - An `irreversible-after-start` finding is recorded in the release record and surfaced
   in the deployment plan.
 - Restore-from-backup is rehearsed for any release recorded as irreversible.
@@ -329,7 +363,6 @@ release.
 
 ### Open Questions
 
-1. Which upstream Keycloak release is pinned for the initial baseline. The technology
-   radar entry carries the adoption; the digest is recorded here once the
-   proof-of-concept has run against a candidate and the compatibility suite has
-   produced its first release record.
+1. ~~Which upstream Keycloak release is pinned for the initial baseline.~~ Answered:
+   26.7.4 was the proof-of-concept baseline (2026-09-25), and 26.7.5 is the first release
+   with a release record (2026-10-01, ROADMAP.md).

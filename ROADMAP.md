@@ -44,7 +44,7 @@ and context switch mechanism — are exercised here but decided in `identity-con
 ## Week 1 · Pinned instance and the realm contract
 
 - ⏳ Digest-pinned Keycloak running from a reproducible image build — **the upstream image is
-  pinned by digest** (`image/keycloak.ref`, 26.7.4) and runs in CI; there is no image of our own
+  pinned by digest** (`image/keycloak.ref`, 26.7.5 since 2026-10-01; 26.7.4 before) and runs in CI; there is no image of our own
   yet, because there are no extensions to package. The reproducible build lands with the first one
 - ✅ Realm definition applied and diffed by the pipeline — `cmd/realm-apply`, which the development
   server runs as a one-shot job on every `docker compose up`, so a pulled change reaches the realm without

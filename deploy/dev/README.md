@@ -234,12 +234,15 @@ See the repository README.
 ## Upgrading Keycloak
 
 The image here must equal `image/keycloak.ref`, and CI fails when they differ. Upgrade
-both together, only after `compat/` passes against the new digest. Then:
+both together, only after `compat/` passes against the new digest and the `upgrade` job has
+written its release record, which says whether the previous release still starts on the
+migrated database (TDD-identity-kernel-005 §Determining the Rollback Boundary). Then:
 
 ```sh
 git pull && docker compose up -d --wait
 ```
 
-Postgres keeps the realm, users, and keys across restarts and upgrades. Rollback past a
-Keycloak database migration is not available. Back up the `postgres` volume before an
-upgrade.
+Postgres keeps the realm, users, and keys across restarts and upgrades. Back up the
+`postgres` volume before an upgrade either way. Redeploying the previous image is a recovery
+only when the release record says `reversible`; when it says `irreversible-after-start`, the
+recovery is restoring that backup.

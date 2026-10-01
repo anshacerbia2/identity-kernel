@@ -25,8 +25,8 @@ services:
     networks: [internal]
 
   keycloak:
-    # quay.io/keycloak/keycloak:26.7.4 -- the digest in image/keycloak.ref
-    image: quay.io/keycloak/keycloak@sha256:82a77884f3af238beab1e7afd63b5f530e1b5c0590bd7aa60b40a40463e29b2c
+    # quay.io/keycloak/keycloak:26.7.5 -- the digest in image/keycloak.ref
+    image: quay.io/keycloak/keycloak@sha256:37dbaf6f0722c9ec246335f36e1ef8b2e6cb960f7c27e0d8c615121a3d475a85
     restart: unless-stopped
     # start, not start-dev: production mode, with its hostname, proxy and cache behaviour. A
     # development server that runs start-dev tests a Keycloak nobody deploys.
