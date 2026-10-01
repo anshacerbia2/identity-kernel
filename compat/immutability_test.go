@@ -32,6 +32,14 @@ import (
 func TestTheUserCannotChangeTheirOwnIdentifier(t *testing.T) {
 	a := requireKeycloak(t)
 	client := internalClient(t, a)
+	// The account API authorizes from the account roles in the token, which the built-in roles scope
+	// writes. The realm's own account-console client holds that scope, because it was made with the
+	// realm, before the realm's defaults were narrowed to basic and acr; a client made since does not.
+	// So this client is given it, to stand in for the account console a user signs in to.
+	if _, err := a.call(http.MethodPut, "/admin/realms/"+realmName+"/clients/"+client.uuid+
+		"/default-client-scopes/"+scopeIDByName(t, a, "roles"), nil, http.StatusNoContent); err != nil {
+		t.Fatalf("attaching the roles scope: %v", err)
+	}
 	who := createPrincipal(t, a)
 	token := passwordGrant(t, a, client, who).AccessToken
 

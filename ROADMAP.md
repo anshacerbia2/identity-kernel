@@ -144,6 +144,11 @@ unused.
 - Questions 5, 6, 7 exercised and handed to the consuming repositories
 - ✅ Client key rotation, asked by identity-control — **signed-JWT keys overlap and revoke at
   once**; see below
+- ⏳ The claim closure (STD-IAM-002 §3.2, §3.2.1) — the realm's default client scopes are `basic` and
+  `acr` only, declared in `realm/default-client-scopes.json` and held as closed sets by
+  `realm-apply`; `scnehaux-profile` gives a BFF its name in the ID token alone;
+  `compat/claim_closure_test.go` asserts no access token carries a claim outside the closure, for a
+  BFF's user token and a workload's (TDD-identity-kernel-001 1.8.0 §Claim Projection)
 - ✅ RFC 9068 access tokens, asked by STD-IAM-002 §3.2 — **the kernel issues them once a client
   carries the `at+jwt` attribute and a `client_id` mapper**; the realm's built-in default scopes put
   claims the claim closure prohibits into both tokens; see below

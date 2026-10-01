@@ -3,6 +3,7 @@ package realmdef
 // The comparison, without a Keycloak. What is asserted against a live one is in compat/.
 
 import (
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"strings"
@@ -40,6 +41,9 @@ func liveFrom(d Definition) *live {
 		attributes = append(attributes, overlay(map[string]any{"annotations": map[string]any{}}, attribute))
 	}
 	l.profile = map[string]any{"attributes": attributes}
+	if c.Defaults != nil {
+		l.defaults = DefaultScopes{Default: sortedCopy(c.Defaults.Default), Optional: sortedCopy(c.Defaults.Optional)}
+	}
 	return l
 }
 
@@ -56,7 +60,7 @@ func TestAMatchingRealmIsInSync(t *testing.T) {
 func TestAnAbsentRealmCreatesEverything(t *testing.T) {
 	d := definition(t)
 	changes := compare(d, &live{})
-	if want := 2 + len(d.Scopes) + len(d.Profile); len(changes) != want {
+	if want := 3 + len(d.Scopes) + len(d.Profile); len(changes) != want {
 		t.Fatalf("%d changes for an absent realm, want %d", len(changes), want)
 	}
 	for _, change := range changes {
@@ -234,4 +238,88 @@ func has(lines []string, fragment string) bool {
 		}
 	}
 	return false
+}
+
+// The realm's default client scopes are a closed set: a built-in scope Keycloak makes a default, and
+// the definition does not name, is a difference.
+func TestARealmDefaultScopeTheDefinitionDoesNotNameIsADifference(t *testing.T) {
+	d := definition(t)
+	if d.Defaults == nil {
+		t.Fatal("realm/ declares no default client scopes")
+	}
+	l := liveFrom(d)
+	l.defaults.Default = sortedCopy(append(l.defaults.Default, "profile", "email"))
+	l.defaults.Optional = []string{"offline_access"}
+	change := find(t, compare(d, l), KindDefaults, d.Name())
+	if change.Action != Update || len(change.Diffs) != 2 {
+		t.Fatalf("change = %+v, want an update naming both sets", change)
+	}
+	for _, want := range []string{"default: live [acr basic email profile], definition [acr basic]",
+		"optional: live [offline_access], definition []"} {
+		if !containsDiff(change.Diffs, want) {
+			t.Errorf("diffs %v do not name %q", change.Diffs, want)
+		}
+	}
+}
+
+// A revision from before the file existed is still a definition: it governs no default scopes, so the
+// drift check judges nothing about them, and its digest is what it always was.
+func TestADefinitionWithoutDefaultScopesGovernsNone(t *testing.T) {
+	d := definition(t)
+	files := map[string][]byte{}
+	for _, name := range Files {
+		content, err := os.ReadFile(filepath.Join("..", "..", "realm", name))
+		if err != nil {
+			t.Fatal(err)
+		}
+		files[name] = content
+	}
+	earlier, err := Parse(files)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if earlier.Defaults != nil {
+		t.Fatal("a definition without default-client-scopes.json governs default scopes")
+	}
+	for _, change := range compare(earlier, liveFrom(d)) {
+		if change.Kind == KindDefaults {
+			t.Errorf("a definition without default scopes compared them: %+v", change)
+		}
+	}
+	if strings.Contains(string(mustJSON(t, earlier)), "defaults") {
+		t.Error("a definition without default scopes carries them in its digest input")
+	}
+}
+
+func TestParseRefusesAScopeThatIsBothDefaultAndOptional(t *testing.T) {
+	files := map[string][]byte{}
+	for _, name := range Files {
+		content, err := os.ReadFile(filepath.Join("..", "..", "realm", name))
+		if err != nil {
+			t.Fatal(err)
+		}
+		files[name] = content
+	}
+	files["default-client-scopes.json"] = []byte(`{"default":["basic"],"optional":["basic"]}`)
+	if _, err := Parse(files); err == nil {
+		t.Error("a scope both default and optional was accepted")
+	}
+}
+
+func containsDiff(diffs []string, want string) bool {
+	for _, d := range diffs {
+		if d == want {
+			return true
+		}
+	}
+	return false
+}
+
+func mustJSON(t *testing.T, d Definition) []byte {
+	t.Helper()
+	encoded, err := json.Marshal(d)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return encoded
 }

@@ -192,5 +192,41 @@
       "display.on.consent.screen": "false"
     },
     "protocolMappers": []
+  },
+  {
+    "name": "scnehaux-profile",
+    "description": "STD-IAM-002 sign-in profile for a first-party BFF. Carries name and preferred_username in the ID token only, never in an access token. Requested at sign-in; never a realm default.",
+    "protocol": "openid-connect",
+    "attributes": {
+      "include.in.token.scope": "false",
+      "display.on.consent.screen": "false"
+    },
+    "protocolMappers": [
+      {
+        "name": "name",
+        "protocol": "openid-connect",
+        "protocolMapper": "oidc-full-name-mapper",
+        "config": {
+          "access.token.claim": "false",
+          "id.token.claim": "true",
+          "userinfo.token.claim": "true",
+          "introspection.token.claim": "false"
+        }
+      },
+      {
+        "name": "preferred_username",
+        "protocol": "openid-connect",
+        "protocolMapper": "oidc-usermodel-property-mapper",
+        "config": {
+          "user.attribute": "username",
+          "claim.name": "preferred_username",
+          "jsonType.label": "String",
+          "access.token.claim": "false",
+          "id.token.claim": "true",
+          "userinfo.token.claim": "true",
+          "introspection.token.claim": "false"
+        }
+      }
+    ]
   }
 ]
