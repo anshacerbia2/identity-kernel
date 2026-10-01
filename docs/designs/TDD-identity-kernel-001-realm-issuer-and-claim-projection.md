@@ -3,7 +3,7 @@ doc_meta:
   id: TDD-identity-kernel-001
   title: Realm Topology, Issuer Identity, and Token Claim Projection
   owner: Identity Platform Team
-  version: 1.7.0
+  version: 1.8.0
   status: approved
   classification: restricted
   review_cycle_days: 90
@@ -189,6 +189,36 @@ every client created after, and a provider token's `acr` comes from `scnehaux-pr
 `compat/workload_test.go` asserts the workload token, the detachment included, and the absence of
 `workload_owner` from an internal token. The tenant-scoped workload form waits on the context projection, as `tenant_id` does for
 every profile.
+
+**The realm's default client scopes are `basic` and `acr`, and nothing else.** Keycloak creates a
+realm with `profile`, `email`, `roles`, `web-origins` and others as default and optional client
+scopes, so every new client held them, and compat run 36775603547 found their claims in internal and
+workload access tokens: email, names, usernames, realm and client roles. STD-IAM-002 §3.2 prohibits
+personal data and roles in an access token, so `realm/default-client-scopes.json` declares the two
+sets, and `realm-apply` holds both as closed sets: a scope it does not name is removed from them,
+and a console change to either is drift. `basic` gives `sub` and `auth_time`, and `acr` the
+authentication context; the audience profile scope a client registers with adds the rest.
+
+Changing the realm's defaults changes only the clients created after it. identity-control detaches
+the built-in scopes from the clients it already registered or adopted, and its sweep holds them
+detached (`TDD-identity-control-003`). Keycloak's admin endpoints authorize a client's service
+account from its role mappings, not from the roles in its token, so a client without `roles` keeps
+its administration access.
+
+**`service_account` is not held by a workload client.** Keycloak attaches it to a client whose
+service accounts are enabled, and its mappers write `client_id` and the client's network address,
+`clientHost` and `clientAddress`, into the token. identity-control detaches it and gives every
+client its own `client_id` mapper instead, so the address never reaches a token.
+
+**`scnehaux-profile` gives a first-party BFF the name it shows, in the ID token only.** Its two
+mappers write `name` and `preferred_username` into the ID token and UserInfo and never into an
+access token. It is not a realm default and not an audience profile: identity-control attaches it
+to a confidential client as an optional scope, and the BFF requests it at sign-in.
+
+Three claims are written by the kernel's token code rather than by a mapper, and no scope removes
+them: `azp`, `sid` and a payload `typ`. STD-IAM-002 §3.2 admits them. `compat/claim_closure_test.go`
+asserts that an access token carries nothing beyond the claims STD-IAM-002 §3.2 defines, RFC 9068
+§2.2 requires, and those three.
 
 | Surface | Requirement |
 | :-- | :-- |

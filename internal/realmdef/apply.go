@@ -69,6 +69,8 @@ func Apply(ctx context.Context, c *admin.Client, plan Plan, options Options) err
 			err = applyScope(ctx, c, base, scopeNamed(d, change.Name), plan.live, change.Action)
 		case KindAttribute:
 			profileChanged = true
+		case KindDefaults:
+			err = applyDefaults(ctx, c, base, *d.Defaults)
 		}
 		if err != nil {
 			return fmt.Errorf("applying %s %s: %w", change.Kind, change.Name, err)
@@ -183,6 +185,68 @@ func applyScope(ctx context.Context, c *admin.Client, base string, scope map[str
 		if _, err := c.Call(ctx, http.MethodDelete, scopePath+"/protocol-mappers/models/"+url.PathEscape(mapperID),
 			nil, http.StatusNoContent); err != nil {
 			return err
+		}
+	}
+	return nil
+}
+
+// applyDefaults makes the realm's default and optional client scopes exactly the declared sets. The
+// scopes are read again rather than taken from the plan, because a scope this apply created has an
+// identifier only now. Every removal comes before any addition, so a scope moving between the two
+// sets is never in both.
+func applyDefaults(ctx context.Context, c *admin.Client, base string, declared DefaultScopes) error {
+	var scopes []map[string]any
+	if err := c.GetJSON(ctx, base+"/client-scopes", &scopes); err != nil {
+		return fmt.Errorf("reading the client scopes: %w", err)
+	}
+	ids := map[string]string{}
+	for _, scope := range scopes {
+		id, _ := scope["id"].(string)
+		ids[name(scope)] = id
+	}
+	sets := []struct {
+		path string
+		want []string
+	}{{"/default-default-client-scopes", declared.Default}, {"/default-optional-client-scopes", declared.Optional}}
+	current := make([]map[string]bool, len(sets))
+	for i, set := range sets {
+		var listed []map[string]any
+		if err := c.GetJSON(ctx, base+set.path, &listed); err != nil {
+			return fmt.Errorf("reading %s: %w", strings.TrimPrefix(set.path, "/"), err)
+		}
+		current[i] = map[string]bool{}
+		for _, scope := range listed {
+			current[i][name(scope)] = true
+		}
+	}
+	for i, set := range sets {
+		want := map[string]bool{}
+		for _, scopeName := range set.want {
+			want[scopeName] = true
+		}
+		for _, scopeName := range sortedKeys(current[i]) {
+			if want[scopeName] {
+				continue
+			}
+			if _, err := c.Call(ctx, http.MethodDelete, base+set.path+"/"+url.PathEscape(ids[scopeName]), nil,
+				http.StatusNoContent); err != nil {
+				return fmt.Errorf("removing %s from %s: %w", scopeName, strings.TrimPrefix(set.path, "/"), err)
+			}
+		}
+	}
+	for i, set := range sets {
+		for _, scopeName := range sortedCopy(set.want) {
+			if current[i][scopeName] {
+				continue
+			}
+			id, ok := ids[scopeName]
+			if !ok {
+				return fmt.Errorf("default-client-scopes.json names %s, which the realm does not have", scopeName)
+			}
+			if _, err := c.Call(ctx, http.MethodPut, base+set.path+"/"+url.PathEscape(id), nil,
+				http.StatusNoContent); err != nil {
+				return fmt.Errorf("adding %s to %s: %w", scopeName, strings.TrimPrefix(set.path, "/"), err)
+			}
 		}
 	}
 	return nil

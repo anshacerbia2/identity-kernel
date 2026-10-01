@@ -177,6 +177,20 @@ func definitionAt(dir, revision string) (map[string][]byte, error) {
 		}
 		files[name] = out
 	}
+	for _, name := range realmdef.OptionalFiles {
+		listed, err := git(dir, "ls-tree", "--name-only", revision, "--", "./"+filepath.ToSlash(name))
+		if err != nil {
+			return nil, err
+		}
+		if strings.TrimSpace(string(listed)) == "" {
+			continue // the revision predates this file
+		}
+		out, err := git(dir, "show", revision+":./"+filepath.ToSlash(name))
+		if err != nil {
+			return nil, err
+		}
+		files[name] = out
+	}
 	return files, nil
 }
 

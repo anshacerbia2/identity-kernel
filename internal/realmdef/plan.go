@@ -128,6 +128,8 @@ type live struct {
 	keys    map[string]map[string]any // key provider components, by name
 	scopes  map[string]map[string]any // client scopes, by name
 	profile map[string]any            // the whole user profile configuration
+	// defaults are the realm's default and optional client scopes, by name.
+	defaults DefaultScopes
 }
 
 func (l *live) profileAttribute(attributeName string) map[string]any {
@@ -170,6 +172,20 @@ func observe(ctx context.Context, c *admin.Client, realm string) (*live, error) 
 	if err := c.GetJSON(ctx, base+"/users/profile", &observed.profile); err != nil {
 		return nil, fmt.Errorf("reading the user profile: %w", err)
 	}
+
+	for path, into := range map[string]*[]string{
+		"/default-default-client-scopes":  &observed.defaults.Default,
+		"/default-optional-client-scopes": &observed.defaults.Optional,
+	} {
+		var listed []map[string]any
+		if err := c.GetJSON(ctx, base+path, &listed); err != nil {
+			return nil, fmt.Errorf("reading the realm's %s: %w", strings.TrimPrefix(path, "/"), err)
+		}
+		for _, scope := range listed {
+			*into = append(*into, name(scope))
+		}
+		sort.Strings(*into)
+	}
 	return observed, nil
 }
 
@@ -182,6 +198,7 @@ const (
 	KindKey       = "signing key"
 	KindScope     = "client scope"
 	KindAttribute = "user-profile attribute"
+	KindDefaults  = "realm default client scopes"
 )
 
 func compare(d Definition, l *live) []Change {
@@ -195,6 +212,9 @@ func compare(d Definition, l *live) []Change {
 		for _, attribute := range d.Profile {
 			changes = append(changes, Change{Kind: KindAttribute, Name: name(attribute), Action: Create})
 		}
+		if d.Defaults != nil {
+			changes = append(changes, Change{Kind: KindDefaults, Name: d.Name(), Action: Create})
+		}
 		return changes
 	}
 
@@ -207,7 +227,36 @@ func compare(d Definition, l *live) []Change {
 		changes = append(changes, compareObject(KindAttribute, name(attribute), attribute,
 			l.profileAttribute(name(attribute))))
 	}
+	if d.Defaults != nil {
+		changes = append(changes, compareDefaults(d.Name(), *d.Defaults, l.defaults))
+	}
 	return changes
+}
+
+// compareDefaults compares the realm's default and optional client scopes as closed sets. A scope a
+// new client is given is a claim surface every new client holds, so one the definition does not name
+// is a difference, not an unmanaged detail.
+func compareDefaults(realm string, declared, observed DefaultScopes) Change {
+	var diffs []string
+	for _, set := range []struct {
+		label              string
+		declared, observed []string
+	}{{"default", declared.Default, observed.Default}, {"optional", declared.Optional, observed.Optional}} {
+		want, got := sortedCopy(set.declared), sortedCopy(set.observed)
+		if !reflect.DeepEqual(want, got) {
+			diffs = append(diffs, fmt.Sprintf("%s: live %v, definition %v", set.label, got, want))
+		}
+	}
+	if len(diffs) > 0 {
+		return Change{Kind: KindDefaults, Name: realm, Action: Update, Diffs: diffs}
+	}
+	return Change{Kind: KindDefaults, Name: realm, Action: InSync}
+}
+
+func sortedCopy(values []string) []string {
+	out := append([]string{}, values...)
+	sort.Strings(out)
+	return out
 }
 
 func compareObject(kind, objectName string, declared, observed map[string]any) Change {
