@@ -203,7 +203,11 @@ Changing the realm's defaults changes only the clients created after it. identit
 the built-in scopes from the clients it already registered or adopted, and its sweep holds them
 detached (`TDD-identity-control-003`). Keycloak's admin endpoints authorize a client's service
 account from its role mappings, not from the roles in its token, so a client without `roles` keeps
-its administration access.
+its administration access. The account API is the exception: it authorizes self-service from the
+account roles in the token. The realm's built-in `account-console` client keeps the scopes it was
+made with, `roles` among them, because it is made with the realm, before the defaults are narrowed,
+so a user's self-service through it is unchanged. `compat/immutability_test.go` gives its probe
+client `roles` for the same reason.
 
 **`service_account` is not held by a workload client.** Keycloak attaches it to a client whose
 service accounts are enabled, and its mappers write `client_id` and the client's network address,
