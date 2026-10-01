@@ -149,6 +149,14 @@ unused.
   `realm-apply`; `scnehaux-profile` gives a BFF its name in the ID token alone;
   `compat/claim_closure_test.go` asserts no access token carries a claim outside the closure, for a
   BFF's user token and a workload's (TDD-identity-kernel-001 1.8.0 §Claim Projection)
+- ✅ `service_account` keeps only its `client_id` mapper (STD-IAM-002 §3.2.1). Keycloak attaches the
+  scope again on every update of a client with service accounts enabled
+  (`ClientManager.updateClientServiceAccount`), so identity-control's detachment from a workload was
+  undone by its next key rotation (identity-control#30, run 36828339504). `realm/client-scopes.json`
+  declares the scope with its `Client ID` mapper alone, so `realm-apply` removes `Client Host` and
+  `Client IP Address`, and a workload holds the scope without its address reaching a token.
+  `compat/claim_closure_test.go` records the re-attachment and asserts the closure with the scope
+  held
 - ✅ RFC 9068 access tokens, asked by STD-IAM-002 §3.2 — **the kernel issues them once a client
   carries the `at+jwt` attribute and a `client_id` mapper**; the realm's built-in default scopes put
   claims the claim closure prohibits into both tokens; see below

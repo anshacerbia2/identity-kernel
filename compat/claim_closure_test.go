@@ -93,11 +93,25 @@ func TestAnAccessTokenCarriesOnlyTheClaimsTheStandardAdmits(t *testing.T) {
 	require("user token: principal_id present", jwtClaims(t, signIn.AccessToken)["principal_id"] == user.principalID,
 		"the internal profile's claim is missing")
 
-	// A workload: service accounts on, service_account and acr detached, the workload profile.
+	// A workload: service accounts on, acr detached, the workload profile. It holds service_account,
+	// which the kernel attaches again on every update of the client; the realm declares that scope
+	// with its client_id mapper alone, so the client's address is not in the token.
 	workloadKey := newClientKey(t, "compat-closure-job")
 	jobID := "compat-closure-job-" + suffix()
 	job := registeredLikeIdentityControl(t, a, jobID, workloadKey, "scnehaux-workload")
 	detachDefaultScope(t, a, job, "service_account")
+	updateClient(t, a, job, func(map[string]any) {})
+	reattached := false
+	var held []struct {
+		Name string `json:"name"`
+	}
+	if err := a.getJSON("/admin/realms/"+realmName+"/clients/"+job+"/default-client-scopes", &held); err != nil {
+		t.Fatalf("reading the workload's default scopes: %v", err)
+	}
+	for _, scope := range held {
+		reattached = reattached || scope.Name == "service_account"
+	}
+	steps = append(steps, lifecycleStep{name: "workload: an update attaches service_account again", observed: reattached})
 	detachDefaultScope(t, a, job, "acr")
 	writeWorkloadIdentity(t, a, job, uuidV7(), uuidV7())
 	status, body := clientCredentials(t, a, jobID, signAssertion(t, a, jobID, workloadKey))
