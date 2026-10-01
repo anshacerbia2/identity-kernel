@@ -362,11 +362,39 @@ them over the live attributes on apply, so the record is never dropped.
 
 - Hosted login, MFA enrollment, and recovery theme against WCAG 2.2 AA
 - Rotation rehearsed end to end, including the retirement window
-- Upgrade compatibility suite: apply realm to a clean instance, assert the declared
-  contract, assert the closed creation paths, rehearse rollback
+- ⏳ Upgrade compatibility suite: apply realm to a clean instance, assert the declared
+  contract, assert the closed creation paths, rehearse rollback — **the contract and the
+  rollback rehearsal run on every pull request**: `compat` asserts the contract against the
+  candidate, and `upgrade` upgrades the previous release's PostgreSQL database with it and
+  starts the previous release on the result (TDD-identity-kernel-005 §Determining the Rollback
+  Boundary). The theme assertions arrive with the theme
 
 **Exit:** a candidate release that changes the issuer form, drops a claim from a
 covered surface, or reopens a creation path fails the suite.
+
+### Release record: 26.7.5
+
+The first release record (TDD-identity-kernel-005 §Release Record), from compat run 36854333984
+on 2026-10-01. 26.7.5 took the accelerated security-release path; among its fixes is
+CVE-2026-93999, a token-exchange refresh that kept issuing tokens for a disabled audience client.
+
+| Field | Value |
+| :-- | :-- |
+| candidate_version | 26.7.5 |
+| upstream_digest | `quay.io/keycloak/keycloak@sha256:37dbaf6f…a85` |
+| previous | 26.7.4, `sha256:82a77884…29b2c` |
+| realm_contract_result | pass (`contract` job; and the realm in sync after the upgrade) |
+| creation_paths_result | pass (`contract` job) |
+| key_invariants_result | pass (`contract` job) |
+| schema_migration_applied | yes: `26.7.0-backfill-group-org-id`, a data backfill of `KEYCLOAK_GROUP.ORG_ID` for Organizations; no schema change |
+| migration model after the upgrade | `26.7.5` |
+| rollback_boundary | reversible: 26.7.4 started on the migrated database and the realm was in sync |
+| rollback_rehearsed | yes |
+| extension_versions | none packaged yet |
+| evaluated_at | 2026-10-01T11:18:19Z |
+
+So redeploying 26.7.4 is a recovery from 26.7.5, and a backup is still taken before the upgrade
+(deploy/dev/README.md §Upgrading Keycloak). Run 36853348045 on #28 found the same boundary.
 
 ## Not this repository
 
