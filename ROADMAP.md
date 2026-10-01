@@ -137,6 +137,9 @@ unused.
 - Key ceremony rehearsed, sealed keystore in the secret manager
 - `kid` derived as the RFC 7638 thumbprint, asserted at startup
 - Startup refuses to serve when custody is unreachable
+- Rotation through the five states of TDD-identity-kernel-002 1.1.0 (ADR-IAM-002 §5.2, NIST SP
+  800-57): a staged key is published before it signs, and its private material is destroyed when it
+  leaves the JWKS, every stored version of the sealed keystore included. No retention period
 - ✅ Question 4 executed and recorded — **path form retained**. `iss` is
   `{frontend URL}/realms/{realm name}`, and a realm rename moves it too (compat run 36113564506).
   The production hostname and realm name are therefore fixed together before the first token.

@@ -3,12 +3,12 @@ doc_meta:
   id: TDD-identity-kernel-002
   title: Signing Key Custody, Identity, and Rotation
   owner: Identity Platform Team
-  version: 1.0.1
+  version: 1.1.0
   status: approved
   classification: restricted
   review_cycle_days: 90
   created_date: 2026-08-11
-  last_reviewed: 2026-09-30
+  last_reviewed: 2026-10-01
   parent_sad: SAD-001
 ---
 
@@ -134,12 +134,14 @@ losing it does not lose a key.
 ```text
 kid            thumbprint, derived not assigned
 algorithm      PS256 for the initial enterprise baseline
-state          active | retiring | retired | purged
+state          staged | active | retiring | retired | revoked
+staged_at      when it was sealed and published to JWKS
 activated_at   when it began signing
 retiring_at    when it stopped signing and continued verifying
-retired_at     when it left JWKS
-purged_at      when the private material was destroyed
+retired_at     when it left JWKS and its private material was destroyed
+revoked_at     when a compromise removed it, and its private material was destroyed
 custody_ref    reference into the secret manager, never the material
+public_jwk     the public key, kept as evidence after retirement
 ```
 
 ## Data Model
@@ -147,20 +149,31 @@ custody_ref    reference into the secret manager, never the material
 ### Rotation State Machine
 
 ```text
-        generate            activate           retire            purge
-  ()  ──────────►  staged  ────────►  active  ────────►  retiring  ────────►  retired  ──────►  purged
-                                        │
-                                        └── compromise ──►  revoked
+        generate and publish      activate           demote              retire
+  ()  ──────────────────►  staged  ────────►  active  ────────►  retiring  ────────►  retired
+                                                │
+                                                └── compromise ──►  revoked
 ```
 
-| State | Signs | Published in JWKS | Meaning |
-| :-- | :-- | :-- | :-- |
-| `staged` | No | No | Generated and sealed, not yet trusted |
-| `active` | Yes | Yes | The current signing key; exactly one per algorithm per realm |
-| `retiring` | No | Yes | Stopped signing, still verifies tokens issued before rotation |
-| `retired` | No | No | No outstanding artifact can still be in flight |
-| `purged` | No | No | Private material destroyed |
-| `revoked` | No | No | Compromise response; removed from JWKS immediately |
+The states are ADR-IAM-002 §5.2's, each mapped to the state NIST SP 800-57 Part 1 defines:
+
+| State | NIST SP 800-57 state | Signs | Published in JWKS | Private material | Meaning |
+| :-- | :-- | :-- | :-- | :-- | :-- |
+| `staged` | Pre-activation | No | Yes | In custody | Generated, sealed and published, so every consumer holds it before it signs |
+| `active` | Active | Yes | Yes | In custody | The current signing key; exactly one per algorithm per realm |
+| `retiring` | Deactivated | No | Yes | In custody | Stopped signing, still verifies tokens issued before rotation |
+| `retired` | Destroyed | No | No | Destroyed | No outstanding artifact can still be in flight |
+| `revoked` | Compromised | No | No | Destroyed | Compromise response; removed from JWKS immediately |
+
+**Private material is destroyed when the key leaves JWKS, and is never archived**
+(ADR-IAM-002 §5.2). A private signature key has no use after its signing period, and a
+copy kept for a retention period is a copy that can still sign. Leaving JWKS and
+destruction are one operation, so no state holds a private key that verifies nothing. The
+kernel publishes a key only from the key pair it holds, which is why the private material
+stays in custody through `retiring`. What is kept is the public key and the registry
+record, as evidence of which key signed which tokens. Version 1.0 of this design had a
+sixth state, `purged`, reached after an evidence retention period; it is gone, with the
+retention period it waited for.
 
 Exactly one key per algorithm is `active` in a realm at any moment. Two active keys
 would make which key signed a given token a matter of chance, which removes the
@@ -231,16 +244,18 @@ or copied between environments with a stale identifier.
 
 ```text
 scheduled rotation:
-    generate the next key pair under ceremony, seal it, register as staged
-    publish its public material to JWKS ahead of activation
+    generate the next key pair under ceremony, seal it, register it staged,
+        and publish its public material to JWKS
     wait for the consumer cache window so every consumer holds the new public key
     promote staged to active; demote the previous active to retiring
     hold the retiring key in JWKS for the computed retirement window
-    move retiring to retired and remove it from JWKS
-    purge the private material after the evidence retention period
+    retire it: remove it from JWKS and destroy its private material, in one operation
+        destroy means removed from the keystore and from every stored version
+        of the sealed keystore in the secret manager that carries it
+    keep its public key and registry record as evidence
 ```
 
-Publishing the public key before activation is what makes rotation invisible to
+Publishing the public key while the key is `staged` is what makes rotation invisible to
 consumers. A consumer whose cache has not refreshed when the new key begins signing
 would see an unknown `kid` and reject valid tokens, which is a self-inflicted outage
 during a routine operation.
@@ -250,7 +265,8 @@ during a routine operation.
 ```text
 on suspected compromise:
     generate and stage a replacement, publish it, activate it
-    move the compromised key directly to revoked and remove it from JWKS immediately
+    move the compromised key directly to revoked: remove it from JWKS immediately and
+        destroy its private material, every stored version included
     accept that every token signed by it fails verification from that moment
     treat the resulting failures as containment, not as an incident to suppress
     record actor, reason, correlation, and the affected issuance window
@@ -264,8 +280,8 @@ signed by that key as valid.
 
 - Key generation requires two operators; neither alone can complete a ceremony.
 - The operator who generates a key does not approve its activation.
-- Purging private material requires an approval distinct from the operator performing
-  it.
+- Retiring or revoking a key, which destroys its private material, requires an approval
+  distinct from the operator performing it.
 - Every key operation is recorded with actor, reason, correlation identifier, and
   outcome, and is emitted as a privileged-administration event.
 
@@ -316,20 +332,24 @@ control, in a log, or in an event.
 ### Rotation
 
 - A token issued before rotation verifies throughout the retirement window.
-- The new public key appears in JWKS before it begins signing, by at least the
-  consumer cache window.
+- A staged key is in JWKS and signs nothing, and it is in JWKS before it begins signing by
+  at least the consumer cache window.
 - A retiring key leaves JWKS only after the computed window elapses.
+- A retired key's private material is in neither the keystore nor any stored version of the
+  sealed keystore, and its public key and record remain.
 - Raising a token lifetime class raises the computed retirement floor, and a
   configuration that would shorten the window below its floor fails.
 
 ### Compromise and Recovery
 
-- A revoked key is removed from JWKS immediately, and tokens signed by it fail
-  verification.
+- A revoked key is removed from JWKS immediately, its private material is destroyed, and
+  tokens signed by it fail verification.
 - Restoring the cluster from backup reproduces the same `kid` set and does not
   generate new material.
 - A restore to a point before a rotation is detected, and the missing key is
-  reinstated from custody rather than regenerated.
+  reinstated from custody rather than regenerated. A key retired since cannot be
+  reinstated, because its private material is destroyed; the restore takes the current
+  active key from custody instead, and the tokens the retired key signed have expired.
 
 ### Separation of Duties
 
@@ -395,6 +415,7 @@ exercised.
 | Parent system | SAD-001 — Scnehaux Identity Runtime |
 | Realizes capability | PAD-PLT-001 — Identity & Access Platform |
 | Governed by | ADR-IAM-001 — Adopt Keycloak Identity Kernel |
+| Governed by | ADR-IAM-002 §5.2 — the key states, mapped to NIST SP 800-57 Part 1; private material destroyed at retirement |
 | Conforms to | STD-IAM-001 §3.5 — one `kid` to one immutable key pair; identical material across replicas; no ephemeral fallback |
 | Conforms to | STD-IAM-002 §3.5 — verification material published for the maximum artifact lifetime with margin |
 | Enterprise constraint | EAD-005 §5.3 — managed KMS/HSM and secret-management capability |
@@ -409,6 +430,7 @@ exercised.
    enterprise direction is a managed capability and the adopted cloud provider offers
    one; the specific service and its access model are recorded once the environment
    baseline is fixed.
-2. Whether the evidence retention period for purged key material is set by security
-   policy or by a regulatory obligation. The design holds material until the period
-   elapses in either case; only the duration differs.
+2. ~~Whether the evidence retention period for purged key material is set by security
+   policy or by a regulatory obligation.~~ Answered by ADR-IAM-002 §5.2: private material
+   has no retention period. It is destroyed when the key leaves JWKS, and the evidence kept
+   is the public key and the record, which NIST SP 800-57 Part 1 permits.
