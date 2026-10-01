@@ -255,7 +255,9 @@ jobs:
             echo "| rollback_rehearsed | yes: the previous release started on the migrated database |"
             echo "| extension_versions | none: no extension is packaged yet |"
             echo "| evaluated_at | $(date -u +%Y-%m-%dT%H:%M:%SZ) |"
-          } >> "$GITHUB_STEP_SUMMARY"
+          } | tee -a "$GITHUB_STEP_SUMMARY"
+          # Printed as well as summarized: the log is what a run id retrieves later, and the
+          # release record is cited by run id.
 
       - name: Keycloak logs
         if: failure()
