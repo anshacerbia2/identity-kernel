@@ -54,8 +54,23 @@ func Apply(ctx context.Context, c *admin.Client, plan Plan, options Options) err
 
 	d := plan.definition
 	base := "/admin/realms/" + url.PathEscape(d.Name())
+	changes := plan.Changes
+	if plan.live.realm == nil {
+		// Keycloak creates a realm with built-in objects the definition may also declare, the
+		// service_account client scope among them. A plan made before the realm existed would create
+		// them a second time, which Keycloak refuses, so the realm is created first and the rest is
+		// planned against what it then holds.
+		if err := applyRealm(ctx, c, d, plan.live, Create); err != nil {
+			return fmt.Errorf("applying %s %s: %w", KindRealm, d.Name(), err)
+		}
+		created, err := NewPlan(ctx, c, d, nil)
+		if err != nil {
+			return fmt.Errorf("planning against the created realm: %w", err)
+		}
+		plan.live, changes = created.live, created.Changes
+	}
 	profileChanged := false
-	for _, change := range plan.Changes {
+	for _, change := range changes {
 		if change.Action == InSync {
 			continue
 		}
