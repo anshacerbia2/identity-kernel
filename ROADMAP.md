@@ -371,6 +371,38 @@ them over the live attributes on apply, so the record is never dropped.
 **Exit:** a candidate release that changes the issuer form, drops a claim from a
 covered surface, or reopens a creation path fails the suite.
 
+## Sender constraint, the recorded gap
+
+STD-IAM-002 §3.8 records that the baseline's access tokens are bearer tokens, although RFC 9700
+§2.2.1 says they SHOULD be sender-constrained, and tracks the gap here. **Not built, by decision.**
+The gap is bounded by where the tokens go:
+
+- a browser never holds one: the BFF keeps its tokens server-side, and the browser holds a cookie;
+- a service calls another over mutual TLS or with a service-mesh token (STD-GLB-001);
+- an `external` relying party holds its tokens outside both paths. It is the case left open.
+
+**When it is decided.** In an ADR, before an `external` profile is issued to a relying party the
+platform does not operate, or before an access token is issued to a browser (STD-IAM-002 §3.8).
+Neither has happened: no `external` registration exists, and no client but the BFF signs a user in.
+
+**What the pinned kernel offers**, per client, both documented in the 26.7.5 Server Administration
+Guide:
+
+- **DPoP** (RFC 9449), *Require DPoP bound tokens*. A supported feature since 26.4, no longer
+  preview. Without the setting a client may still send a DPoP proof, and the token is then bound.
+- **Mutual TLS certificate-bound tokens** (RFC 8705), *OAuth 2.0 Mutual TLS Certificate Bound
+  Access Tokens Enabled*. It needs TLS client certificates to reach Keycloak, which the dev
+  server's tunnel does not carry.
+
+**What the decision has to cover**, because the binding is worth nothing unless the resource checks
+it:
+
+- the verifier: foundation-platform `verify` would check `cnf.jkt` against the DPoP proof
+  (RFC 9449 §7) or `cnf.x5t#S256` against the presented client certificate (RFC 8705 §3), and
+  refuse a bound token presented as a bearer token;
+- registration: identity-control setting and comparing the client attribute, as it does at+jwt;
+- `compat/`: a bound token issued and refused without its proof, against the pinned image.
+
 ## Not this repository
 
 Recorded so scope creep is visible rather than convenient:
