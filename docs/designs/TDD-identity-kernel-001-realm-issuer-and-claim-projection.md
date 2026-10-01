@@ -209,10 +209,14 @@ made with, `roles` among them, because it is made with the realm, before the def
 so a user's self-service through it is unchanged. `compat/immutability_test.go` gives its probe
 client `roles` for the same reason.
 
-**`service_account` is not held by a workload client.** Keycloak attaches it to a client whose
-service accounts are enabled, and its mappers write `client_id` and the client's network address,
-`clientHost` and `clientAddress`, into the token. identity-control detaches it and gives every
-client its own `client_id` mapper instead, so the address never reaches a token.
+**`service_account` keeps only its `client_id` mapper.** Keycloak attaches the built-in scope to a
+client whose service accounts are enabled, and attaches it again on every update of such a client
+(`ClientManager.updateClientServiceAccount`), so a workload cannot be kept without it: identity-control
+found a detachment undone by the next key rotation. Its other two mappers write the client's network
+address, `clientHost` and `clientAddress`, into the token. So `realm/client-scopes.json` declares the
+scope with its `Client ID` mapper alone, `realm-apply` removes the other two as it removes any
+undeclared mapper of a declared scope, and a workload holds the scope without the address reaching a
+token. The scope is not removed or renamed: Keycloak looks it up by name.
 
 **`scnehaux-profile` gives a first-party BFF the name it shows, in the ID token only.** Its two
 mappers write `name` and `preferred_username` into the ID token and UserInfo and never into an
