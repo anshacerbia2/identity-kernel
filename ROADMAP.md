@@ -60,6 +60,11 @@ and context switch mechanism — are exercised here but decided in `identity-con
   STD-IAM-002 §3.2.1 requires. It is what identity-control accepts to mint a Principal, and `compat/`
   asserts it with a real Authorization Code + PKCE login, because `auth_time` exists only for one
 
+- ✅ `provider_scope` is no longer issued (TDD-identity-kernel-001 1.9.0). identity-control decides
+  provider authority from its projection of Organization's grants (TDD-identity-control-006), and
+  STD-IAM-002 §3.1.1 forbids reading a grant from a claim, so the mapper and the
+  `scnehaux_provider_scope` attribute leave the definition. `realm-apply` deletes the mapper from a
+  live realm; the attribute stays there unread, because removing one is a migration.
 - ✅ The workload profile — `scnehaux-workload`, carrying `principal_id`, `subject_type` and
   `workload_owner` (STD-IAM-002 §3.2.1). A workload's token comes from the client credentials grant
   and is issued for its client's service-account user, so identity-control writes the workload's
