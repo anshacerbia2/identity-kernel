@@ -3,8 +3,11 @@ package compat
 // The provider-scope form of the privileged profile (STD-IAM-002 §3.1.1, §3.2.1).
 //
 // It is what identity-control accepts: minting a Principal is provider-scope, so the token must
-// carry principal_id, subject_type, provider_scope, acr and auth_time, and must not carry tenant_id
-// or either version claim. The kernel realizes it through the scnehaux-provider client scope.
+// carry principal_id, subject_type, acr and auth_time, and must not carry tenant_id or either
+// version claim. identity-control holds the projection of the provider grants and decides from it
+// for each request, so the token carries no provider_scope either: no resource checks a provider
+// grant from a claim and none is issued (STD-IAM-002 §3.1.1). The kernel realizes the form through
+// the scnehaux-provider client scope.
 //
 // The token is obtained by Authorization Code with PKCE S256 against the kernel's own login form,
 // not by a password grant. auth_time is the instant of an authentication ceremony, and a direct grant
@@ -27,13 +30,11 @@ import (
 	"time"
 )
 
-const providerScopeValue = "provider:identity-control"
-
 func TestAProviderTokenMeetsTheProviderProfile(t *testing.T) {
 	a := requireKeycloak(t)
 	caller := providerCaller(t, a)
 	resource := resourceServerFor(t, a, caller)
-	who := providerPrincipal(t, a, providerScopeValue)
+	who := providerPrincipal(t, a)
 
 	before := time.Now().Add(-time.Minute).Unix()
 	issued := authorizationCode(t, a, caller, who)
@@ -44,9 +45,8 @@ func TestAProviderTokenMeetsTheProviderProfile(t *testing.T) {
 		t.Errorf("the provider token is signed with %v, want PS256", header["alg"])
 	}
 	for name, want := range map[string]string{
-		"principal_id":   who.principalID,
-		"subject_type":   "human",
-		"provider_scope": providerScopeValue,
+		"principal_id": who.principalID,
+		"subject_type": "human",
 	} {
 		if got, _ := claims[name].(string); got != want {
 			t.Errorf("the provider token carries %s=%v, want %q", name, claims[name], want)
@@ -61,7 +61,8 @@ func TestAProviderTokenMeetsTheProviderProfile(t *testing.T) {
 	}
 	// A provider operation belongs to no Tenant. A tenant_id here would put a Tenant on an action
 	// that has none, which is the conflation §3.1.1 exists to prevent.
-	for _, name := range []string{"tenant_id", "workspace_id", "membership_version", "tenant_security_version", "workload_owner"} {
+	// provider_scope is not issued: the resource decides from the record it holds.
+	for _, name := range []string{"provider_scope", "tenant_id", "workspace_id", "membership_version", "tenant_security_version", "workload_owner"} {
 		if value, present := claims[name]; present {
 			t.Errorf("the provider token carries %s=%v, which the provider-scope form prohibits", name, value)
 		}
@@ -107,7 +108,7 @@ func providerCaller(t *testing.T, a *admin) client {
 // where the code is; nothing needs to receive it.
 const providerRedirect = "http://127.0.0.1:9/callback"
 
-func providerPrincipal(t *testing.T, a *admin, scope string) principal {
+func providerPrincipal(t *testing.T, a *admin) principal {
 	t.Helper()
 	p := principal{username: "compat-" + suffix(), password: "Compat-" + suffix() + "!", principalID: uuidV7()}
 	response, err := a.call(http.MethodPost, "/admin/realms/"+realmName+"/users", map[string]any{
@@ -118,9 +119,8 @@ func providerPrincipal(t *testing.T, a *admin, scope string) principal {
 		"firstName":     "Compat",
 		"lastName":      "Provider",
 		"attributes": map[string][]string{
-			"scnehaux_principal_id":   {p.principalID},
-			"scnehaux_subject_type":   {"human"},
-			"scnehaux_provider_scope": {scope},
+			"scnehaux_principal_id": {p.principalID},
+			"scnehaux_subject_type": {"human"},
 		},
 		"credentials":     []map[string]any{{"type": "password", "value": p.password, "temporary": false}},
 		"requiredActions": []string{},

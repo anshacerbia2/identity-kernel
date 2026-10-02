@@ -3,12 +3,12 @@ doc_meta:
   id: TDD-identity-kernel-001
   title: Realm Topology, Issuer Identity, and Token Claim Projection
   owner: Identity Platform Team
-  version: 1.8.0
+  version: 1.9.0
   status: approved
   classification: restricted
   review_cycle_days: 90
   created_date: 2026-08-11
-  last_reviewed: 2026-09-30
+  last_reviewed: 2026-10-02
   parent_sad: SAD-001
 ---
 
@@ -150,7 +150,6 @@ configuration that turns them into the STD-IAM-002 contract:
 | `scnehaux_principal_id` | `principal_id` | internal, privileged, provider, workload |
 | `scnehaux_subject_type` | `subject_type` | internal, privileged, provider, workload |
 | `scnehaux_workload_owner` | `workload_owner` | workload only |
-| `scnehaux_provider_scope` | `provider_scope` | provider only |
 | authentication session (`AUTH_TIME` note), authentication level | `auth_time`, `acr` | privileged, provider |
 | projected active Tenant | `tenant_id` | internal, privileged, tenant-scoped workload |
 | projected active Workspace | `workspace_id` | optional internal/privileged/workload |
@@ -162,10 +161,26 @@ These mappers live in the audience client scopes of STD-IAM-002 §3.2.1:
 `scnehaux-external` contains none of them and uses a pairwise `sub`.
 
 `scnehaux-provider` is the provider-scope form of the privileged profile (§3.1.1). It carries
-`principal_id`, `subject_type`, `provider_scope`, `acr`, and `auth_time`, and never `tenant_id` or a
-version claim, because a provider operation belongs to no Tenant. It is what identity-control
-accepts to mint a Principal. `provider_scope` is written only by identity-control's bootstrap
-ceremony, and like every `scnehaux_*` attribute it is admin-managed and not user-editable.
+`principal_id`, `subject_type`, `acr`, and `auth_time`, and never `tenant_id` or a version claim,
+because a provider operation belongs to no Tenant. It is what identity-control accepts to mint a
+Principal.
+
+**It carries no `provider_scope`.** STD-IAM-002 §3.1.1 requires a resource that holds a provider
+grant, or a projection of it, to check its record for each request by the token's `principal_id`,
+and never to read the grant from a claim. Organization Control holds the grants and identity-control
+holds the projection of `provider:identity-control` (`ADR-ORG-002 §5.3`,
+`TDD-identity-control-006`). No resource in the estate checks a provider grant from a claim, so the
+kernel issues none. This is how Google Cloud IAM and Kubernetes decide access: the token establishes
+who the caller is, and the resource evaluates the policy it holds (STD-IAM-002 R19, R20). A claim
+would also outlive an activation ended early until the token expired. The `provider_scope` mapper
+and the `scnehaux_provider_scope` attribute are therefore not in the definition.
+
+*Tradeoff.* A client still configured for the old profile stops working, because identity-control
+refuses a token that carries the claim, rather than being read silently as an owner. On a realm
+applied before this revision, `realm-apply` deletes the mapper, because a managed scope's mapper
+set is the definition's. It leaves the attribute in the live user profile, because Apply deletes
+nothing whose removal is a migration (§Configuration as Code). No mapper reads it, so a value a
+user still holds reaches no token.
 `auth_time` exists only for an authentication ceremony, so a direct grant cannot produce a
 conformant provider token. No enterprise mapper is attached as a realm default, because doing so
 would leak stable correlation and Tenant context into external tokens.
@@ -273,7 +288,7 @@ is closed here, by configuration rather than by policy:
 | User registration | disabled | Self-registration |
 | Identity provider first-login flow | no automatic user creation | Federated auto-creation |
 | Declarative user profile `scnehaux_principal_id` | admin-managed, not user-editable | Attribute mutation through account self-service |
-| Declarative user profile `scnehaux_subject_type`, `scnehaux_workload_owner`, and `scnehaux_provider_scope` | admin-managed, not user-editable | Claim-source mutation through account self-service |
+| Declarative user profile `scnehaux_subject_type` and `scnehaux_workload_owner` | admin-managed, not user-editable | Claim-source mutation through account self-service |
 | Admin Console user creation | restricted to break-glass roles | Direct console creation |
 
 Keycloak enforces no uniqueness on user attributes, so the uniqueness invariant for
@@ -464,7 +479,6 @@ persisted against, so they are asserted rather than observed.
 | `scnehaux_principal_id` | admin-managed, not user-editable, single-valued | Preserves immutability |
 | `scnehaux_subject_type` | admin-managed, not user-editable, single-valued | Distinguishes human and workload Principals |
 | `scnehaux_workload_owner` | admin-managed, workload only, single-valued | Carries workload accountability |
-| `scnehaux_provider_scope` | admin-managed, not user-editable, single-valued | Names the bounded provider authority of a provider-scope token |
 | `firstName`, `lastName` | optional; Keycloak's own validations kept | PAD-PLT-001 minimizes personal data by purpose and lists no name among a Principal's PII. identity-control's API accepts none. A required family name shuts out every person with a single name. Keycloak's default requires both, which interrupted every login of a Principal identity-control created |
 | Audience client scopes | exactly one of internal, privileged, provider, workload, external | Applies the STD-IAM-002 claim allowlist |
 | Signing algorithm | `PS256` | STD-IAM-002 §3.2.2 initial baseline |
@@ -486,7 +500,7 @@ compatibility suite rather than left to operational discipline.
   the name attributes keep Keycloak's validations.
 - A human internal access token carries `principal_id` and `subject_type=human`.
 - A provider token, obtained by Authorization Code with PKCE, carries `principal_id`,
-  `subject_type`, `provider_scope`, `acr`, and the `auth_time` of the login, and no `tenant_id`,
+  `subject_type`, `acr`, and the `auth_time` of the login, and no `provider_scope`, `tenant_id`,
   version claim, or `workload_owner`.
 - A workload token carries `principal_id`, `subject_type=workload`, and
   `workload_owner`.
@@ -575,6 +589,8 @@ rollback, signing-key incident, and issuer change assessment.
 | Enterprise constraint | EAD-003 — canonical identifiers are opaque, stable, and authority-scoped |
 | Consumed by | `TDD-identity-control-001` — depends on the four closed creation paths and the mapper |
 | Consumed by | `TDD-identity-control-002` — projected context representation is applied against this realm |
+| Conforms to | STD-IAM-002 §3.1.1 — a resource holding provider grants or their projection checks its record; no `provider_scope` is issued |
+| Consumed by | `TDD-identity-control-006` — provider authority from the projection of Organization's grants |
 
 ### Open Proof-of-Concept Questions
 
