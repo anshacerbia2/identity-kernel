@@ -3,6 +3,7 @@ package realmdef
 // The comparison, without a Keycloak. What is asserted against a live one is in compat/.
 
 import (
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"strings"
@@ -40,6 +41,9 @@ func liveFrom(d Definition) *live {
 		attributes = append(attributes, overlay(map[string]any{"annotations": map[string]any{}}, attribute))
 	}
 	l.profile = map[string]any{"attributes": attributes}
+	if c.Defaults != nil {
+		l.defaults = DefaultScopes{Default: sortedCopy(c.Defaults.Default), Optional: sortedCopy(c.Defaults.Optional)}
+	}
 	return l
 }
 
@@ -56,7 +60,7 @@ func TestAMatchingRealmIsInSync(t *testing.T) {
 func TestAnAbsentRealmCreatesEverything(t *testing.T) {
 	d := definition(t)
 	changes := compare(d, &live{})
-	if want := 2 + len(d.Scopes) + len(d.Profile); len(changes) != want {
+	if want := 3 + len(d.Scopes) + len(d.Profile); len(changes) != want {
 		t.Fatalf("%d changes for an absent realm, want %d", len(changes), want)
 	}
 	for _, change := range changes {
@@ -98,6 +102,29 @@ func TestAnUndeclaredMapperIsADifference(t *testing.T) {
 	}
 }
 
+// A declared null is a governed absence. The definition makes firstName optional by declaring
+// required: null, and Keycloak's default still carrying required must read as a difference --
+// otherwise the plan would call the realm in sync and never apply the change.
+func TestADeclaredNullIsComparedLikeAnyValue(t *testing.T) {
+	d := definition(t)
+	l := liveFrom(d)
+	for _, attribute := range listOfMaps(l.profile["attributes"]) {
+		if name(attribute) == "firstName" {
+			attribute["required"] = map[string]any{"roles": []any{"user"}}
+			attribute["validations"] = map[string]any{"length": map[string]any{"max": 255.0}}
+		}
+	}
+	change := find(t, compare(d, l), KindAttribute, "firstName")
+	if change.Action != Update || !has(change.Diffs, "required") {
+		t.Fatalf("a required firstName against a definition declaring it optional: %s %v", change.Action, change.Diffs)
+	}
+	for _, diff := range change.Diffs {
+		if strings.Contains(diff, "validations") {
+			t.Errorf("a field the definition does not declare was compared: %s", diff)
+		}
+	}
+}
+
 func TestAMissingProfileAttributeIsACreate(t *testing.T) {
 	d := definition(t)
 	l := liveFrom(d)
@@ -121,9 +148,41 @@ func TestTheDigestFollowsTheContent(t *testing.T) {
 
 func TestParseRefusesWhatOnlyTheApplyStepMayWrite(t *testing.T) {
 	files := files(t)
-	files["scnehaux.json"] = []byte(`{"realm":"scnehaux","attributes":{"scnehaux.definition.revision":"x"}}`)
+	for _, attribute := range []string{AttrRevision, AttrDigest} {
+		files["scnehaux.json"] = []byte(`{"realm":"scnehaux","attributes":{"` + attribute + `":"x"}}`)
+		if _, err := Parse(files); err == nil {
+			t.Errorf("a definition declaring %s parsed; it could forge the applied revision", attribute)
+		}
+	}
+}
+
+// Admin-event retention has no top-level key; Keycloak keeps it as a realm attribute.
+func TestParseAcceptsAnyOtherRealmAttributeAsAString(t *testing.T) {
+	files := files(t)
+	files["scnehaux.json"] = []byte(`{"realm":"scnehaux","attributes":{"adminEventsExpiration":"604800"}}`)
+	if _, err := Parse(files); err != nil {
+		t.Errorf("a definition declaring admin-event retention was refused: %v", err)
+	}
+	files["scnehaux.json"] = []byte(`{"realm":"scnehaux","attributes":{"adminEventsExpiration":604800}}`)
 	if _, err := Parse(files); err == nil {
-		t.Error("a definition declaring realm attributes parsed; it could forge the applied revision")
+		t.Error("a realm attribute declared as a number parsed; Keycloak returns it as a string, so it would read as drift")
+	}
+}
+
+// A console change to a declared realm attribute is a difference like any other; an attribute the
+// definition does not declare, the recorded revision among them, is not compared.
+func TestADeclaredRealmAttributeIsCompared(t *testing.T) {
+	d := definition(t)
+	l := liveFrom(d)
+	attributes := l.realm["attributes"].(map[string]any)
+	attributes[AttrRevision] = "abc123"
+	if change := find(t, compare(d, l), KindRealm, d.Name()); change.Action != InSync {
+		t.Fatalf("an undeclared realm attribute reads as %s %v", change.Action, change.Diffs)
+	}
+	attributes["adminEventsExpiration"] = "60"
+	change := find(t, compare(d, l), KindRealm, d.Name())
+	if change.Action != Update || !strings.Contains(strings.Join(change.Diffs, " "), "attributes.adminEventsExpiration") {
+		t.Errorf("a shortened admin-event retention reads as %s %v, want an update naming it", change.Action, change.Diffs)
 	}
 }
 
@@ -179,4 +238,88 @@ func has(lines []string, fragment string) bool {
 		}
 	}
 	return false
+}
+
+// The realm's default client scopes are a closed set: a built-in scope Keycloak makes a default, and
+// the definition does not name, is a difference.
+func TestARealmDefaultScopeTheDefinitionDoesNotNameIsADifference(t *testing.T) {
+	d := definition(t)
+	if d.Defaults == nil {
+		t.Fatal("realm/ declares no default client scopes")
+	}
+	l := liveFrom(d)
+	l.defaults.Default = sortedCopy(append(l.defaults.Default, "profile", "email"))
+	l.defaults.Optional = []string{"offline_access"}
+	change := find(t, compare(d, l), KindDefaults, d.Name())
+	if change.Action != Update || len(change.Diffs) != 2 {
+		t.Fatalf("change = %+v, want an update naming both sets", change)
+	}
+	for _, want := range []string{"default: live [acr basic email profile], definition [acr basic]",
+		"optional: live [offline_access], definition []"} {
+		if !containsDiff(change.Diffs, want) {
+			t.Errorf("diffs %v do not name %q", change.Diffs, want)
+		}
+	}
+}
+
+// A revision from before the file existed is still a definition: it governs no default scopes, so the
+// drift check judges nothing about them, and its digest is what it always was.
+func TestADefinitionWithoutDefaultScopesGovernsNone(t *testing.T) {
+	d := definition(t)
+	files := map[string][]byte{}
+	for _, name := range Files {
+		content, err := os.ReadFile(filepath.Join("..", "..", "realm", name))
+		if err != nil {
+			t.Fatal(err)
+		}
+		files[name] = content
+	}
+	earlier, err := Parse(files)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if earlier.Defaults != nil {
+		t.Fatal("a definition without default-client-scopes.json governs default scopes")
+	}
+	for _, change := range compare(earlier, liveFrom(d)) {
+		if change.Kind == KindDefaults {
+			t.Errorf("a definition without default scopes compared them: %+v", change)
+		}
+	}
+	if strings.Contains(string(mustJSON(t, earlier)), "defaults") {
+		t.Error("a definition without default scopes carries them in its digest input")
+	}
+}
+
+func TestParseRefusesAScopeThatIsBothDefaultAndOptional(t *testing.T) {
+	files := map[string][]byte{}
+	for _, name := range Files {
+		content, err := os.ReadFile(filepath.Join("..", "..", "realm", name))
+		if err != nil {
+			t.Fatal(err)
+		}
+		files[name] = content
+	}
+	files["default-client-scopes.json"] = []byte(`{"default":["basic"],"optional":["basic"]}`)
+	if _, err := Parse(files); err == nil {
+		t.Error("a scope both default and optional was accepted")
+	}
+}
+
+func containsDiff(diffs []string, want string) bool {
+	for _, d := range diffs {
+		if d == want {
+			return true
+		}
+	}
+	return false
+}
+
+func mustJSON(t *testing.T, d Definition) []byte {
+	t.Helper()
+	encoded, err := json.Marshal(d)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return encoded
 }

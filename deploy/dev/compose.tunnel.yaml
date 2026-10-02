@@ -1,4 +1,4 @@
-# Tunnel mode: layered over compose.yaml when the server is reached through a VS Code dev tunnel
+# Tunnel mode: layered over compose.yaml when the server is reached through a dev tunnel
 # rather than a DNS name of its own.
 #
 #   docker compose -f compose.yaml -f compose.tunnel.yaml up -d --wait

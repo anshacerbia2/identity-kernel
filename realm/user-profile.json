@@ -1,6 +1,14 @@
 {
   "attributes": [
     {
+      "name": "firstName",
+      "required": null
+    },
+    {
+      "name": "lastName",
+      "required": null
+    },
+    {
       "name": "scnehaux_principal_id",
       "displayName": "Scnehaux Principal Identifier",
       "permissions": { "view": ["admin"], "edit": ["admin"] },

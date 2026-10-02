@@ -14,18 +14,20 @@ import (
 	"net/http"
 	"net/url"
 	"strings"
+	"sync"
 	"time"
 )
 
 // Credentials select how the client obtains an administrator token in the master realm: a
-// service account's client id and secret, or the bootstrap administrator's username and password.
-// The second exists for local and throwaway instances; a long-lived server should be administered
-// through a service account whose secret can be rotated without touching a person's login.
+// service account's client id and private key, or the bootstrap administrator's username and
+// password. The second exists for throwaway instances only. A long-lived server is administered
+// through a service account that authenticates with its key (STD-IAM-001 §3.2): no client secret
+// exists in a shared environment, and the key can be rotated without touching a person's login.
 type Credentials struct {
-	ClientID     string
-	ClientSecret string
-	Username     string
-	Password     string
+	ClientID  string
+	ClientKey *ClientKey
+	Username  string
+	Password  string
 }
 
 // Client calls one Keycloak's Admin API.
@@ -33,6 +35,9 @@ type Client struct {
 	base  string
 	http  *http.Client
 	creds Credentials
+
+	issuerMu sync.Mutex
+	issuer   string
 }
 
 // New validates the configuration before anything is sent, so a missing credential is a
@@ -44,10 +49,10 @@ func New(base string, httpClient *http.Client, creds Credentials) (*Client, erro
 		return nil, fmt.Errorf("admin: %q is not a Keycloak base URL", base)
 	}
 	switch {
-	case creds.ClientID != "" && creds.ClientSecret != "":
-	case creds.ClientID == "" && creds.Username != "" && creds.Password != "":
+	case creds.ClientID != "" && creds.ClientKey != nil:
+	case creds.ClientID == "" && creds.ClientKey == nil && creds.Username != "" && creds.Password != "":
 	default:
-		return nil, errors.New("admin: credentials need a client id and secret, or a username and password")
+		return nil, errors.New("admin: credentials need a client id and its private key, or a username and password")
 	}
 	if httpClient == nil {
 		httpClient = &http.Client{Timeout: 20 * time.Second}
@@ -155,9 +160,18 @@ func (c *Client) GetJSON(ctx context.Context, path string, into any) error {
 func (c *Client) token(ctx context.Context) (string, error) {
 	form := url.Values{}
 	if c.creds.ClientID != "" {
+		audience, err := c.masterIssuer(ctx)
+		if err != nil {
+			return "", err
+		}
+		assertion, err := c.creds.ClientKey.ClientAssertion(c.creds.ClientID, audience, time.Now())
+		if err != nil {
+			return "", err
+		}
 		form.Set("grant_type", "client_credentials")
 		form.Set("client_id", c.creds.ClientID)
-		form.Set("client_secret", c.creds.ClientSecret)
+		form.Set("client_assertion_type", ClientAssertionType)
+		form.Set("client_assertion", assertion)
 	} else {
 		form.Set("grant_type", "password")
 		form.Set("client_id", "admin-cli")
@@ -189,6 +203,37 @@ func (c *Client) token(ctx context.Context) (string, error) {
 		return "", errors.New("admin: the master realm returned no access token")
 	}
 	return out.AccessToken, nil
+}
+
+// masterIssuer is the master realm's issuer, which a client assertion names as its audience. It is
+// read from discovery rather than built from the base URL. Behind a fixed hostname, or with the
+// master realm's frontend URL set as tunnel mode sets it, the issuer is not the address this client
+// reaches Keycloak on, and an assertion naming that address is refused. It is read once per client.
+func (c *Client) masterIssuer(ctx context.Context) (string, error) {
+	c.issuerMu.Lock()
+	defer c.issuerMu.Unlock()
+	if c.issuer != "" {
+		return c.issuer, nil
+	}
+	request, err := http.NewRequestWithContext(ctx, http.MethodGet,
+		c.base+"/realms/master/.well-known/openid-configuration", nil)
+	if err != nil {
+		return "", fmt.Errorf("admin: %w", err)
+	}
+	response, err := c.http.Do(request)
+	if err != nil {
+		return "", fmt.Errorf("admin: reaching Keycloak at %s: %w", c.base, err)
+	}
+	defer func() { _ = response.Body.Close() }()
+	var discovery struct {
+		Issuer string `json:"issuer"`
+	}
+	body, _ := io.ReadAll(io.LimitReader(response.Body, 1<<20))
+	if response.StatusCode != http.StatusOK || json.Unmarshal(body, &discovery) != nil || discovery.Issuer == "" {
+		return "", fmt.Errorf("admin: the master realm's discovery document answered %d without an issuer", response.StatusCode)
+	}
+	c.issuer = discovery.Issuer
+	return c.issuer, nil
 }
 
 func truncate(s string) string {

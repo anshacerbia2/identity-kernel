@@ -3,12 +3,12 @@ doc_meta:
   id: TDD-identity-kernel-001
   title: Realm Topology, Issuer Identity, and Token Claim Projection
   owner: Identity Platform Team
-  version: 1.4.0
+  version: 1.9.0
   status: approved
   classification: restricted
   review_cycle_days: 90
   created_date: 2026-08-11
-  last_reviewed: 2026-09-25
+  last_reviewed: 2026-10-02
   parent_sad: SAD-001
 ---
 
@@ -147,18 +147,101 @@ configuration that turns them into the STD-IAM-002 contract:
 
 | Source attribute | Claim | Profile |
 | :-- | :-- | :-- |
-| `scnehaux_principal_id` | `principal_id` | internal, privileged, workload |
-| `scnehaux_subject_type` | `subject_type` | internal, privileged, workload |
+| `scnehaux_principal_id` | `principal_id` | internal, privileged, provider, workload |
+| `scnehaux_subject_type` | `subject_type` | internal, privileged, provider, workload |
 | `scnehaux_workload_owner` | `workload_owner` | workload only |
+| authentication session (`AUTH_TIME` note), authentication level | `auth_time`, `acr` | privileged, provider |
 | projected active Tenant | `tenant_id` | internal, privileged, tenant-scoped workload |
 | projected active Workspace | `workspace_id` | optional internal/privileged/workload |
 | projected Membership version | `membership_version` | whenever `tenant_id` is present |
 | projected Tenant security version | `tenant_security_version` | whenever `tenant_id` is present |
 
-These mappers live in `scnehaux-internal`, `scnehaux-privileged`, and
-`scnehaux-workload` client scopes. `scnehaux-external` contains none of them and uses a
-pairwise `sub`. No enterprise mapper is attached as a realm default, because doing so
+These mappers live in the audience client scopes of STD-IAM-002 §3.2.1:
+`scnehaux-internal`, `scnehaux-privileged`, `scnehaux-provider`, and `scnehaux-workload`.
+`scnehaux-external` contains none of them and uses a pairwise `sub`.
+
+`scnehaux-provider` is the provider-scope form of the privileged profile (§3.1.1). It carries
+`principal_id`, `subject_type`, `acr`, and `auth_time`, and never `tenant_id` or a version claim,
+because a provider operation belongs to no Tenant. It is what identity-control accepts to mint a
+Principal.
+
+**It carries no `provider_scope`.** STD-IAM-002 §3.1.1 requires a resource that holds a provider
+grant, or a projection of it, to check its record for each request by the token's `principal_id`,
+and never to read the grant from a claim. Organization Control holds the grants and identity-control
+holds the projection of `provider:identity-control` (`ADR-ORG-002 §5.3`,
+`TDD-identity-control-006`). No resource in the estate checks a provider grant from a claim, so the
+kernel issues none. This is how Google Cloud IAM and Kubernetes decide access: the token establishes
+who the caller is, and the resource evaluates the policy it holds (STD-IAM-002 R19, R20). A claim
+would also outlive an activation ended early until the token expired. The `provider_scope` mapper
+and the `scnehaux_provider_scope` attribute are therefore not in the definition.
+
+*Tradeoff.* A client still configured for the old profile stops working, because identity-control
+refuses a token that carries the claim, rather than being read silently as an owner. On a realm
+applied before this revision, `realm-apply` deletes the mapper, because a managed scope's mapper
+set is the definition's. It leaves the attribute in the live user profile, because Apply deletes
+nothing whose removal is a migration (§Configuration as Code). No mapper reads it, so a value a
+user still holds reaches no token.
+`auth_time` exists only for an authentication ceremony, so a direct grant cannot produce a
+conformant provider token. No enterprise mapper is attached as a realm default, because doing so
 would leak stable correlation and Tenant context into external tokens.
+
+`scnehaux-workload` is the workload profile. It carries `principal_id`, `subject_type` and
+`workload_owner`, and never `acr`, `auth_time`, `provider_scope` or, until the context projection
+exists, any Tenant claim. **A workload's claim-source attributes live on its client's
+service-account user.** A workload authenticates as its own client with the client credentials
+grant and a registered key (`ADR-IAM-001 §5.12`), and that grant issues its token for the
+client's service-account user, the user Keycloak creates with the client. No other user's
+attributes reach the token. identity-control therefore writes `scnehaux_principal_id`,
+`scnehaux_subject_type=workload` and `scnehaux_workload_owner` on that user, under the same
+declared profile as a human's. `workload_owner` is mapped by this scope alone, so a human who came
+to hold the attribute still receives no `workload_owner` claim.
+
+**A workload client does not hold the built-in `acr` scope.** Keycloak makes `acr` a realm default
+client scope, so every new client holds it, and it puts `acr=1` into a client credentials token,
+which STD-IAM-002 §3.2 prohibits for a workload. identity-control detaches it when it registers a
+workload (`TDD-identity-control-003`). The realm default is left as it is: removing it would change
+every client created after, and a provider token's `acr` comes from `scnehaux-provider` either way.
+`compat/workload_test.go` asserts the workload token, the detachment included, and the absence of
+`workload_owner` from an internal token. The tenant-scoped workload form waits on the context projection, as `tenant_id` does for
+every profile.
+
+**The realm's default client scopes are `basic` and `acr`, and nothing else.** Keycloak creates a
+realm with `profile`, `email`, `roles`, `web-origins` and others as default and optional client
+scopes, so every new client held them, and compat run 36775603547 found their claims in internal and
+workload access tokens: email, names, usernames, realm and client roles. STD-IAM-002 §3.2 prohibits
+personal data and roles in an access token, so `realm/default-client-scopes.json` declares the two
+sets, and `realm-apply` holds both as closed sets: a scope it does not name is removed from them,
+and a console change to either is drift. `basic` gives `sub` and `auth_time`, and `acr` the
+authentication context; the audience profile scope a client registers with adds the rest.
+
+Changing the realm's defaults changes only the clients created after it. identity-control detaches
+the built-in scopes from the clients it already registered or adopted, and its sweep holds them
+detached (`TDD-identity-control-003`). Keycloak's admin endpoints authorize a client's service
+account from its role mappings, not from the roles in its token, so a client without `roles` keeps
+its administration access. The account API is the exception: it authorizes self-service from the
+account roles in the token. The realm's built-in `account-console` client keeps the scopes it was
+made with, `roles` among them, because it is made with the realm, before the defaults are narrowed,
+so a user's self-service through it is unchanged. `compat/immutability_test.go` gives its probe
+client `roles` for the same reason.
+
+**`service_account` keeps only its `client_id` mapper.** Keycloak attaches the built-in scope to a
+client whose service accounts are enabled, and attaches it again on every update of such a client
+(`ClientManager.updateClientServiceAccount`), so a workload cannot be kept without it: identity-control
+found a detachment undone by the next key rotation. Its other two mappers write the client's network
+address, `clientHost` and `clientAddress`, into the token. So `realm/client-scopes.json` declares the
+scope with its `Client ID` mapper alone, `realm-apply` removes the other two as it removes any
+undeclared mapper of a declared scope, and a workload holds the scope without the address reaching a
+token. The scope is not removed or renamed: Keycloak looks it up by name.
+
+**`scnehaux-profile` gives a first-party BFF the name it shows, in the ID token only.** Its two
+mappers write `name` and `preferred_username` into the ID token and UserInfo and never into an
+access token. It is not a realm default and not an audience profile: identity-control attaches it
+to a confidential client as an optional scope, and the BFF requests it at sign-in.
+
+Three claims are written by the kernel's token code rather than by a mapper, and no scope removes
+them: `azp`, `sid` and a payload `typ`. STD-IAM-002 §3.2 admits them. `compat/claim_closure_test.go`
+asserts that an access token carries nothing beyond the claims STD-IAM-002 §3.2 defines, RFC 9068
+§2.2 requires, and those three.
 
 | Surface | Requirement |
 | :-- | :-- |
@@ -396,7 +479,8 @@ persisted against, so they are asserted rather than observed.
 | `scnehaux_principal_id` | admin-managed, not user-editable, single-valued | Preserves immutability |
 | `scnehaux_subject_type` | admin-managed, not user-editable, single-valued | Distinguishes human and workload Principals |
 | `scnehaux_workload_owner` | admin-managed, workload only, single-valued | Carries workload accountability |
-| Audience client scopes | exactly one of internal, privileged, workload, external | Applies the STD-IAM-002 claim allowlist |
+| `firstName`, `lastName` | optional; Keycloak's own validations kept | PAD-PLT-001 minimizes personal data by purpose and lists no name among a Principal's PII. identity-control's API accepts none. A required family name shuts out every person with a single name. Keycloak's default requires both, which interrupted every login of a Principal identity-control created |
+| Audience client scopes | exactly one of internal, privileged, provider, workload, external | Applies the STD-IAM-002 claim allowlist |
 | Signing algorithm | `PS256` | STD-IAM-002 §3.2.2 initial baseline |
 | Preview features | disabled | ADR-IAM-001 §5.8 requires a separate ADR to enable any |
 | Image | pinned by digest | SAD-001 §7.6 |
@@ -412,7 +496,12 @@ compatibility suite rather than left to operational discipline.
 ### Realm Contract
 
 - A created Principal carries `scnehaux_principal_id` in its Keycloak representation.
+- A Principal with no name logs in without the kernel interrupting the flow to collect one, and
+  the name attributes keep Keycloak's validations.
 - A human internal access token carries `principal_id` and `subject_type=human`.
+- A provider token, obtained by Authorization Code with PKCE, carries `principal_id`,
+  `subject_type`, `acr`, and the `auth_time` of the login, and no `provider_scope`, `tenant_id`,
+  version claim, or `workload_owner`.
 - A workload token carries `principal_id`, `subject_type=workload`, and
   `workload_owner`.
 - Every surface the adopted configuration claims to cover carries the profile's claim
@@ -500,6 +589,8 @@ rollback, signing-key incident, and issuer change assessment.
 | Enterprise constraint | EAD-003 — canonical identifiers are opaque, stable, and authority-scoped |
 | Consumed by | `TDD-identity-control-001` — depends on the four closed creation paths and the mapper |
 | Consumed by | `TDD-identity-control-002` — projected context representation is applied against this realm |
+| Conforms to | STD-IAM-002 §3.1.1 — a resource holding provider grants or their projection checks its record; no `provider_scope` is issued |
+| Consumed by | `TDD-identity-control-006` — provider authority from the projection of Organization's grants |
 
 ### Open Proof-of-Concept Questions
 
@@ -510,8 +601,9 @@ standard amendment.
    introspection can carry each audience profile's required claim set through supported
    mappers. Any mandatory access-token claim uncovered is the escalation case.
    **Answered 2026-09-25: outcome 1, all four covered** — see §Claim Projection. Answered for
-   the internal human profile; the workload profile's `workload_owner` is exercised when the
-   workload path is built.
+   the internal human profile first. The workload profile's access token is asserted by
+   `compat/workload_test.go`: `principal_id`, `subject_type` and `workload_owner` from the
+   service-account user, and no `acr`, `auth_time` or Tenant claim.
 2. **Attribute search semantics.** Whether `q=scnehaux_principal_id:{id}` is
    exact-match and how it paginates. Determines the recovery mechanism in
    `TDD-identity-control-001`; the creation path is unaffected either way.

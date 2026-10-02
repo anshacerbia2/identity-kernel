@@ -25,8 +25,8 @@ services:
     networks: [internal]
 
   keycloak:
-    # quay.io/keycloak/keycloak:26.7.4 -- the digest in image/keycloak.ref
-    image: quay.io/keycloak/keycloak@sha256:82a77884f3af238beab1e7afd63b5f530e1b5c0590bd7aa60b40a40463e29b2c
+    # quay.io/keycloak/keycloak:26.7.5 -- the digest in image/keycloak.ref
+    image: quay.io/keycloak/keycloak@sha256:37dbaf6f0722c9ec246335f36e1ef8b2e6cb960f7c27e0d8c615121a3d475a85
     restart: unless-stopped
     # start, not start-dev: production mode, with its hostname, proxy and cache behaviour. A
     # development server that runs start-dev tests a Keycloak nobody deploys.
@@ -60,7 +60,10 @@ services:
       timeout: 5s
       retries: 30
       start_period: 60s
-    networks: [internal]
+    # api is the one network other development services join to reach Keycloak -- identity-control's
+    # Admin API client, for one. They join it rather than internal, so they reach Keycloak and
+    # nothing else here: not its Postgres, not the proxy.
+    networks: [internal, api]
 
   caddy:
     # caddy:2.11.4-alpine
@@ -82,6 +85,40 @@ services:
         condition: service_healthy
     networks: [internal]
 
+  # Brings the realm to realm/ on every `docker compose up`, once Keycloak is healthy, and exits.
+  # It refuses -- exits non-zero and changes nothing -- when the live realm carries changes the
+  # definition at the last applied revision does not: console drift surfaces at the next up rather
+  # than being overwritten. `docker compose logs realm-apply` shows the plan it acted on.
+  #
+  # The checkout is mounted read-only: realm-apply reads the definition at the recorded revision with
+  # git, and refuses to apply from uncommitted changes under realm/. Credentials are a master-realm
+  # service account when KEYCLOAK_ADMIN_CLIENT_ID is set (create-apply-client.sh), else the bootstrap
+  # administrator.
+  realm-apply:
+    build:
+      context: ../..
+      dockerfile: deploy/dev/realm-apply.Dockerfile
+    restart: "no"
+    command:
+      - -environment=${REALM_ENVIRONMENT:-development}
+      - -definition=/repo/realm
+      - -url=http://keycloak:8080
+      - -apply
+    environment:
+      KEYCLOAK_ADMIN_CLIENT_ID: ${KEYCLOAK_ADMIN_CLIENT_ID:-}
+      # The service account's private key, mounted from ./keys. With KEYCLOAK_ADMIN_CLIENT_ID set,
+      # the key is required and the password below is never used.
+      KEYCLOAK_ADMIN_CLIENT_KEY_FILE: /keys/${KEYCLOAK_ADMIN_CLIENT_ID:-realm-apply}.pem
+      KEYCLOAK_ADMIN_USER: ${KC_BOOTSTRAP_ADMIN_USERNAME:-admin}
+      KEYCLOAK_ADMIN_PASSWORD: ${KC_BOOTSTRAP_ADMIN_PASSWORD:?set KC_BOOTSTRAP_ADMIN_PASSWORD in .env}
+    volumes:
+      - ../..:/repo:ro
+      - ./keys:/keys:ro
+    depends_on:
+      keycloak:
+        condition: service_healthy
+    networks: [internal]
+
 volumes:
   postgres:
   caddy-data:
@@ -89,3 +126,7 @@ volumes:
 
 networks:
   internal:
+  # A fixed name, so a stack in another repository can declare it external. If the host's address
+  # ranges overlap Docker's defaults, pin its subnet in a local override as for internal.
+  api:
+    name: scnehaux-identity-api

@@ -1,4 +1,4 @@
-# The development Keycloak behind a public VS Code dev tunnel.
+# The development Keycloak behind a public dev tunnel (devtunnel CLI, or any tunnel that forwards plain HTTP).
 #
 # The tunnel terminates TLS and forwards plain HTTP to this listener, so Caddy serves HTTP only and
 # obtains no certificate. Every request arrives from the tunnel agent, which makes an address

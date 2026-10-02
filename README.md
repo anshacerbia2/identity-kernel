@@ -127,9 +127,28 @@ one.
 CI applies the realm with this tool, and a server is applied with the same tool.
 Credentials come from the environment, never from a flag:
 
-- **Service account:** `KEYCLOAK_ADMIN_CLIENT_ID` and `KEYCLOAK_ADMIN_CLIENT_SECRET`, for
-  a master-realm service account. Use this on a long-lived server.
-- **Bootstrap administrator:** `KEYCLOAK_ADMIN_USER` and `KEYCLOAK_ADMIN_PASSWORD`.
+- **Service account:** `KEYCLOAK_ADMIN_CLIENT_ID` and `KEYCLOAK_ADMIN_CLIENT_KEY_FILE`, the
+  path of its PEM private key. Use this on a long-lived server. It authenticates by signed JWT
+  (`private_key_jwt`), because no client in a shared environment holds a client secret
+  (`ADR-IAM-001 §5.12`, `STD-IAM-001 §3.2`). The assertion's audience is read from the master
+  realm's discovery document, so a fixed hostname or tunnel frontend URL needs no configuration.
+  With the client ID set, a key that fails to load is an error, never a fall back to the password.
+- **Bootstrap administrator:** `KEYCLOAK_ADMIN_USER` and `KEYCLOAK_ADMIN_PASSWORD`, for a
+  throwaway instance such as CI's.
+
+### Client keys: `cmd/client-key`
+
+Confidential clients created before identity-control can register them use this tool. That covers
+realm-apply's account, identity-control's own clients, the development caller, and the BFFs.
+
+- `client-key new -out NAME.pem` makes a 3072-bit RSA pair. It writes the private key (mode 0600)
+  and prints the public JWK beside it. The `kid` is the key's RFC 7638 thumbprint, so a deployable
+  is configured with its key file and nothing else.
+- `client-key install` sets a client to authenticate with exactly the JWKs it is given: two during
+  a rotation. It regenerates the client's old secret without printing it.
+
+`deploy/dev/new-client-key.sh` and `deploy/dev/set-client-key.sh` run the tool from the realm-apply
+image, so a server needs only Docker.
 
 ```sh
 # plan: read-only, prints what applying would change
@@ -157,6 +176,7 @@ reproduce what it applied.
 | Only `local`, `ci`, and `development` are accepted | `signing-key.generated.json` has Keycloak generate the signing key in-process, which TDD-identity-kernel-002 prohibits wherever real tokens are served. It is 3072-bit because `foundation-platform`'s verifier silently discards smaller keys |
 | A client scope's mapper set is closed | A mapper added by hand is how `principal_id` would reach an audience it is kept from, so an undeclared mapper is drift, and applying removes it |
 | Nothing else is deleted | Removing a user-profile attribute makes Keycloak discard its values from every user on their next write. Removing a client scope strips its claims from every client using it. Both are migrations, not configuration changes |
+| A declared attribute is laid over the live one | The definition governs the fields it names and Keycloak keeps the rest, the same rule the comparison follows. So one field of a built-in attribute can be governed without restating its validations. `firstName`'s `required: null` is the case in point, and a declared null removes the field |
 | The drift check reaches only what `realm/` declares | A console change to an undeclared field is not seen. Declaring a field is what guards it |
 | After applying, the tool re-plans before recording | A value Keycloak normalises or drops on write fails the apply, instead of reading as drift on the next run |
 

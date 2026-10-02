@@ -56,12 +56,27 @@ func ParseEnvironment(name string) (Environment, error) {
 // Files are the definition's sources under realm/, in the order they are applied.
 var Files = []string{"scnehaux.json", "signing-key.generated.json", "client-scopes.json", "user-profile.json"}
 
+// OptionalFiles are sources a definition may lack. A revision from before one was added is still a
+// definition, so the drift check can judge the live realm against it.
+var OptionalFiles = []string{"default-client-scopes.json"}
+
 // Definition is the declared state of one realm.
 type Definition struct {
 	Realm   map[string]any   `json:"realm"`
 	Key     map[string]any   `json:"key"`
 	Scopes  []map[string]any `json:"scopes"`
 	Profile []map[string]any `json:"profile"`
+	// Defaults are the realm's default client scopes, the ones every new client is given. Nil when
+	// the definition does not govern them, as before it declared them; omitted from the digest then,
+	// so an earlier revision's digest is unchanged.
+	Defaults *DefaultScopes `json:"defaults,omitempty"`
+}
+
+// DefaultScopes are the client scopes a new client holds as default and as optional scopes, by name.
+// Both sets are the definition's: a scope it does not name is not a realm default.
+type DefaultScopes struct {
+	Default  []string `json:"default"`
+	Optional []string `json:"optional"`
 }
 
 // Name is the realm's name.
@@ -99,6 +114,16 @@ func Load(dir string) (Definition, error) {
 		}
 		files[name] = content
 	}
+	for _, name := range OptionalFiles {
+		content, err := os.ReadFile(filepath.Join(dir, name))
+		switch {
+		case errors.Is(err, os.ErrNotExist):
+			continue
+		case err != nil:
+			return Definition{}, fmt.Errorf("reading the realm definition: %w", err)
+		}
+		files[name] = content
+	}
 	return Parse(files)
 }
 
@@ -124,6 +149,13 @@ func Parse(files map[string][]byte) (Definition, error) {
 		}
 	}
 	d.Profile = profile.Attributes
+	if content, ok := files["default-client-scopes.json"]; ok {
+		var defaults DefaultScopes
+		if err := json.Unmarshal(content, &defaults); err != nil {
+			return Definition{}, fmt.Errorf("parsing default-client-scopes.json: %w", err)
+		}
+		d.Defaults = &defaults
+	}
 	return d, d.validate()
 }
 
@@ -131,9 +163,24 @@ func (d Definition) validate() error {
 	if d.Name() == "" {
 		return errors.New("scnehaux.json names no realm")
 	}
-	if _, present := d.Realm["attributes"]; present {
-		return errors.New("scnehaux.json declares realm attributes; they hold the applied revision and " +
-			"are written only by the apply step")
+	// Realm attributes are where Keycloak keeps some settings with no top-level key, admin-event
+	// retention among them, so the definition may declare them. Not the two that hold the applied
+	// revision: a definition that declared those could forge the baseline drift is judged by.
+	if declared, present := d.Realm["attributes"]; present {
+		attributes, ok := declared.(map[string]any)
+		if !ok {
+			return errors.New("scnehaux.json declares realm attributes that are not an object")
+		}
+		for key, value := range attributes {
+			if key == AttrRevision || key == AttrDigest {
+				return fmt.Errorf("scnehaux.json declares the realm attribute %s; it holds the applied "+
+					"revision and is written only by the apply step", key)
+			}
+			if _, isString := value.(string); !isString {
+				return fmt.Errorf("scnehaux.json declares the realm attribute %s as %v; Keycloak keeps "+
+					"realm attributes as strings, so anything else would read as drift", key, value)
+			}
+		}
 	}
 	if name(d.Key) == "" || d.Key["providerId"] == nil {
 		return errors.New("signing-key.generated.json needs a name and a providerId")
@@ -153,6 +200,16 @@ func (d Definition) validate() error {
 					scopeName, mapperName)
 			}
 			mappers[mapperName] = true
+		}
+	}
+	if d.Defaults != nil {
+		seen := map[string]bool{}
+		for _, scopeName := range append(append([]string{}, d.Defaults.Default...), d.Defaults.Optional...) {
+			if scopeName == "" || seen[scopeName] {
+				return fmt.Errorf("default-client-scopes.json names an empty or repeated scope %q; a scope is "+
+					"a default or an optional one, not both", scopeName)
+			}
+			seen[scopeName] = true
 		}
 	}
 	attributes := map[string]bool{}

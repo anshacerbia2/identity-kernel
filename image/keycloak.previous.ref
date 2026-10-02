@@ -1,0 +1,9 @@
+# The release servers ran before image/keycloak.ref: the upgrade job starts it first, upgrades its
+# database with the candidate, and then starts it again on the migrated database to determine the
+# rollback boundary (TDD-identity-kernel-005 §Determining the Rollback Boundary). It changes in the
+# same commit as image/keycloak.ref, to the digest that one replaces.
+#
+# 26.7.4, published 2026-09-16, pinned 2026-09-25.
+#
+# The first non-comment line is the reference the upgrade job runs.
+quay.io/keycloak/keycloak@sha256:82a77884f3af238beab1e7afd63b5f530e1b5c0590bd7aa60b40a40463e29b2c

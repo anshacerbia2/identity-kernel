@@ -54,21 +54,38 @@ func Apply(ctx context.Context, c *admin.Client, plan Plan, options Options) err
 
 	d := plan.definition
 	base := "/admin/realms/" + url.PathEscape(d.Name())
+	changes := plan.Changes
+	if plan.live.realm == nil {
+		// Keycloak creates a realm with built-in objects the definition may also declare, the
+		// service_account client scope among them. A plan made before the realm existed would create
+		// them a second time, which Keycloak refuses, so the realm is created first and the rest is
+		// planned against what it then holds.
+		if err := applyRealm(ctx, c, d, plan.live, Create); err != nil {
+			return fmt.Errorf("applying %s %s: %w", KindRealm, d.Name(), err)
+		}
+		created, err := NewPlan(ctx, c, d, nil)
+		if err != nil {
+			return fmt.Errorf("planning against the created realm: %w", err)
+		}
+		plan.live, changes = created.live, created.Changes
+	}
 	profileChanged := false
-	for _, change := range plan.Changes {
+	for _, change := range changes {
 		if change.Action == InSync {
 			continue
 		}
 		var err error
 		switch change.Kind {
 		case KindRealm:
-			err = applyRealm(ctx, c, d, change.Action)
+			err = applyRealm(ctx, c, d, plan.live, change.Action)
 		case KindKey:
 			err = applyKey(ctx, c, base, d.Key, plan.live, change.Action)
 		case KindScope:
 			err = applyScope(ctx, c, base, scopeNamed(d, change.Name), plan.live, change.Action)
 		case KindAttribute:
 			profileChanged = true
+		case KindDefaults:
+			err = applyDefaults(ctx, c, base, *d.Defaults)
 		}
 		if err != nil {
 			return fmt.Errorf("applying %s %s: %w", change.Kind, change.Name, err)
@@ -105,13 +122,21 @@ func Apply(ctx context.Context, c *admin.Client, plan Plan, options Options) err
 	return record(ctx, c, base, d, options.Revision)
 }
 
-func applyRealm(ctx context.Context, c *admin.Client, d Definition, action Action) error {
+func applyRealm(ctx context.Context, c *admin.Client, d Definition, l *live, action Action) error {
 	if action == Create {
 		_, err := c.Call(ctx, http.MethodPost, "/admin/realms", d.Realm, http.StatusCreated)
 		return err
 	}
-	// A partial representation: Keycloak updates the fields present and leaves the rest.
-	_, err := c.Call(ctx, http.MethodPut, "/admin/realms/"+url.PathEscape(d.Name()), d.Realm, http.StatusNoContent)
+	// A partial representation: Keycloak updates the fields present and leaves the rest. The
+	// attributes are the exception, sent as one map, so the declared ones are laid over the live
+	// ones rather than sent alone -- the recorded revision among them, which the drift check
+	// depends on.
+	body := d.Clone().Realm
+	if declared, ok := body["attributes"].(map[string]any); ok {
+		liveAttributes, _ := l.realm["attributes"].(map[string]any)
+		body["attributes"] = overlay(liveAttributes, declared)
+	}
+	_, err := c.Call(ctx, http.MethodPut, "/admin/realms/"+url.PathEscape(d.Name()), body, http.StatusNoContent)
 	return err
 }
 
@@ -180,9 +205,77 @@ func applyScope(ctx context.Context, c *admin.Client, base string, scope map[str
 	return nil
 }
 
+// applyDefaults makes the realm's default and optional client scopes exactly the declared sets. The
+// scopes are read again rather than taken from the plan, because a scope this apply created has an
+// identifier only now. Every removal comes before any addition, so a scope moving between the two
+// sets is never in both.
+func applyDefaults(ctx context.Context, c *admin.Client, base string, declared DefaultScopes) error {
+	var scopes []map[string]any
+	if err := c.GetJSON(ctx, base+"/client-scopes", &scopes); err != nil {
+		return fmt.Errorf("reading the client scopes: %w", err)
+	}
+	ids := map[string]string{}
+	for _, scope := range scopes {
+		id, _ := scope["id"].(string)
+		ids[name(scope)] = id
+	}
+	sets := []struct {
+		path string
+		want []string
+	}{{"/default-default-client-scopes", declared.Default}, {"/default-optional-client-scopes", declared.Optional}}
+	current := make([]map[string]bool, len(sets))
+	for i, set := range sets {
+		var listed []map[string]any
+		if err := c.GetJSON(ctx, base+set.path, &listed); err != nil {
+			return fmt.Errorf("reading %s: %w", strings.TrimPrefix(set.path, "/"), err)
+		}
+		current[i] = map[string]bool{}
+		for _, scope := range listed {
+			current[i][name(scope)] = true
+		}
+	}
+	for i, set := range sets {
+		want := map[string]bool{}
+		for _, scopeName := range set.want {
+			want[scopeName] = true
+		}
+		for _, scopeName := range sortedKeys(current[i]) {
+			if want[scopeName] {
+				continue
+			}
+			if _, err := c.Call(ctx, http.MethodDelete, base+set.path+"/"+url.PathEscape(ids[scopeName]), nil,
+				http.StatusNoContent); err != nil {
+				return fmt.Errorf("removing %s from %s: %w", scopeName, strings.TrimPrefix(set.path, "/"), err)
+			}
+		}
+	}
+	for i, set := range sets {
+		for _, scopeName := range sortedCopy(set.want) {
+			if current[i][scopeName] {
+				continue
+			}
+			id, ok := ids[scopeName]
+			if !ok {
+				return fmt.Errorf("default-client-scopes.json names %s, which the realm does not have", scopeName)
+			}
+			if _, err := c.Call(ctx, http.MethodPut, base+set.path+"/"+url.PathEscape(id), nil,
+				http.StatusNoContent); err != nil {
+				return fmt.Errorf("adding %s to %s: %w", scopeName, strings.TrimPrefix(set.path, "/"), err)
+			}
+		}
+	}
+	return nil
+}
+
 // applyProfile writes the declared attributes into the live profile by name, leaving every other
-// attribute -- Keycloak's username, email, first and last name among them -- as it is. PUT replaces
-// the whole configuration, so the live one is read and edited rather than replaced.
+// attribute as it is. PUT replaces the whole configuration, so the live one is read and edited rather
+// than replaced.
+//
+// A declared attribute is laid over the live one rather than substituted for it: the definition states
+// what it governs and Keycloak keeps the rest, the same rule the comparison follows. That is what lets
+// the definition govern one field of a built-in attribute -- firstName's required, for one -- without
+// restating, and silently discarding, the validations Keycloak ships it with. A declared null removes
+// the field.
 func applyProfile(ctx context.Context, c *admin.Client, base string, declared []map[string]any) error {
 	path := base + "/users/profile"
 	var profile map[string]any
@@ -194,7 +287,7 @@ func applyProfile(ctx context.Context, c *admin.Client, base string, declared []
 		replaced := false
 		for i := range attributes {
 			if name(attributes[i]) == name(attribute) {
-				attributes[i] = attribute
+				attributes[i] = overlay(attributes[i], attribute)
 				replaced = true
 			}
 		}
