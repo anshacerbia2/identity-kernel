@@ -377,6 +377,28 @@ them over the live attributes on apply, so the record is never dropped.
 **Exit:** a candidate release that changes the issuer form, drops a claim from a
 covered surface, or reopens a creation path fails the suite.
 
+## Development server
+
+✅ A long-lived development Keycloak, so local applications have a real issuer to develop against.
+[`deploy/dev/`](deploy/dev/README.md) runs the pinned image in production mode on Postgres. The realm
+is applied with `cmd/realm-apply`. Two access modes, and CI brings up both:
+
+- **A DNS name:** Caddy obtains the certificate, and administration is allowlisted by address.
+- **A dev tunnel (the current server):**
+  - The public tunnel port reaches Caddy, which refuses `/admin` and `/realms/master` to everyone.
+  - Administration uses an owner-only tunnel port.
+  - An address allowlist cannot work behind a tunnel, because every request arrives from the tunnel
+    agent.
+
+It is development only:
+
+- `realm-apply` refuses any environment that serves real tokens, because the signing key is generated
+  in-process.
+- The tunnel host is the issuer, so it is not the production issuer, and nothing may store a
+  development `iss` as though it were.
+- Principals are created by `identity-control`, which runs beside it (identity-control's
+  `deploy/dev/`), and never by hand in the Admin Console.
+
 ## Sender constraint, the recorded gap
 
 STD-IAM-002 §3.8 records that the baseline's access tokens are bearer tokens, although RFC 9700
