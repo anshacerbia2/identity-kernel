@@ -23,9 +23,8 @@ func TestAPrincipalWithoutANameCanLogIn(t *testing.T) {
 		"email":         p.username + "@compat.invalid",
 		"emailVerified": true,
 		"attributes": map[string][]string{
-			"scnehaux_principal_id":   {p.principalID},
-			"scnehaux_subject_type":   {"human"},
-			"scnehaux_provider_scope": {providerScopeValue},
+			"scnehaux_principal_id": {p.principalID},
+			"scnehaux_subject_type": {"human"},
 		},
 		"credentials":     []map[string]any{{"type": "password", "value": p.password, "temporary": false}},
 		"requiredActions": []string{},

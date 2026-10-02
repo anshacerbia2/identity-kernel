@@ -21,7 +21,7 @@ import (
 var closure = map[string]bool{
 	"iss": true, "sub": true, "aud": true, "exp": true, "iat": true, "jti": true, "client_id": true, "scope": true,
 	"principal_id": true, "subject_type": true, "tenant_id": true, "workspace_id": true,
-	"membership_version": true, "tenant_security_version": true, "provider_scope": true,
+	"membership_version": true, "tenant_security_version": true,
 	"acr": true, "auth_time": true, "workload_owner": true,
 	// Written by the kernel's token code, not by a mapper.
 	"azp": true, "sid": true, "typ": true,

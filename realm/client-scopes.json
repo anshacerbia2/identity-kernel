@@ -44,7 +44,7 @@
   },
   {
     "name": "scnehaux-provider",
-    "description": "STD-IAM-002 privileged profile, provider-scope form. Carries principal_id, subject_type, provider_scope, acr and auth_time; never tenant_id. Never a realm default.",
+    "description": "STD-IAM-002 privileged profile, provider-scope form at a resource that holds the grants or their projection. Carries principal_id, subject_type, acr and auth_time; never provider_scope or tenant_id. Never a realm default.",
     "protocol": "openid-connect",
     "attributes": {
       "include.in.token.scope": "true",
@@ -74,22 +74,6 @@
         "config": {
           "user.attribute": "scnehaux_subject_type",
           "claim.name": "subject_type",
-          "jsonType.label": "String",
-          "multivalued": "false",
-          "aggregate.attrs": "false",
-          "access.token.claim": "true",
-          "id.token.claim": "true",
-          "userinfo.token.claim": "true",
-          "introspection.token.claim": "true"
-        }
-      },
-      {
-        "name": "provider_scope",
-        "protocol": "openid-connect",
-        "protocolMapper": "oidc-usermodel-attribute-mapper",
-        "config": {
-          "user.attribute": "scnehaux_provider_scope",
-          "claim.name": "provider_scope",
           "jsonType.label": "String",
           "multivalued": "false",
           "aggregate.attrs": "false",
