@@ -86,6 +86,17 @@ func Apply(ctx context.Context, c *admin.Client, plan Plan, options Options) err
 			profileChanged = true
 		case KindDefaults:
 			err = applyDefaults(ctx, c, base, *d.Defaults)
+		case KindFlow:
+			flow, _ := flowNamed(d, change.Name)
+			if change.Action == Update {
+				if err = rebuildUnbound(ctx, c, base, plan.live, flow); errors.Is(err, ErrFlowChanged) {
+					err = fmt.Errorf("%w:\n  %s", ErrFlowChanged, strings.Join(change.Diffs, "\n  "))
+				}
+				break
+			}
+			err = buildFlow(ctx, c, base, flow)
+		case KindBinding:
+			err = bindFlow(ctx, c, d, change.Name)
 		}
 		if err != nil {
 			return fmt.Errorf("applying %s %s: %w", change.Kind, change.Name, err)

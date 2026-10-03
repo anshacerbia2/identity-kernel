@@ -91,7 +91,7 @@ func recordOf(realm map[string]any) Record {
 // NewPlan compares the definition with the live realm. previous is the definition the recorded
 // revision applied; nil when nothing was recorded, or when the caller is adopting the live state.
 func NewPlan(ctx context.Context, c *admin.Client, definition Definition, previous *Definition) (Plan, error) {
-	observed, err := observe(ctx, c, definition.Name())
+	observed, err := observe(ctx, c, definition.Name(), flowAliases(&definition, previous))
 	if err != nil {
 		return Plan{}, err
 	}
@@ -130,6 +130,8 @@ type live struct {
 	profile map[string]any            // the whole user profile configuration
 	// defaults are the realm's default and optional client scopes, by name.
 	defaults DefaultScopes
+	// flows are the declared top-level flows that exist, as trees, by alias.
+	flows map[string][]Execution
 }
 
 func (l *live) profileAttribute(attributeName string) map[string]any {
@@ -141,9 +143,10 @@ func (l *live) profileAttribute(attributeName string) map[string]any {
 	return nil
 }
 
-func observe(ctx context.Context, c *admin.Client, realm string) (*live, error) {
+func observe(ctx context.Context, c *admin.Client, realm string, aliases []string) (*live, error) {
 	base := "/admin/realms/" + url.PathEscape(realm)
-	observed := &live{keys: map[string]map[string]any{}, scopes: map[string]map[string]any{}}
+	observed := &live{keys: map[string]map[string]any{}, scopes: map[string]map[string]any{},
+		flows: map[string][]Execution{}}
 	if err := c.GetJSON(ctx, base, &observed.realm); err != nil {
 		if admin.IsNotFound(err) {
 			observed.realm = nil
@@ -186,6 +189,11 @@ func observe(ctx context.Context, c *admin.Client, realm string) (*live, error) 
 		}
 		sort.Strings(*into)
 	}
+	flows, err := observeFlows(ctx, c, base, aliases)
+	if err != nil {
+		return nil, err
+	}
+	observed.flows = flows
 	return observed, nil
 }
 
@@ -215,6 +223,14 @@ func compare(d Definition, l *live) []Change {
 		if d.Defaults != nil {
 			changes = append(changes, Change{Kind: KindDefaults, Name: d.Name(), Action: Create})
 		}
+		for _, f := range d.Flows {
+			changes = append(changes, Change{Kind: KindFlow, Name: f.Alias, Action: Create})
+		}
+		for _, f := range d.Flows {
+			if f.Binding != "" {
+				changes = append(changes, Change{Kind: KindBinding, Name: f.Binding, Action: Update})
+			}
+		}
 		return changes
 	}
 
@@ -230,6 +246,9 @@ func compare(d Definition, l *live) []Change {
 	if d.Defaults != nil {
 		changes = append(changes, compareDefaults(d.Name(), *d.Defaults, l.defaults))
 	}
+	// Flows after everything else, and their bindings after the flows: a binding names a flow that
+	// must already be whole.
+	changes = append(changes, compareFlows(d, l)...)
 	return changes
 }
 

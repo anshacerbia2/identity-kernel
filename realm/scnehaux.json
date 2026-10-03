@@ -12,6 +12,7 @@
   "adminEventsEnabled": true,
   "adminEventsDetailsEnabled": true,
   "attributes": {
-    "adminEventsExpiration": "604800"
+    "adminEventsExpiration": "604800",
+    "acr.loa.map": "{\"aal1\":1,\"aal2\":2}"
   }
 }
