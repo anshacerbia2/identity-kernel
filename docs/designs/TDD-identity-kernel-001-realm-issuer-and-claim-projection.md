@@ -473,10 +473,15 @@ scnehaux-browser-v1
    │  └─ Username Password Form             REQUIRED
    └─ level 2                               CONDITIONAL
       ├─ Condition - Level Of Authentication REQUIRED   LoA 2, max age 300 s
-      └─ second factor                      REQUIRED
-         ├─ OTP Form                        ALTERNATIVE
-         └─ WebAuthn Authenticator          ALTERNATIVE
+      └─ OTP Form                           REQUIRED
 ```
+
+- **TOTP alone in v1, not TOTP or WebAuthn.** The first build made them alternatives, and the pinned
+  kernel refused the sign-in of a person who held neither ("Invalid username or password", compat run
+  on identity-kernel#37). It did not offer to enroll one. A required OTP Form does offer it, through
+  the kernel's Configure OTP action. WebAuthn joins in a later version of the flow, once a person can
+  enroll it (`TDD-identity-control-005` slice 4) and so every person reaching level 2 holds at least
+  one of the alternatives.
 
 - **Level 2's max age is 300 seconds.** That equals the Identity Control Service's
   `IDENTITY_STEP_UP_MAX_AGE`. Within it, a second request for `aal2` reuses the second factor; after
@@ -540,7 +545,7 @@ persisted against, so they are asserted rather than observed.
 | Audience client scopes | exactly one of internal, privileged, provider, workload, external | Applies the STD-IAM-002 claim allowlist |
 | Signing algorithm | `PS256` | STD-IAM-002 §3.2.2 initial baseline |
 | `acr.loa.map` | `{"aal1":1,"aal2":2}` | ADR-IAM-004 §5.1; realm-level, as Keycloak advises |
-| Browser flow | `scnehaux-browser-v1` | Password at LoA 1, plus TOTP or WebAuthn at LoA 2 (§Authentication Levels) |
+| Browser flow | `scnehaux-browser-v1` | Password at LoA 1, plus TOTP at LoA 2 (§Authentication Levels) |
 | OTP policy | TOTP, 6 digits, 30 s, `HmacSHA1` | The realm default, accepted by common authenticator apps |
 | Preview features | disabled | ADR-IAM-001 §5.8 requires a separate ADR to enable any |
 | Image | pinned by digest | SAD-001 §7.6 |

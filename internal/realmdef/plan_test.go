@@ -387,9 +387,9 @@ func TestAHandEditedFlowIsADifference(t *testing.T) {
 	l := liveFrom(d)
 	forms := l.flows["scnehaux-browser-v1"][1]
 	level2 := forms.Executions[1]
-	level2.Executions[1].Executions[0].Requirement = "DISABLED"
+	level2.Executions[1].Requirement = "DISABLED"
 	c := find(t, compare(d, l), KindFlow, "scnehaux-browser-v1")
-	if c.Action != Update || !has(c.Diffs, "auth-otp-form: requirement live DISABLED, definition ALTERNATIVE") {
+	if c.Action != Update || !has(c.Diffs, "auth-otp-form: requirement live DISABLED, definition REQUIRED") {
 		t.Errorf("%s %v", c.Action, c.Diffs)
 	}
 	l = liveFrom(d)
