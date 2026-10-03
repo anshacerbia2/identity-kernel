@@ -43,6 +43,11 @@ type browser struct {
 	http       *http.Client
 	totpSecret string
 	pages      []string
+	// label names the next TOTP enrolled; secrets holds every enrolled one by label.
+	label   string
+	secrets map[string]string
+	// credential, when set, is the OTP credential the code page is answered for.
+	credential string
 }
 
 func newBrowser(t *testing.T, a *admin, c client, p principal) *browser {
@@ -114,15 +119,31 @@ func (b *browser) signIn(extra url.Values) map[string]any {
 			form.Set("password", b.p.password)
 		case namedInput("totpSecret").MatchString(page):
 			b.pages = append(b.pages, "configure-totp")
-			b.totpSecret = form.Get("totpSecret")
-			form.Set("totp", totp(b.totpSecret, time.Now()))
-			form.Set("userLabel", "compat")
+			secret := form.Get("totpSecret")
+			label := b.label
+			if label == "" {
+				label = "compat"
+			}
+			if b.secrets == nil {
+				b.secrets = map[string]string{}
+			}
+			b.secrets[label] = secret
+			if b.totpSecret == "" {
+				b.totpSecret = secret
+			}
+			form.Set("totp", totp(secret, time.Now()))
+			form.Set("userLabel", label)
 		case namedInput("otp").MatchString(page):
 			b.pages = append(b.pages, "otp")
 			if b.totpSecret == "" {
 				b.t.Fatal("the kernel asked for a code before one was enrolled")
 			}
-			form.Set("otp", totp(b.totpSecret, time.Now()))
+			secret := b.totpSecret
+			if b.credential != "" {
+				form.Set("selectedCredentialId", b.credential)
+				secret = b.secrets[b.label]
+			}
+			form.Set("otp", totp(secret, time.Now()))
 		default:
 			b.t.Fatalf("an unexpected page: %s", snippet(page))
 		}
@@ -233,6 +254,44 @@ func TestAuthenticationLevels(t *testing.T) {
 	require("an unmapped acr is never answered with that level", claims["acr"] != "phr", true, fmt.Sprint(claims["acr"]))
 	steps = append(steps, lifecycleStep{name: fmt.Sprintf("an unmapped acr is answered with %v", claims["acr"]),
 		observed: true})
+
+	// A second TOTP, bound at aal2 through the application-initiated action (ADR-IAM-004 §5.5): the
+	// account already holds a TOTP, so the binding authenticates at aal2 first (NIST SP 800-63B-4
+	// §4.1.2.1).
+	time.Sleep(time.Until(time.Unix((time.Now().Unix()/30+1)*30, 0)) + time.Second)
+	b.label = "compat-server"
+	claims = b.signIn(url.Values{"acr_values": {"aal2"}, "max_age": {"0"}, "kc_action": {"CONFIGURE_TOTP"}})
+	require("kc_action CONFIGURE_TOTP after an aal2 sign-in sets up another TOTP",
+		pages() == "password,otp,configure-totp", true, pages())
+	var credentials []struct {
+		ID        string `json:"id"`
+		Type      string `json:"type"`
+		UserLabel string `json:"userLabel"`
+	}
+	if err := a.getJSON("/admin/realms/"+realmName+"/users/"+p.userID+"/credentials", &credentials); err != nil {
+		t.Fatalf("listing the credentials: %v", err)
+	}
+	second := ""
+	otps := 0
+	for _, credential := range credentials {
+		if credential.Type == "otp" {
+			otps++
+			if credential.UserLabel == "compat-server" {
+				second = credential.ID
+			}
+		}
+	}
+	require("the person then holds two TOTP credentials", otps == 2 && second != "", true, fmt.Sprint(credentials))
+
+	time.Sleep(time.Until(time.Unix((time.Now().Unix()/30+1)*30, 0)) + time.Second)
+	b.credential = second
+	claims = b.signIn(url.Values{"acr_values": {"aal2"}, "max_age": {"0"}})
+	require("the second TOTP alone signs in at aal2", claims["acr"] == "aal2" && pages() == "password,otp", true,
+		fmt.Sprint(claims["acr"], " ", pages()))
+	b.credential, b.label = "", ""
+	time.Sleep(time.Until(time.Unix((time.Now().Unix()/30+1)*30, 0)) + time.Second)
+	claims = b.signIn(url.Values{"acr_values": {"aal2"}, "max_age": {"0"}})
+	require("the first TOTP still signs in at aal2", claims["acr"] == "aal2", true, fmt.Sprint(claims["acr"]))
 
 	var out strings.Builder
 	fmt.Fprintf(&out, "## Authentication levels\n\n")

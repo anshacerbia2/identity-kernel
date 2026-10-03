@@ -431,6 +431,13 @@ required step held:
   again.
 - An unmapped `acr` (`phr`) is never answered with that level. It got the session's `aal2`.
 
+**A second TOTP** (ADR-IAM-004 §5.5) is asked of the same test.
+- After a sign-in at `aal2` with the first code, `kc_action=CONFIGURE_TOTP` sets up another TOTP.
+- The person then holds two.
+- Each of the two signs in at `aal2` alone.
+
+**Answered** on 2026-10-03, in compat run 37153685891: every step held.
+
 One finding changed the flow. With TOTP and WebAuthn as alternatives, the kernel refused a person who
 held neither ("Invalid username or password") instead of offering enrollment. Level 2 therefore
 requires TOTP, and WebAuthn waits for a flow version that follows its enrollment.
