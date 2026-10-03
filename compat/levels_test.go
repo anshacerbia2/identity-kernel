@@ -348,6 +348,8 @@ func TestAuthenticationLevels(t *testing.T) {
 		}
 	}
 	require("the person holds a WebAuthn credential", webauthns == 1, true, fmt.Sprint(credentials))
+	// max_age 0 is measured in whole seconds from the last authentication, so let one pass.
+	time.Sleep(2 * time.Second)
 	claims = b.signIn(url.Values{"acr_values": {"aal2"}, "max_age": {"0"}})
 	require("with the key alone, aal2 asks for the password and the key", pages() == "password,webauthn", true, pages())
 	require("and carries aal2", claims["acr"] == "aal2", true, fmt.Sprint(claims["acr"]))
