@@ -3,7 +3,7 @@ doc_meta:
   id: TDD-identity-kernel-001
   title: Realm Topology, Issuer Identity, and Token Claim Projection
   owner: Identity Platform Team
-  version: 1.9.0
+  version: 1.10.0
   status: approved
   classification: restricted
   review_cycle_days: 90
@@ -449,6 +449,60 @@ Two limits are part of the design rather than gaps in it:
   discards its values from every user, and removing a client scope strips its claims from
   every client using it. Both are migrations.
 
+### Authentication Levels
+
+`ADR-IAM-004` names two levels, `aal1` and `aal2`, and this realm is where a person reaches them.
+Keycloak maps an `acr` value to a numeric Level of Authentication (LoA). Its *Conditional - Level Of
+Authentication* step lets a browser flow authenticate a person to the level a request asks for
+[R1].
+
+**The map.** The realm attribute `acr.loa.map` is `{"aal1":1,"aal2":2}`. It is set at realm level,
+as Keycloak advises: "a best practice is to stick to realm mappings" [R1]. `phr` is reserved by the
+ADR and is left out of the map until a flow can satisfy it, because asking for a level no flow
+reaches is a failed sign-in.
+
+**The flow.** The browser binding is a flow of this realm's own, `scnehaux-browser-v1`. It follows
+the step-up flow Keycloak documents [R1]:
+
+```text
+scnehaux-browser-v1
+├─ Cookie                                   ALTERNATIVE
+└─ forms                                    ALTERNATIVE
+   ├─ level 1                               CONDITIONAL
+   │  ├─ Condition - Level Of Authentication REQUIRED   LoA 1, max age 36000 s (the SSO session maximum)
+   │  └─ Username Password Form             REQUIRED
+   └─ level 2                               CONDITIONAL
+      ├─ Condition - Level Of Authentication REQUIRED   LoA 2, max age 300 s
+      └─ second factor                      REQUIRED
+         ├─ OTP Form                        ALTERNATIVE
+         └─ WebAuthn Authenticator          ALTERNATIVE
+```
+
+- **Level 2's max age is 300 seconds.** That equals the Identity Control Service's
+  `IDENTITY_STEP_UP_MAX_AGE`. Within it, a second request for `aal2` reuses the second factor; after
+  it, the person proves it again. Level 1 keeps the session's own maximum, so a password is asked
+  once per session, as Keycloak's example does.
+- **A person with no second factor** who is asked for `aal2` enrolls a TOTP authenticator in that
+  sign-in, on the kernel's own page (`ADR-IAM-004 §5.4`). The compat suite proves that the pinned
+  kernel does this, and does not refuse the sign-in.
+- **Not carried over from the built-in flow.** The *Identity Provider Redirector* is left out, because
+  the realm federates no identity provider. A flow that declares one comes with the first identity
+  provider.
+- **The OTP policy is the realm's default:** TOTP, six digits, 30 seconds, `HmacSHA1`. That is what the
+  authenticator apps people already hold accept. NIST SP 800-63B-4 places a single-factor OTP device,
+  as the second factor, at AAL2 [R2].
+
+**How realm-apply manages a flow.** A flow is declared in `realm/authentication-flows.json` by
+alias, and is never edited in place.
+- **Changing a flow** declares a new alias: `-v2` follows `-v1`. realm-apply builds the new flow
+  completely, then binds it as the browser flow in one realm update, so no sign-in ever runs through
+  a half-built flow. Keycloak edits a flow one execution at a time, and editing the bound flow would
+  expose every intermediate state to the people signing in.
+- **The previous flow stays, unbound.** The apply deletes nothing (§Configuration as Code), and a
+  bound-flow rollback is a rebind.
+- **Drift.** The drift check compares the bound flow's executions, requirements, order and condition
+  configurations with its declaration. Any difference was made by hand, and the apply is refused.
+
 ### Upgrade Compatibility
 
 Every Keycloak upgrade runs the compatibility suite in this repository before the
@@ -482,6 +536,9 @@ persisted against, so they are asserted rather than observed.
 | `firstName`, `lastName` | optional; Keycloak's own validations kept | PAD-PLT-001 minimizes personal data by purpose and lists no name among a Principal's PII. identity-control's API accepts none. A required family name shuts out every person with a single name. Keycloak's default requires both, which interrupted every login of a Principal identity-control created |
 | Audience client scopes | exactly one of internal, privileged, provider, workload, external | Applies the STD-IAM-002 claim allowlist |
 | Signing algorithm | `PS256` | STD-IAM-002 §3.2.2 initial baseline |
+| `acr.loa.map` | `{"aal1":1,"aal2":2}` | ADR-IAM-004 §5.1; realm-level, as Keycloak advises |
+| Browser flow | `scnehaux-browser-v1` | Password at LoA 1, plus TOTP or WebAuthn at LoA 2 (§Authentication Levels) |
+| OTP policy | TOTP, 6 digits, 30 s, `HmacSHA1` | The realm default, accepted by common authenticator apps |
 | Preview features | disabled | ADR-IAM-001 §5.8 requires a separate ADR to enable any |
 | Image | pinned by digest | SAD-001 §7.6 |
 
@@ -527,6 +584,18 @@ compatibility suite rather than left to operational discipline.
   apply, and the deployment fails.
 - Applying the definition twice produces no change on the second run.
 - A preview feature enabled outside an approved ADR fails the pipeline.
+
+### Authentication Levels
+
+`compat/levels_test.go`, against the pinned image:
+- A password sign-in that asks for nothing more carries `acr` `aal1`.
+- A sign-in asking `acr_values=aal2`, by a person with no second factor, leads to TOTP enrollment.
+  Once a valid code is given, the token carries `acr` `aal2`.
+- Asked again within 300 seconds, `aal2` asks for no code. With `max_age=0` it asks for the password
+  and the code again.
+- A request for an unmapped `acr` is refused or reported, never silently answered with a higher level.
+- realm-apply refuses a hand-edited bound flow as drift, and building a new flow version leaves the
+  previous one unbound.
 
 ### Upgrade
 
@@ -591,6 +660,9 @@ rollback, signing-key incident, and issuer change assessment.
 | Consumed by | `TDD-identity-control-002` — projected context representation is applied against this realm |
 | Conforms to | STD-IAM-002 §3.1.1 — a resource holding provider grants or their projection checks its record; no `provider_scope` is issued |
 | Consumed by | `TDD-identity-control-006` — provider authority from the projection of Organization's grants |
+| Governed by | ADR-IAM-004 — authentication assurance levels `aal1`/`aal2` and step-up |
+| Conforms to | STD-IAM-001 §3.1 2.2.0 — privileged access is multi-factor |
+| Consumed by | `TDD-identity-control-005` §Step-Up — the levels its challenge asks for |
 
 ### Open Proof-of-Concept Questions
 
@@ -617,3 +689,10 @@ standard amendment.
    supported. Irreversible once tokens are issued, so it is decided either way before
    the first token rather than inherited. **Answered 2026-09-25: path form retained**.
    See §Issuer Identity.
+
+## References
+
+| Ref | Source |
+| :-- | :-- |
+| R1 | Keycloak, *Server Administration Guide*, ACR to Level of Authentication (LoA) Mapping and Creating a browser login flow with step-up mechanism, <https://www.keycloak.org/docs/latest/server_admin/index.html>, accessed 2026-10-03: "The ACR can be any value, whereas the LoA must be numeric"; "a best practice is to stick to realm mappings"; the level-2 condition's Max Age "0" means the level "is valid just for the current authentication"; "if a user already has a session in Keycloak, that was logged in with username and password (LoA 1), the user is only asked for the second authentication factor". |
+| R2 | NIST SP 800-63B-4, *Digital Identity Guidelines: Authentication and Authenticator Management*, August 2025, <https://pages.nist.gov/800-63-4/sp800-63b.html>, §2.2: "AAL2 provides high confidence … Proof of possession and control of two distinct authentication factors through the use of secure authentication protocols is required." |
