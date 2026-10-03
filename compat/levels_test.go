@@ -114,6 +114,9 @@ func (b *browser) signIn(extra url.Values) map[string]any {
 				form.Set(n[1], value)
 			}
 		}
+		// The "Try another way" form is a separate form on the same page; a browser submitting the
+		// page's own form does not send it.
+		form.Del("tryAnotherWay")
 		base, _ := url.Parse(b.a.base)
 		origin := base.Scheme + "://" + base.Host
 		switch {
