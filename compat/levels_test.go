@@ -48,6 +48,8 @@ type browser struct {
 	secrets map[string]string
 	// credential, when set, is the OTP credential the code page is answered for.
 	credential string
+	// key answers the WebAuthn pages, once set.
+	key *softKey
 }
 
 func newBrowser(t *testing.T, a *admin, c client, p principal) *browser {
@@ -112,7 +114,21 @@ func (b *browser) signIn(extra url.Values) map[string]any {
 				form.Set(n[1], value)
 			}
 		}
+		base, _ := url.Parse(b.a.base)
+		origin := base.Scheme + "://" + base.Host
 		switch {
+		case namedInput("attestationObject").MatchString(page):
+			b.pages = append(b.pages, "webauthn-register")
+			if b.key == nil {
+				b.t.Fatal("the kernel asked to register a WebAuthn authenticator the test holds none of")
+			}
+			b.key.register(b.t, page, origin, form)
+		case namedInput("authenticatorData").MatchString(page):
+			b.pages = append(b.pages, "webauthn")
+			if b.key == nil {
+				b.t.Fatal("the kernel asked for a WebAuthn assertion the test holds no key for")
+			}
+			b.key.assert(b.t, page, origin, form)
 		case namedInput("password").MatchString(page):
 			b.pages = append(b.pages, "password")
 			form.Set("username", b.p.username)
@@ -293,6 +309,56 @@ func TestAuthenticationLevels(t *testing.T) {
 	claims = b.signIn(url.Values{"acr_values": {"aal2"}, "max_age": {"0"}})
 	require("the first TOTP still signs in at aal2", claims["acr"] == "aal2", true, fmt.Sprint(claims["acr"]))
 
+	// WebAuthn at level 2 (scnehaux-browser-v2). A WebAuthn authenticator is registered through the
+	// application-initiated action after an aal2 sign-in, the TOTPs are then deleted, and a sign-in
+	// at aal2 is answered by the key alone.
+	time.Sleep(time.Until(time.Unix((time.Now().Unix()/30+1)*30, 0)) + time.Second)
+	b.key = newSoftKey(t)
+	b.signIn(url.Values{"acr_values": {"aal2"}, "max_age": {"0"}, "kc_action": {"webauthn-register"}})
+	require("kc_action webauthn-register after an aal2 sign-in registers a WebAuthn authenticator",
+		strings.HasSuffix(pages(), "webauthn-register"), true, pages())
+
+	// Holding both factors, the person is shown one of them; which one is recorded, not required.
+	time.Sleep(time.Until(time.Unix((time.Now().Unix()/30+1)*30, 0)) + time.Second)
+	claims = b.signIn(url.Values{"acr_values": {"aal2"}, "max_age": {"0"}})
+	require("holding a TOTP and a key, aal2 is reached", claims["acr"] == "aal2", true, fmt.Sprint(claims["acr"]))
+	steps = append(steps, lifecycleStep{name: "holding both, the pages shown are " + pages(), observed: true})
+
+	credentials = nil
+	if err := a.getJSON("/admin/realms/"+realmName+"/users/"+p.userID+"/credentials", &credentials); err != nil {
+		t.Fatalf("listing the credentials: %v", err)
+	}
+	webauthns := 0
+	for _, credential := range credentials {
+		switch credential.Type {
+		case "webauthn":
+			webauthns++
+		case "otp":
+			if _, err := a.call(http.MethodDelete, "/admin/realms/"+realmName+"/users/"+p.userID+"/credentials/"+credential.ID,
+				nil, http.StatusNoContent); err != nil {
+				t.Fatalf("deleting a TOTP: %v", err)
+			}
+		}
+	}
+	require("the person holds a WebAuthn credential", webauthns == 1, true, fmt.Sprint(credentials))
+	claims = b.signIn(url.Values{"acr_values": {"aal2"}, "max_age": {"0"}})
+	require("with the key alone, aal2 asks for the password and the key", pages() == "password,webauthn", true, pages())
+	require("and carries aal2", claims["acr"] == "aal2", true, fmt.Sprint(claims["acr"]))
+
+	// A person with neither factor still enrolls a TOTP in their first aal2 sign-in under v2.
+	fresh := createPrincipal(t, a)
+	t.Cleanup(func() {
+		if _, err := a.call(http.MethodDelete, "/admin/realms/"+realmName+"/users/"+fresh.userID, nil,
+			http.StatusNoContent); err != nil {
+			t.Errorf("deleting user %s: %v", fresh.username, err)
+		}
+	})
+	other := newBrowser(t, a, c, fresh)
+	claims = other.signIn(url.Values{"acr_values": {"aal2"}})
+	require("a person with neither factor enrolls a TOTP at aal2",
+		strings.Join(other.pages, ",") == "password,configure-totp", true, strings.Join(other.pages, ","))
+	require("and carries aal2 after it", claims["acr"] == "aal2", true, fmt.Sprint(claims["acr"]))
+
 	var out strings.Builder
 	fmt.Fprintf(&out, "## Authentication levels\n\n")
 	fmt.Fprintf(&out, "Image: `%s`\n\n", imageRef())
@@ -304,7 +370,8 @@ func TestAuthenticationLevels(t *testing.T) {
 		fmt.Fprintf(&out, "\n**Outcome:** the realm does not reach aal1 and aal2 as ADR-IAM-004 requires.\n")
 	} else {
 		fmt.Fprintf(&out, "\n**Outcome:** a password sign-in is aal1; aal2 adds a TOTP code, enrolled at the first "+
-			"aal2 sign-in, reused for 300 s, and asked again with max_age 0.\n")
+			"aal2 sign-in, or a WebAuthn authenticator; level 2 is reused for 300 s and asked again with "+
+			"max_age 0.\n")
 	}
 	publish(t, out.String())
 }

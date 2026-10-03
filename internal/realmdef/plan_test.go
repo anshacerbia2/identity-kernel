@@ -85,7 +85,13 @@ func TestAnAbsentRealmCreatesEverything(t *testing.T) {
 	d := definition(t)
 	changes := compare(d, &live{})
 	// Each flow is built, and each binding then set to the flow it names.
-	if want := 3 + len(d.Scopes) + len(d.Profile) + 2*len(d.Flows); len(changes) != want {
+	bindings := 0
+	for _, f := range d.Flows {
+		if f.Binding != "" {
+			bindings++
+		}
+	}
+	if want := 3 + len(d.Scopes) + len(d.Profile) + len(d.Flows) + bindings; len(changes) != want {
 		t.Fatalf("%d changes for an absent realm, want %d", len(changes), want)
 	}
 	for _, change := range changes {
@@ -358,10 +364,10 @@ func mustJSON(t *testing.T, d Definition) []byte {
 func TestAnAbsentFlowIsBuiltAndThenBound(t *testing.T) {
 	d := definition(t)
 	l := liveFrom(d)
-	delete(l.flows, "scnehaux-browser-v1")
-	l.realm["browserFlow"] = "browser"
+	delete(l.flows, "scnehaux-browser-v2")
+	l.realm["browserFlow"] = "scnehaux-browser-v1"
 	changes := compare(d, l)
-	if c := find(t, changes, KindFlow, "scnehaux-browser-v1"); c.Action != Create {
+	if c := find(t, changes, KindFlow, "scnehaux-browser-v2"); c.Action != Create {
 		t.Errorf("flow: %s", c.Action)
 	}
 	if c := find(t, changes, KindBinding, "browserFlow"); c.Action != Update {
@@ -385,16 +391,16 @@ func TestAnAbsentFlowIsBuiltAndThenBound(t *testing.T) {
 func TestAHandEditedFlowIsADifference(t *testing.T) {
 	d := definition(t)
 	l := liveFrom(d)
-	forms := l.flows["scnehaux-browser-v1"][1]
+	forms := l.flows["scnehaux-browser-v2"][1]
 	level2 := forms.Executions[1]
-	level2.Executions[1].Requirement = "DISABLED"
-	c := find(t, compare(d, l), KindFlow, "scnehaux-browser-v1")
+	level2.Executions[1].Executions[1].Executions[0].Requirement = "DISABLED"
+	c := find(t, compare(d, l), KindFlow, "scnehaux-browser-v2")
 	if c.Action != Update || !has(c.Diffs, "auth-otp-form: requirement live DISABLED, definition REQUIRED") {
 		t.Errorf("%s %v", c.Action, c.Diffs)
 	}
 	l = liveFrom(d)
-	l.flows["scnehaux-browser-v1"][1].Executions[1].Executions[0].Config["loa-max-age"] = "0"
-	c = find(t, compare(d, l), KindFlow, "scnehaux-browser-v1")
+	l.flows["scnehaux-browser-v2"][1].Executions[1].Executions[0].Config["loa-max-age"] = "0"
+	c = find(t, compare(d, l), KindFlow, "scnehaux-browser-v2")
 	if c.Action != Update || !has(c.Diffs, "loa-max-age live \"0\", definition \"300\"") {
 		t.Errorf("%s %v", c.Action, c.Diffs)
 	}
