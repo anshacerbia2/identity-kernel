@@ -3,12 +3,12 @@ doc_meta:
   id: TDD-identity-kernel-001
   title: Realm Topology, Issuer Identity, and Token Claim Projection
   owner: Identity Platform Team
-  version: 1.10.0
+  version: 1.11.0
   status: approved
   classification: restricted
   review_cycle_days: 90
   created_date: 2026-08-11
-  last_reviewed: 2026-10-02
+  last_reviewed: 2026-10-03
   parent_sad: SAD-001
 ---
 
@@ -461,27 +461,45 @@ as Keycloak advises: "a best practice is to stick to realm mappings" [R1]. `phr`
 ADR and is left out of the map until a flow can satisfy it, because asking for a level no flow
 reaches is a failed sign-in.
 
-**The flow.** The browser binding is a flow of this realm's own, `scnehaux-browser-v1`. It follows
-the step-up flow Keycloak documents [R1]:
+**The flow.** The browser binding is a flow of this realm's own, `scnehaux-browser-v2`. It follows
+the step-up flow Keycloak documents [R1], with the second factor offered as WebAuthn or TOTP, as
+Keycloak documents for a second factor [R3]:
 
 ```text
-scnehaux-browser-v1
-├─ Cookie                                   ALTERNATIVE
-└─ forms                                    ALTERNATIVE
-   ├─ level 1                               CONDITIONAL
-   │  ├─ Condition - Level Of Authentication REQUIRED   LoA 1, max age 36000 s (the SSO session maximum)
-   │  └─ Username Password Form             REQUIRED
-   └─ level 2                               CONDITIONAL
-      ├─ Condition - Level Of Authentication REQUIRED   LoA 2, max age 300 s
-      └─ OTP Form                           REQUIRED
+scnehaux-browser-v2
+├─ Cookie                                     ALTERNATIVE
+└─ forms                                      ALTERNATIVE
+   ├─ level 1                                 CONDITIONAL
+   │  ├─ Condition - Level Of Authentication  REQUIRED   LoA 1, max age 36000 s (the SSO session maximum)
+   │  └─ Username Password Form               REQUIRED
+   └─ level 2                                 CONDITIONAL
+      ├─ Condition - Level Of Authentication  REQUIRED   LoA 2, max age 300 s
+      └─ second factor                        REQUIRED
+         ├─ WebAuthn Authenticator            ALTERNATIVE
+         └─ one-time code                     ALTERNATIVE
+            └─ OTP Form                       REQUIRED
 ```
 
-- **TOTP alone in v1, not TOTP or WebAuthn.** The first build made them alternatives, and the pinned
-  kernel refused the sign-in of a person who held neither ("Invalid username or password", compat run
-  on identity-kernel#37). It did not offer to enroll one. A required OTP Form does offer it, through
-  the kernel's Configure OTP action. WebAuthn joins in a later version of the flow, once a person can
-  enroll it (`TDD-identity-control-005` slice 4) and so every person reaching level 2 holds at least
-  one of the alternatives.
+- **WebAuthn or TOTP at level 2.** Either is a second factor beside the password, and the pair meets
+  AAL2 [R2]. `ADR-IAM-004` §5.1 names both.
+- **The OTP Form sits in a sub-flow of its own, required there.** Its first version, v1, made WebAuthn
+  and TOTP plain alternatives. The pinned kernel then refused the sign-in of a person who held
+  neither ("Invalid username or password", compat run on identity-kernel#37); it did not offer to
+  enroll one. v1 therefore required TOTP alone. In v2 the alternative is the sub-flow, and inside it
+  the OTP Form is required. A person with neither factor is taken to TOTP enrollment, as under v1
+  (`ADR-IAM-004 §5.4`). The compat suite proves this on the pinned image.
+- **WebAuthn is enrolled, never required.** No sign-in asks a person to register a key. An
+  application asks for registration with `kc_action=webauthn-register` after an `aal2` sign-in [R4].
+  The *Webauthn Register* required action is enabled in a new realm, and the compat suite proves it
+  answers on this one. Registration therefore follows a proof of a factor the person already holds,
+  as `ADR-IAM-004 §5.5` asks of binding an additional authenticator (NIST SP 800-63B-4 §4.1.2.1).
+- **A person holding both** is shown one by default. Keycloak documents: "If a user has configured
+  both credential types, the credential with the highest priority will be displayed by default.
+  However, the *Try Another Way* option will appear" [R3]. On the pinned image, a person who enrolled
+  TOTP first and then a key was shown the TOTP page.
+- **The WebAuthn policy is the realm's default.** The relying party ID is the kernel's host name, and
+  no attestation is required. Requiring attestation would restrict which authenticators a person may
+  use, and no requirement asks for that.
 
 - **Level 2's max age is 300 seconds.** That equals the Identity Control Service's
   `IDENTITY_STEP_UP_MAX_AGE`. Within it, a second request for `aal2` reuses the second factor; after
@@ -510,6 +528,11 @@ alias, and is never edited in place.
   next apply deletes it and builds it again whole. A bound flow is never replaced.
 - **Drift.** The drift check compares the bound flow's executions, requirements, order and condition
   configurations with its declaration. Any difference was made by hand, and the apply is refused.
+- **Order is set, never left to the database.** A step's position in a flow is its priority.
+  realm-apply adds each step with its position as its priority, and sets the requirement with the
+  priority it reads back. Keycloak's execution update copies the priority it is sent onto the step
+  [R5]. An update without one resets the step to 0, which leaves the order of equal steps to the
+  database. On Postgres, the upgrade job listed v2's level sub-flows with their two steps swapped.
 
 ### Upgrade Compatibility
 
@@ -545,7 +568,7 @@ persisted against, so they are asserted rather than observed.
 | Audience client scopes | exactly one of internal, privileged, provider, workload, external | Applies the STD-IAM-002 claim allowlist |
 | Signing algorithm | `PS256` | STD-IAM-002 §3.2.2 initial baseline |
 | `acr.loa.map` | `{"aal1":1,"aal2":2}` | ADR-IAM-004 §5.1; realm-level, as Keycloak advises |
-| Browser flow | `scnehaux-browser-v1` | Password at LoA 1, plus TOTP at LoA 2 (§Authentication Levels) |
+| Browser flow | `scnehaux-browser-v2` | Password at LoA 1, plus WebAuthn or TOTP at LoA 2 (§Authentication Levels) |
 | OTP policy | TOTP, 6 digits, 30 s, `HmacSHA1` | The realm default, accepted by common authenticator apps |
 | Preview features | disabled | ADR-IAM-001 §5.8 requires a separate ADR to enable any |
 | Image | pinned by digest | SAD-001 §7.6 |
@@ -602,8 +625,15 @@ compatibility suite rather than left to operational discipline.
 - Asked again within 300 seconds, `aal2` asks for no code. With `max_age=0` it asks for the password
   and the code again.
 - A request for an unmapped `acr` is refused or reported, never silently answered with a higher level.
+- `kc_action=webauthn-register`, after an `aal2` sign-in, registers a WebAuthn authenticator. With
+  the person's TOTPs deleted, `aal2` asks for the password and the key, and the token carries `aal2`.
+  A person with neither factor still enrolls a TOTP at their first `aal2` sign-in.
+- Which page a person holding both factors is shown is recorded, not required.
+- The suite answers the WebAuthn pages with a software authenticator. It holds a P-256 key, attests
+  with `none`, and signs each assertion over the authenticator data and the client data's hash [R6].
 - realm-apply refuses a hand-edited bound flow as drift, and building a new flow version leaves the
   previous one unbound.
+- The upgrade job builds the flows on Postgres, where an order left to the database shows as drift.
 
 ### Upgrade
 
@@ -704,3 +734,7 @@ standard amendment.
 | :-- | :-- |
 | R1 | Keycloak, *Server Administration Guide*, ACR to Level of Authentication (LoA) Mapping and Creating a browser login flow with step-up mechanism, <https://www.keycloak.org/docs/latest/server_admin/index.html>, accessed 2026-10-03: "The ACR can be any value, whereas the LoA must be numeric"; "a best practice is to stick to realm mappings"; the level-2 condition's Max Age "0" means the level "is valid just for the current authentication"; "if a user already has a session in Keycloak, that was logged in with username and password (LoA 1), the user is only asked for the second authentication factor". |
 | R2 | NIST SP 800-63B-4, *Digital Identity Guidelines: Authentication and Authenticator Management*, August 2025, <https://pages.nist.gov/800-63-4/sp800-63b.html>, §2.2: "AAL2 provides high confidence … Proof of possession and control of two distinct authentication factors through the use of secure authentication protocols is required." |
+| R3 | Keycloak 26.7.5, *Server Administration Guide*, W3C Web Authentication (WebAuthn), source `docs/documentation/server_admin/topics/authentication/webauthn.adoc` at tag 26.7.5, accessed 2026-10-03: "With this configuration, the users can choose between using WebAuthn and OTP for the second factor."; "If a user has configured both credential types, the credential with the highest priority will be displayed by default. However, the *Try Another Way* option will appear so that the user has the alternative methods to log in." |
+| R4 | Keycloak 26.7.5, *Server Administration Guide*, Registering WebAuthn credentials using AIA, same source: "The actions *Webauthn Register* (`kc_action=webauthn-register`) and *Webauthn Register Passwordless* (`kc_action=webauthn-register-passwordless`) are available for the applications if enabled in the Required actions tab." |
+| R5 | Keycloak 26.7.5, `services/src/main/java/org/keycloak/services/resources/admin/AuthenticationManagementResource.java`, `updateExecutions`: "if (model.getPriority() != rep.getPriority()) { model.setPriority(rep.getPriority()); updateExecution = true; }"; `addExecutionToFlow`: "int priority = data.containsKey("priority") ? (Integer) data.get("priority") : getNextPriority(parentFlow);" |
+| R6 | W3C, *Web Authentication: An API for accessing Public Key Credentials, Level 2*, Recommendation, 8 April 2021, <https://www.w3.org/TR/webauthn-2/>: §6.1 Authenticator Data, §6.3.3 the authenticatorGetAssertion operation (the signature over the authenticator data concatenated with the client data hash), §8.7 None Attestation Statement Format. |

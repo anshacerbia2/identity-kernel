@@ -442,6 +442,21 @@ One finding changed the flow. With TOTP and WebAuthn as alternatives, the kernel
 held neither ("Invalid username or password") instead of offering enrollment. Level 2 therefore
 requires TOTP, and WebAuthn waits for a flow version that follows its enrollment.
 
+**WebAuthn at level 2.** `scnehaux-browser-v2` succeeds v1: level 2 asks for a WebAuthn
+authenticator or a TOTP code. The OTP Form sits in a sub-flow of its own, so a person with neither
+factor is still taken to TOTP enrollment (TDD-identity-kernel-001 1.11.0 §Authentication Levels). The
+compat suite answers the WebAuthn pages with a software authenticator.
+
+**Answered** on 2026-10-03, in compat run 37159258798. Every required step held:
+- `kc_action=webauthn-register` after an `aal2` sign-in registers a key.
+- With the TOTPs deleted, `aal2` asks for the password and the key and carries `aal2`.
+- A person with neither factor enrolls a TOTP at their first `aal2` sign-in.
+- Recorded: a person who holds both, TOTP enrolled first, is shown the TOTP page.
+
+One finding fixed realm-apply. Setting a step's requirement without its priority reset the step to
+priority 0. On Postgres, the upgrade job then listed two steps swapped. realm-apply now gives every
+step its position as its priority.
+
 ## Week 3 · Event listener
 
 - Minimal listener capturing user, admin, and security events
