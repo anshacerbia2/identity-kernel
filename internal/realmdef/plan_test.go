@@ -44,7 +44,31 @@ func liveFrom(d Definition) *live {
 	if c.Defaults != nil {
 		l.defaults = DefaultScopes{Default: sortedCopy(c.Defaults.Default), Optional: sortedCopy(c.Defaults.Optional)}
 	}
+	l.flows = map[string][]Execution{}
+	for _, f := range c.Flows {
+		l.flows[f.Alias] = withLiveConfig(f.Executions)
+		if f.Binding != "" {
+			l.realm[f.Binding] = f.Alias
+		}
+	}
 	return l
+}
+
+// withLiveConfig adds a configuration key Keycloak keeps that the declaration does not name.
+func withLiveConfig(executions []Execution) []Execution {
+	out := make([]Execution, len(executions))
+	for i, e := range executions {
+		if e.ConfigAlias != "" {
+			config := map[string]string{"unmanaged": "x"}
+			for k, v := range e.Config {
+				config[k] = v
+			}
+			e.Config = config
+		}
+		e.Executions = withLiveConfig(e.Executions)
+		out[i] = e
+	}
+	return out
 }
 
 func TestAMatchingRealmIsInSync(t *testing.T) {
@@ -60,10 +84,17 @@ func TestAMatchingRealmIsInSync(t *testing.T) {
 func TestAnAbsentRealmCreatesEverything(t *testing.T) {
 	d := definition(t)
 	changes := compare(d, &live{})
-	if want := 3 + len(d.Scopes) + len(d.Profile); len(changes) != want {
+	// Each flow is built, and each binding then set to the flow it names.
+	if want := 3 + len(d.Scopes) + len(d.Profile) + 2*len(d.Flows); len(changes) != want {
 		t.Fatalf("%d changes for an absent realm, want %d", len(changes), want)
 	}
 	for _, change := range changes {
+		if change.Kind == KindBinding {
+			if change.Action != Update {
+				t.Errorf("binding %s: %s, want update", change.Name, change.Action)
+			}
+			continue
+		}
 		if change.Action != Create {
 			t.Errorf("%s %s: %s, want create", change.Kind, change.Name, change.Action)
 		}
@@ -322,4 +353,77 @@ func mustJSON(t *testing.T, d Definition) []byte {
 		t.Fatal(err)
 	}
 	return encoded
+}
+
+func TestAnAbsentFlowIsBuiltAndThenBound(t *testing.T) {
+	d := definition(t)
+	l := liveFrom(d)
+	delete(l.flows, "scnehaux-browser-v1")
+	l.realm["browserFlow"] = "browser"
+	changes := compare(d, l)
+	if c := find(t, changes, KindFlow, "scnehaux-browser-v1"); c.Action != Create {
+		t.Errorf("flow: %s", c.Action)
+	}
+	if c := find(t, changes, KindBinding, "browserFlow"); c.Action != Update {
+		t.Errorf("binding: %s", c.Action)
+	}
+	flowAt, bindingAt := -1, -1
+	for i, c := range changes {
+		switch c.Kind {
+		case KindFlow:
+			flowAt = i
+		case KindBinding:
+			bindingAt = i
+		}
+	}
+	if bindingAt < flowAt {
+		t.Error("the binding is applied before the flow it names exists")
+	}
+}
+
+// A requirement changed by hand in the bound flow is a difference naming the step.
+func TestAHandEditedFlowIsADifference(t *testing.T) {
+	d := definition(t)
+	l := liveFrom(d)
+	forms := l.flows["scnehaux-browser-v1"][1]
+	level2 := forms.Executions[1]
+	level2.Executions[1].Executions[0].Requirement = "DISABLED"
+	c := find(t, compare(d, l), KindFlow, "scnehaux-browser-v1")
+	if c.Action != Update || !has(c.Diffs, "auth-otp-form: requirement live DISABLED, definition ALTERNATIVE") {
+		t.Errorf("%s %v", c.Action, c.Diffs)
+	}
+	l = liveFrom(d)
+	l.flows["scnehaux-browser-v1"][1].Executions[1].Executions[0].Config["loa-max-age"] = "0"
+	c = find(t, compare(d, l), KindFlow, "scnehaux-browser-v1")
+	if c.Action != Update || !has(c.Diffs, "loa-max-age live \"0\", definition \"300\"") {
+		t.Errorf("%s %v", c.Action, c.Diffs)
+	}
+}
+
+func TestParseRefusesAMalformedFlow(t *testing.T) {
+	for name, flows := range map[string]string{
+		"a repeated alias":     `[{"alias":"a","executions":[]},{"alias":"a","executions":[]}]`,
+		"two bindings":         `[{"alias":"a","binding":"browserFlow","executions":[]},{"alias":"b","binding":"browserFlow","executions":[]}]`,
+		"an unknown binding":   `[{"alias":"a","binding":"directGrantFlow","executions":[]}]`,
+		"a step of both kinds": `[{"alias":"a","executions":[{"authenticator":"x","flow":"y","requirement":"REQUIRED"}]}]`,
+		"a bad requirement":    `[{"alias":"a","executions":[{"authenticator":"x","requirement":"SOMETIMES"}]}]`,
+		"config without alias": `[{"alias":"a","executions":[{"authenticator":"x","requirement":"REQUIRED","config":{"k":"v"}}]}]`,
+	} {
+		f := files(t)
+		f["authentication-flows.json"] = []byte(flows)
+		if _, err := Parse(f); err == nil {
+			t.Errorf("%s was accepted", name)
+		}
+	}
+}
+
+// A definition from before flows were declared keeps its digest.
+func TestADefinitionWithoutFlowsKeepsItsDigest(t *testing.T) {
+	d := definition(t)
+	without := d.Clone()
+	without.Flows = nil
+	encoded, _ := json.Marshal(without)
+	if strings.Contains(string(encoded), "flows") {
+		t.Error("an absent flow list is part of the digest")
+	}
 }
