@@ -94,7 +94,8 @@ func (b *browser) signIn(extra url.Values) map[string]any {
 		}
 		action := formAction.FindStringSubmatch(page)
 		if response.StatusCode != http.StatusOK || action == nil {
-			b.t.Fatalf("the sign-in answered %d with no form: %s", response.StatusCode, snippet(page))
+			b.t.Fatalf("the sign-in answered %d with no form, after pages %v, saying %q", response.StatusCode, b.pages,
+				pageMessage(page))
 		}
 		form := url.Values{}
 		for _, input := range hiddenInput.FindAllString(page, -1) {
@@ -148,6 +149,24 @@ func (b *browser) exchange(code, verifier string) map[string]any {
 		claims["id_token_acr"] = jwtClaims(b.t, tokens.IDToken)["acr"]
 	}
 	return claims
+}
+
+// pageMessage is the text a Keycloak page shows as its message: an alert's, or an instruction's.
+func pageMessage(page string) string {
+	var out []string
+	for _, pattern := range []string{`(?s)class="[^"]*kc-feedback-text[^"]*"[^>]*>(.*?)<`,
+		`(?s)id="kc-page-title"[^>]*>(.*?)<`, `(?s)class="instruction"[^>]*>(.*?)<`,
+		`(?s)<title>(.*?)</title>`} {
+		for _, m := range regexp.MustCompile(pattern).FindAllStringSubmatch(page, -1) {
+			if text := strings.TrimSpace(html.UnescapeString(m[1])); text != "" {
+				out = append(out, text)
+			}
+		}
+	}
+	if len(out) == 0 {
+		return snippet(page)
+	}
+	return strings.Join(out, " | ")
 }
 
 // totp is RFC 6238 with the realm's policy: HmacSHA1, 30-second steps, six digits. Keycloak keys
