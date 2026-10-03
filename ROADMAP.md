@@ -393,6 +393,24 @@ required step held:
 that rested on the disable alone would hand every session back on restore. TDD-identity-control-005's
 suspension logs the user out as well, and the restoration after that brings no session back.
 
+### One session ended, asked by identity-control
+
+TDD-identity-control-005 2.3.0 lets a person end one of their own sessions. The session is named by
+the identifier the Admin API lists, and the session a request came from is marked by the access
+token's `sid`. `compat/single_session_test.go` asks of the pinned image:
+- whether that `sid` is the listed identifier;
+- whether `DELETE /admin/realms/{realm}/sessions/{id}` ends that session and refuses its refresh
+  token, while the user's other session keeps working;
+- what a second delete answers. This is recorded, not required: the executor treats an absent session
+  as ended either way.
+
+**Answered.** The pinned 26.7.5 image answered on 2026-10-03, in compat run 37137921752, and every
+required step held:
+- The access token's `sid` is the listed session identifier.
+- The delete ends that session alone: its refresh token is refused, and the other session keeps
+  refreshing.
+- A second delete answers `404`.
+
 ## Week 3 · Event listener
 
 - Minimal listener capturing user, admin, and security events
