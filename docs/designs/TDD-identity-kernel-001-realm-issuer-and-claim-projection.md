@@ -500,6 +500,9 @@ alias, and is never edited in place.
   expose every intermediate state to the people signing in.
 - **The previous flow stays, unbound.** The apply deletes nothing (§Configuration as Code), and a
   bound-flow rollback is a rebind.
+- **A build that stopped part way** leaves a declared flow that is unbound and differs from its
+  declaration. That flow is the one exception to deleting nothing: nobody signs in through it, so the
+  next apply deletes it and builds it again whole. A bound flow is never replaced.
 - **Drift.** The drift check compares the bound flow's executions, requirements, order and condition
   configurations with its declaration. Any difference was made by hand, and the apply is refused.
 

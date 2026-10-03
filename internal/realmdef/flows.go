@@ -316,6 +316,35 @@ func flowNamed(d Definition, alias string) (Flow, bool) {
 	return Flow{}, false
 }
 
+// rebuildUnbound replaces a declared flow that is bound to nothing and differs from its declaration.
+// That is a build that stopped part way: no sign-in runs through an unbound flow, so it is deleted
+// and built again whole. A bound flow is never replaced; ErrFlowChanged refuses that.
+func rebuildUnbound(ctx context.Context, c *admin.Client, base string, l *live, f Flow) error {
+	if l.realm != nil {
+		for binding := range flowBindings {
+			if current, _ := l.realm[binding].(string); current == f.Alias {
+				return ErrFlowChanged
+			}
+		}
+	}
+	var top []struct {
+		ID    string `json:"id"`
+		Alias string `json:"alias"`
+	}
+	if err := c.GetJSON(ctx, base+"/authentication/flows", &top); err != nil {
+		return err
+	}
+	for _, flow := range top {
+		if flow.Alias == f.Alias {
+			if _, err := c.Call(ctx, http.MethodDelete, base+"/authentication/flows/"+url.PathEscape(flow.ID), nil,
+				http.StatusNoContent); err != nil {
+				return fmt.Errorf("deleting the partly built flow %s: %w", f.Alias, err)
+			}
+		}
+	}
+	return buildFlow(ctx, c, base, f)
+}
+
 // buildFlow creates a declared top-level flow and every step beneath it.
 func buildFlow(ctx context.Context, c *admin.Client, base string, f Flow) error {
 	if _, err := c.Call(ctx, http.MethodPost, base+"/authentication/flows", map[string]any{
@@ -358,7 +387,7 @@ func addExecutions(ctx context.Context, c *admin.Client, base, parent string, ex
 			return fmt.Errorf("the step added to %s is not listed", parent)
 		}
 		update := map[string]any{"id": added.ID, "requirement": e.Requirement}
-		if _, err := c.Call(ctx, http.MethodPut, flowPath, update, http.StatusAccepted); err != nil {
+		if _, err := c.Call(ctx, http.MethodPut, flowPath, update, http.StatusNoContent); err != nil {
 			return fmt.Errorf("setting %s in %s to %s: %w", stepName(e), parent, e.Requirement, err)
 		}
 		if e.ConfigAlias != "" {
