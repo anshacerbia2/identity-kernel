@@ -371,7 +371,27 @@ Each call is confirmed by a read-back before the operation counts as applied.
 4. **Logout alone.** The session list is empty, and the refresh token issued before is refused.
 5. **Delete the one credential.** It reads back absent, and the password no longer signs in.
 
-Not answered yet: the first run of the compat workflow on this branch answers it.
+**Answered.** The pinned 26.7.5 image answered on 2026-10-03, in compat run 37125613572, and every
+required step held:
+
+| Step | Observed | Required |
+| :-- | :-- | :-- |
+| Disabled: the user reads back disabled; `scnehaux_principal_id` kept | yes | yes |
+| Disabled: a sign-in | **no** | no |
+| Disabled: the refresh token issued before | **no** | no |
+| Enabled again without a logout: the refresh token issued before | **yes** | recorded |
+| Suspended (disable + logout): the session list is empty | yes | yes |
+| Suspended: the refresh token issued before | **no** | no |
+| Suspended: a second logout is accepted | yes | recorded |
+| Restored: reads back enabled; identifier kept | yes | yes |
+| Restored: the refresh token from before the suspension | **no** | no |
+| Restored: a new sign-in | yes | yes |
+| Logged out: the session list is empty; the earlier refresh token refused | yes; **no** | yes; no |
+| Revoked: the credential reads back absent; the password signs in | yes; **no** | yes; no |
+
+**A user's disable pauses its sessions; it does not end them**, as a client's does. So a suspension
+that rested on the disable alone would hand every session back on restore. TDD-identity-control-005's
+suspension logs the user out as well, and the restoration after that brings no session back.
 
 ## Week 3 · Event listener
 
