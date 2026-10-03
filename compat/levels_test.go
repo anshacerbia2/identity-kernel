@@ -62,7 +62,8 @@ type browser struct {
 var (
 	recoveryCode       = regexp.MustCompile(`<li>([A-Z0-9]{4}-[A-Z0-9]{4}-[A-Z0-9]{4})</li>`)
 	recoveryCodeNumber = regexp.MustCompile(`[Cc]ode #(\d+)`)
-	selectionForm      = regexp.MustCompile(`(?s)<form[^>]*id="kc-select-credential-form".*?</form>`)
+	// One option of the selection page: its form, and beside it, in the same list item, its name.
+	selectionForm = regexp.MustCompile(`(?s)<li[^>]*>\s*<form[^>]*id="kc-select-credential-form".*?</li>`)
 )
 
 // tryAnotherWay is the "Try another way" form a page offers beside its own.
