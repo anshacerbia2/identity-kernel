@@ -139,6 +139,7 @@ type executionRepresentation struct {
 	AuthenticationConfig string `json:"authenticationConfig"`
 	Level                int    `json:"level"`
 	Index                int    `json:"index"`
+	Priority             int    `json:"priority"`
 }
 
 // observeFlows reads each named top-level flow as a tree of executions, configurations included. A
@@ -356,20 +357,28 @@ func buildFlow(ctx context.Context, c *admin.Client, base string, f Flow) error 
 }
 
 // addExecutions appends each step to the flow named parent, sets its requirement, configures it,
-// and descends into a sub-flow. Keycloak adds a step disabled and last, so the step just added is
-// the parent's last direct child.
+// and descends into a sub-flow. Each step is given its position as its priority, the order
+// Keycloak runs and lists a flow's steps in; Keycloak adds a step disabled, so the step just added
+// is the parent's last direct child.
+//
+// Keycloak's execution update copies the priority it is sent onto the step (Keycloak 26.7.5,
+// AuthenticationManagementResource.updateExecutions: "if (model.getPriority() != rep.getPriority())
+// { model.setPriority(rep.getPriority()); ... }"), so the requirement is set with the priority read
+// back; one sent without it would reset the step to 0 and leave the order to the database.
 func addExecutions(ctx context.Context, c *admin.Client, base, parent string, executions []Execution) error {
 	flowPath := base + "/authentication/flows/" + url.PathEscape(parent) + "/executions"
-	for _, e := range executions {
+	for position, e := range executions {
+		priority := (position + 1) * 10
 		if e.Flow != "" {
 			if _, err := c.Call(ctx, http.MethodPost, flowPath+"/flow", map[string]any{
 				"alias": e.Flow, "type": "basic-flow", "provider": "registration-page-form", "description": "",
+				"priority": priority,
 			}, http.StatusCreated); err != nil {
 				return fmt.Errorf("adding sub-flow %s to %s: %w", e.Flow, parent, err)
 			}
 		} else {
-			if _, err := c.Call(ctx, http.MethodPost, flowPath+"/execution", map[string]any{"provider": e.Authenticator},
-				http.StatusCreated); err != nil {
+			if _, err := c.Call(ctx, http.MethodPost, flowPath+"/execution",
+				map[string]any{"provider": e.Authenticator, "priority": priority}, http.StatusCreated); err != nil {
 				return fmt.Errorf("adding %s to %s: %w", e.Authenticator, parent, err)
 			}
 		}
@@ -386,7 +395,7 @@ func addExecutions(ctx context.Context, c *admin.Client, base, parent string, ex
 		if added == nil {
 			return fmt.Errorf("the step added to %s is not listed", parent)
 		}
-		update := map[string]any{"id": added.ID, "requirement": e.Requirement}
+		update := map[string]any{"id": added.ID, "requirement": e.Requirement, "priority": added.Priority}
 		if _, err := c.Call(ctx, http.MethodPut, flowPath, update, http.StatusNoContent); err != nil {
 			return fmt.Errorf("setting %s in %s to %s: %w", stepName(e), parent, e.Requirement, err)
 		}
