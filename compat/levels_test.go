@@ -161,7 +161,11 @@ func (b *browser) signIn(extra url.Values) map[string]any {
 			}
 			form.Set("otp", totp(secret, time.Now()))
 		default:
-			b.t.Fatalf("an unexpected page: %s", snippet(page))
+			var names []string
+			for _, n := range regexp.MustCompile(`name="([^"]+)"`).FindAllStringSubmatch(page, -1) {
+				names = append(names, n[1])
+			}
+			b.t.Fatalf("an unexpected page after pages %v, saying %q, with inputs %v", b.pages, pageMessage(page), names)
 		}
 		request, _ = http.NewRequest(http.MethodPost, html.UnescapeString(action[1]), strings.NewReader(form.Encode()))
 		request.Header.Set("Content-Type", "application/x-www-form-urlencoded")
