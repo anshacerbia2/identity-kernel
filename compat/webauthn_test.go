@@ -3,7 +3,7 @@ package compat
 // A software WebAuthn authenticator, so the compat suite can answer the kernel's WebAuthn pages the
 // way a browser and a security key would: a P-256 key pair, a "none" attestation, and assertions
 // signed over the authenticator data and the client data's hash (W3C Web Authentication Level 2,
-// §6.1 authenticator data, §6.5.4 "none" attestation, §6.3.3 assertion signature).
+// §6.1 authenticator data, §8.7 "none" attestation, §6.3.3 assertion signature).
 
 import (
 	"crypto/ecdsa"
