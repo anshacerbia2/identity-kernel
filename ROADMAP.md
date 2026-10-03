@@ -404,7 +404,12 @@ token's `sid`. `compat/single_session_test.go` asks of the pinned image:
 - what a second delete answers. This is recorded, not required: the executor treats an absent session
   as ended either way.
 
-Not answered yet: the compat workflow's first run on this branch answers it.
+**Answered.** The pinned 26.7.5 image answered on 2026-10-03, in compat run 37137921752, and every
+required step held:
+- The access token's `sid` is the listed session identifier.
+- The delete ends that session alone: its refresh token is refused, and the other session keeps
+  refreshing.
+- A second delete answers `404`.
 
 ## Week 3 · Event listener
 
