@@ -347,6 +347,32 @@ first start of a server, before the service account exists.
 **Exit:** a token signed by one replica verifies against every other replica; a replica
 with an empty secret-manager response exits non-zero and signs nothing.
 
+### User containment, asked by identity-control
+
+TDD-identity-control-005 2.2.0 contains a Principal through four Admin API calls:
+- `:suspend` disables the user with a partial `PUT` and logs it out.
+- `:restore` enables it.
+- `sessions:terminate-all` logs it out.
+- `:revoke` deletes one credential.
+
+Each call is confirmed by a read-back before the operation counts as applied.
+
+`compat/user_containment_test.go` asks the following of the pinned image:
+
+1. **A disable alone.** The user reads back disabled, and a partial `PUT` of `enabled` keeps
+   `scnehaux_principal_id`. A sign-in is refused, and the refresh token issued before is refused.
+   - Recorded, not required: whether that refresh token works again once the user is enabled. A
+     client's disable only pauses its sessions, and this answer says whether a user's disable does
+     the same.
+2. **Disable and logout, the suspension.** The session list reads back empty, and the refresh token
+   issued before is refused. A second logout is accepted, so the call is idempotent.
+3. **Enable again, the restoration.** The user reads back enabled and keeps its identifier. The
+   refresh token from before the suspension stays refused, and a new sign-in works.
+4. **Logout alone.** The session list is empty, and the refresh token issued before is refused.
+5. **Delete the one credential.** It reads back absent, and the password no longer signs in.
+
+Not answered yet: the first run of the compat workflow on this branch answers it.
+
 ## Week 3 · Event listener
 
 - Minimal listener capturing user, admin, and security events
