@@ -436,7 +436,7 @@ required step held:
 - The person then holds two.
 - Each of the two signs in at `aal2` alone.
 
-Not answered yet: the compat run on this branch answers it.
+**Answered** on 2026-10-03, in compat run 37153685891: every step held.
 
 One finding changed the flow. With TOTP and WebAuthn as alternatives, the kernel refused a person who
 held neither ("Invalid username or password") instead of offering enrollment. Level 2 therefore
