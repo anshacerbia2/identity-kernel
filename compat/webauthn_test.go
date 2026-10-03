@@ -15,12 +15,14 @@ import (
 	"encoding/json"
 	"net/url"
 	"regexp"
+	"strings"
 	"testing"
 )
 
+// The kernel's pages write these as FreeMarker ${challenge?c}, a JavaScript string literal.
 var (
-	scriptChallenge = regexp.MustCompile(`challenge\s*:\s*'([^']+)'`)
-	scriptRPID      = regexp.MustCompile(`rpId\s*:\s*'([^']*)'`)
+	scriptChallenge = regexp.MustCompile(`challenge\s*:\s*["']([^"']+)["']`)
+	scriptRPID      = regexp.MustCompile(`rpId\s*:\s*["']([^"']*)["']`)
 )
 
 type softKey struct {
@@ -97,7 +99,8 @@ func relyingParty(t *testing.T, page, origin string) (challenge, rpID string) {
 	t.Helper()
 	c, r := scriptChallenge.FindStringSubmatch(page), scriptRPID.FindStringSubmatch(page)
 	if c == nil {
-		t.Fatalf("the WebAuthn page names no challenge: %s", snippet(page))
+		at := strings.Index(page, "challenge")
+		t.Fatalf("the WebAuthn page names no challenge: %q", page[max(at, 0):min(max(at, 0)+200, len(page))])
 	}
 	if r != nil && r[1] != "" {
 		return c[1], r[1]
@@ -118,6 +121,7 @@ func (k *softKey) register(t *testing.T, page, origin string, form url.Values) {
 	form.Set("publicKeyCredentialId", b64.EncodeToString(k.credentialID))
 	form.Set("authenticatorLabel", "compat-key")
 	form.Set("transports", "usb")
+	form.Set("authenticatorAttachment", "cross-platform")
 	form.Set("error", "")
 }
 
