@@ -91,7 +91,11 @@ func recordOf(realm map[string]any) Record {
 // NewPlan compares the definition with the live realm. previous is the definition the recorded
 // revision applied; nil when nothing was recorded, or when the caller is adopting the live state.
 func NewPlan(ctx context.Context, c *admin.Client, definition Definition, previous *Definition) (Plan, error) {
-	observed, err := observe(ctx, c, definition.Name(), flowAliases(&definition, previous))
+	declaredActions := definition.RequiredActions
+	if previous != nil {
+		declaredActions = append(append([]map[string]any{}, declaredActions...), previous.RequiredActions...)
+	}
+	observed, err := observe(ctx, c, definition.Name(), flowAliases(&definition, previous), declaredActions)
 	if err != nil {
 		return Plan{}, err
 	}
@@ -132,6 +136,8 @@ type live struct {
 	defaults DefaultScopes
 	// flows are the declared top-level flows that exist, as trees, by alias.
 	flows map[string][]Execution
+	// requiredActions are the declared required actions the kernel registers, by alias.
+	requiredActions map[string]map[string]any
 }
 
 func (l *live) profileAttribute(attributeName string) map[string]any {
@@ -143,7 +149,8 @@ func (l *live) profileAttribute(attributeName string) map[string]any {
 	return nil
 }
 
-func observe(ctx context.Context, c *admin.Client, realm string, aliases []string) (*live, error) {
+func observe(ctx context.Context, c *admin.Client, realm string, aliases []string,
+	requiredActions []map[string]any) (*live, error) {
 	base := "/admin/realms/" + url.PathEscape(realm)
 	observed := &live{keys: map[string]map[string]any{}, scopes: map[string]map[string]any{},
 		flows: map[string][]Execution{}}
@@ -194,6 +201,9 @@ func observe(ctx context.Context, c *admin.Client, realm string, aliases []strin
 		return nil, err
 	}
 	observed.flows = flows
+	if observed.requiredActions, err = observeRequiredActions(ctx, c, base, requiredActions); err != nil {
+		return nil, err
+	}
 	return observed, nil
 }
 
@@ -231,6 +241,12 @@ func compare(d Definition, l *live) []Change {
 				changes = append(changes, Change{Kind: KindBinding, Name: f.Binding, Action: Update})
 			}
 		}
+		// Keycloak registers its required actions with the realm, so each is an update of one it
+		// has just created.
+		for _, action := range d.RequiredActions {
+			alias, _ := action["alias"].(string)
+			changes = append(changes, Change{Kind: KindRequiredAction, Name: alias, Action: Update})
+		}
 		return changes
 	}
 
@@ -249,6 +265,10 @@ func compare(d Definition, l *live) []Change {
 	// Flows after everything else, and their bindings after the flows: a binding names a flow that
 	// must already be whole.
 	changes = append(changes, compareFlows(d, l)...)
+	for _, action := range d.RequiredActions {
+		alias, _ := action["alias"].(string)
+		changes = append(changes, compareObject(KindRequiredAction, alias, action, l.requiredActions[alias]))
+	}
 	return changes
 }
 

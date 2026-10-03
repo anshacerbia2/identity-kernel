@@ -44,6 +44,12 @@ func liveFrom(d Definition) *live {
 	if c.Defaults != nil {
 		l.defaults = DefaultScopes{Default: sortedCopy(c.Defaults.Default), Optional: sortedCopy(c.Defaults.Optional)}
 	}
+	l.requiredActions = map[string]map[string]any{}
+	for _, action := range c.RequiredActions {
+		alias, _ := action["alias"].(string)
+		l.requiredActions[alias] = overlay(map[string]any{"name": alias, "providerId": alias, "priority": 10.0,
+			"defaultAction": false, "config": map[string]any{}}, action)
+	}
 	l.flows = map[string][]Execution{}
 	for _, f := range c.Flows {
 		l.flows[f.Alias] = withLiveConfig(f.Executions)
@@ -91,11 +97,11 @@ func TestAnAbsentRealmCreatesEverything(t *testing.T) {
 			bindings++
 		}
 	}
-	if want := 3 + len(d.Scopes) + len(d.Profile) + len(d.Flows) + bindings; len(changes) != want {
+	if want := 3 + len(d.Scopes) + len(d.Profile) + len(d.Flows) + bindings + len(d.RequiredActions); len(changes) != want {
 		t.Fatalf("%d changes for an absent realm, want %d", len(changes), want)
 	}
 	for _, change := range changes {
-		if change.Kind == KindBinding {
+		if change.Kind == KindBinding || change.Kind == KindRequiredAction {
 			if change.Action != Update {
 				t.Errorf("binding %s: %s, want update", change.Name, change.Action)
 			}
@@ -364,10 +370,10 @@ func mustJSON(t *testing.T, d Definition) []byte {
 func TestAnAbsentFlowIsBuiltAndThenBound(t *testing.T) {
 	d := definition(t)
 	l := liveFrom(d)
-	delete(l.flows, "scnehaux-browser-v2")
-	l.realm["browserFlow"] = "scnehaux-browser-v1"
+	delete(l.flows, "scnehaux-browser-v3")
+	l.realm["browserFlow"] = "scnehaux-browser-v2"
 	changes := compare(d, l)
-	if c := find(t, changes, KindFlow, "scnehaux-browser-v2"); c.Action != Create {
+	if c := find(t, changes, KindFlow, "scnehaux-browser-v3"); c.Action != Create {
 		t.Errorf("flow: %s", c.Action)
 	}
 	if c := find(t, changes, KindBinding, "browserFlow"); c.Action != Update {
@@ -391,16 +397,16 @@ func TestAnAbsentFlowIsBuiltAndThenBound(t *testing.T) {
 func TestAHandEditedFlowIsADifference(t *testing.T) {
 	d := definition(t)
 	l := liveFrom(d)
-	forms := l.flows["scnehaux-browser-v2"][1]
+	forms := l.flows["scnehaux-browser-v3"][1]
 	level2 := forms.Executions[1]
 	level2.Executions[1].Executions[1].Executions[0].Requirement = "DISABLED"
-	c := find(t, compare(d, l), KindFlow, "scnehaux-browser-v2")
+	c := find(t, compare(d, l), KindFlow, "scnehaux-browser-v3")
 	if c.Action != Update || !has(c.Diffs, "auth-otp-form: requirement live DISABLED, definition REQUIRED") {
 		t.Errorf("%s %v", c.Action, c.Diffs)
 	}
 	l = liveFrom(d)
-	l.flows["scnehaux-browser-v2"][1].Executions[1].Executions[0].Config["loa-max-age"] = "0"
-	c = find(t, compare(d, l), KindFlow, "scnehaux-browser-v2")
+	l.flows["scnehaux-browser-v3"][1].Executions[1].Executions[0].Config["loa-max-age"] = "0"
+	c = find(t, compare(d, l), KindFlow, "scnehaux-browser-v3")
 	if c.Action != Update || !has(c.Diffs, "loa-max-age live \"0\", definition \"300\"") {
 		t.Errorf("%s %v", c.Action, c.Diffs)
 	}
@@ -431,5 +437,67 @@ func TestADefinitionWithoutFlowsKeepsItsDigest(t *testing.T) {
 	encoded, _ := json.Marshal(without)
 	if strings.Contains(string(encoded), "flows") {
 		t.Error("an absent flow list is part of the digest")
+	}
+}
+
+// A required action's configuration changed by hand is a difference naming the key, and one the
+// definition does not govern is not compared.
+func TestAHandEditedRequiredActionIsADifference(t *testing.T) {
+	d := definition(t)
+	l := liveFrom(d)
+	if c := find(t, compare(d, l), KindRequiredAction, "CONFIGURE_TOTP"); c.Action != InSync {
+		t.Fatalf("%s %v", c.Action, c.Diffs)
+	}
+	l.requiredActions["CONFIGURE_TOTP"]["priority"] = 99.0
+	if c := find(t, compare(d, l), KindRequiredAction, "CONFIGURE_TOTP"); c.Action != InSync {
+		t.Errorf("an undeclared field: %s %v", c.Action, c.Diffs)
+	}
+	l.requiredActions["CONFIGURE_TOTP"]["config"] = map[string]any{"add-recovery-codes": "false"}
+	c := find(t, compare(d, l), KindRequiredAction, "CONFIGURE_TOTP")
+	if c.Action != Update || !has(c.Diffs, "config.add-recovery-codes: live \"false\", definition \"true\"") {
+		t.Errorf("%s %v", c.Action, c.Diffs)
+	}
+	delete(l.requiredActions, "CONFIGURE_RECOVERY_AUTHN_CODES")
+	if c := find(t, compare(d, l), KindRequiredAction, "CONFIGURE_RECOVERY_AUTHN_CODES"); c.Action != Create {
+		t.Errorf("an action the kernel does not register: %s", c.Action)
+	}
+}
+
+func TestParseRefusesAnUngovernedRequiredActionField(t *testing.T) {
+	files := map[string][]byte{}
+	for _, name := range append(append([]string{}, Files...), OptionalFiles...) {
+		content, err := os.ReadFile(filepath.Join("..", "..", "realm", name))
+		if err != nil {
+			t.Fatal(err)
+		}
+		files[name] = content
+	}
+	for _, bad := range []string{
+		`[{"alias":"CONFIGURE_TOTP","priority":10}]`,
+		`[{"alias":"CONFIGURE_TOTP","config":{"add-recovery-codes":true}}]`,
+		`[{"alias":"CONFIGURE_TOTP"},{"alias":"CONFIGURE_TOTP"}]`,
+	} {
+		files["required-actions.json"] = []byte(bad)
+		if _, err := Parse(files); err == nil {
+			t.Errorf("%s was accepted", bad)
+		}
+	}
+}
+
+// The brute-force settings reach a permanent lockout no later than the 100th consecutive failure
+// (NIST SP 800-63B-4 §3.2.2). With the MULTIPLE strategy, Keycloak counts one temporary lockout per
+// failure from the failureFactor-th on, and locks permanently once the count exceeds
+// maxTemporaryLockouts: at failure failureFactor + maxTemporaryLockouts.
+func TestThePermanentLockoutComesByTheHundredthFailure(t *testing.T) {
+	r := definition(t).Realm
+	if r["bruteForceProtected"] != true || r["permanentLockout"] != true || r["bruteForceStrategy"] != "MULTIPLE" {
+		t.Fatalf("brute-force detection is not in the mode ADR-IAM-005 §5.6 decides: %v", r)
+	}
+	factor, temporary := r["failureFactor"].(float64), r["maxTemporaryLockouts"].(float64)
+	if at := factor + temporary; at > 100 || temporary < 1 {
+		t.Errorf("permanent lockout at failure %v, want no later than 100 with temporary lockouts first", at)
+	}
+	if reset, wait := r["maxDeltaTimeSeconds"].(float64), r["maxFailureWaitSeconds"].(float64); reset <= wait {
+		t.Errorf("the failure reset time %v is not above the longest wait %v", reset, wait)
 	}
 }

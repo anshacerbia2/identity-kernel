@@ -1,0 +1,17 @@
+[
+  {
+    "alias": "CONFIGURE_TOTP",
+    "enabled": true,
+    "config": {
+      "add-recovery-codes": "true"
+    }
+  },
+  {
+    "alias": "CONFIGURE_RECOVERY_AUTHN_CODES",
+    "enabled": true
+  },
+  {
+    "alias": "webauthn-register",
+    "enabled": true
+  }
+]

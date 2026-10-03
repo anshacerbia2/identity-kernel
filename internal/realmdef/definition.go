@@ -58,7 +58,7 @@ var Files = []string{"scnehaux.json", "signing-key.generated.json", "client-scop
 
 // OptionalFiles are sources a definition may lack. A revision from before one was added is still a
 // definition, so the drift check can judge the live realm against it.
-var OptionalFiles = []string{"default-client-scopes.json", "authentication-flows.json"}
+var OptionalFiles = []string{"default-client-scopes.json", "authentication-flows.json", "required-actions.json"}
 
 // Definition is the declared state of one realm.
 type Definition struct {
@@ -73,6 +73,9 @@ type Definition struct {
 	// Flows are the authentication flows the definition declares, and the bindings they take. Nil
 	// when it declares none, as before it governed them, and omitted from the digest then.
 	Flows []Flow `json:"flows,omitempty"`
+	// RequiredActions are the fields the definition governs on the kernel's required actions, by
+	// alias. Nil when it declares none, and omitted from the digest then.
+	RequiredActions []map[string]any `json:"requiredActions,omitempty"`
 }
 
 // DefaultScopes are the client scopes a new client holds as default and as optional scopes, by name.
@@ -164,6 +167,11 @@ func Parse(files map[string][]byte) (Definition, error) {
 			return Definition{}, fmt.Errorf("parsing authentication-flows.json: %w", err)
 		}
 	}
+	if content, ok := files["required-actions.json"]; ok {
+		if err := json.Unmarshal(content, &d.RequiredActions); err != nil {
+			return Definition{}, fmt.Errorf("parsing required-actions.json: %w", err)
+		}
+	}
 	return d, d.validate()
 }
 
@@ -221,6 +229,9 @@ func (d Definition) validate() error {
 		}
 	}
 	if err := validateFlows(d.Flows); err != nil {
+		return err
+	}
+	if err := validateRequiredActions(d.RequiredActions); err != nil {
 		return err
 	}
 	attributes := map[string]bool{}

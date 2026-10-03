@@ -97,6 +97,8 @@ func Apply(ctx context.Context, c *admin.Client, plan Plan, options Options) err
 			err = buildFlow(ctx, c, base, flow)
 		case KindBinding:
 			err = bindFlow(ctx, c, d, change.Name)
+		case KindRequiredAction:
+			err = applyRequiredAction(ctx, c, base, requiredActionNamed(d, change.Name), plan.live)
 		}
 		if err != nil {
 			return fmt.Errorf("applying %s %s: %w", change.Kind, change.Name, err)

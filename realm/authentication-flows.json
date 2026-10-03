@@ -56,7 +56,6 @@
   {
     "alias": "scnehaux-browser-v2",
     "description": "Password at LoA 1 (aal1); plus WebAuthn or TOTP at LoA 2 (aal2), enrolling TOTP for a person with neither. TDD-identity-kernel-001 \u00a7Authentication Levels, ADR-IAM-004.",
-    "binding": "browserFlow",
     "executions": [
       {
         "authenticator": "auth-cookie",
@@ -115,6 +114,81 @@
                         "requirement": "REQUIRED"
                       }
                     ]
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "alias": "scnehaux-browser-v3",
+    "description": "Password at LoA 1 (aal1); plus WebAuthn, TOTP or a recovery code at LoA 2 (aal2), enrolling TOTP for a person with none. TDD-identity-kernel-001 \u00a7Authentication Levels, ADR-IAM-004, ADR-IAM-005.",
+    "binding": "browserFlow",
+    "executions": [
+      {
+        "authenticator": "auth-cookie",
+        "requirement": "ALTERNATIVE"
+      },
+      {
+        "flow": "scnehaux-browser-v3 forms",
+        "requirement": "ALTERNATIVE",
+        "executions": [
+          {
+            "flow": "scnehaux-browser-v3 level 1",
+            "requirement": "CONDITIONAL",
+            "executions": [
+              {
+                "authenticator": "conditional-level-of-authentication",
+                "requirement": "REQUIRED",
+                "configAlias": "scnehaux-browser-v3 loa 1",
+                "config": {
+                  "loa-condition-level": "1",
+                  "loa-max-age": "36000"
+                }
+              },
+              {
+                "authenticator": "auth-username-password-form",
+                "requirement": "REQUIRED"
+              }
+            ]
+          },
+          {
+            "flow": "scnehaux-browser-v3 level 2",
+            "requirement": "CONDITIONAL",
+            "executions": [
+              {
+                "authenticator": "conditional-level-of-authentication",
+                "requirement": "REQUIRED",
+                "configAlias": "scnehaux-browser-v3 loa 2",
+                "config": {
+                  "loa-condition-level": "2",
+                  "loa-max-age": "300"
+                }
+              },
+              {
+                "flow": "scnehaux-browser-v3 second factor",
+                "requirement": "REQUIRED",
+                "executions": [
+                  {
+                    "authenticator": "webauthn-authenticator",
+                    "requirement": "ALTERNATIVE"
+                  },
+                  {
+                    "flow": "scnehaux-browser-v3 one-time code",
+                    "requirement": "ALTERNATIVE",
+                    "executions": [
+                      {
+                        "authenticator": "auth-otp-form",
+                        "requirement": "REQUIRED"
+                      }
+                    ]
+                  },
+                  {
+                    "authenticator": "auth-recovery-authn-code-form",
+                    "requirement": "ALTERNATIVE"
                   }
                 ]
               }

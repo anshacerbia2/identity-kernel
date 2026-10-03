@@ -20,6 +20,7 @@ import (
 	"net/http/cookiejar"
 	"net/url"
 	"regexp"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -50,7 +51,22 @@ type browser struct {
 	credential string
 	// key answers the WebAuthn pages, once set.
 	key *softKey
+	// codes are the recovery codes the kernel showed, in order; asked holds the number of each code
+	// the kernel asked for. recover, when set, leaves the second-factor page through "Try another
+	// way" for the recovery code (ADR-IAM-005 §5.2).
+	codes   []string
+	asked   []int
+	recover bool
 }
+
+var (
+	recoveryCode       = regexp.MustCompile(`<li>([A-Z0-9]{4}-[A-Z0-9]{4}-[A-Z0-9]{4})</li>`)
+	recoveryCodeNumber = regexp.MustCompile(`[Cc]ode #(\d+)`)
+	selectionForm      = regexp.MustCompile(`(?s)<form[^>]*id="kc-select-credential-form".*?</form>`)
+)
+
+// tryAnotherWay is the "Try another way" form a page offers beside its own.
+func tryAnotherWay(page string) bool { return strings.Contains(page, `name="tryAnotherWay"`) }
 
 func newBrowser(t *testing.T, a *admin, c client, p principal) *browser {
 	t.Helper()
@@ -120,6 +136,45 @@ func (b *browser) signIn(extra url.Values) map[string]any {
 		base, _ := url.Parse(b.a.base)
 		origin := base.Scheme + "://" + base.Host
 		switch {
+		case b.recover && tryAnotherWay(page) && !namedInput("authenticationExecution").MatchString(page) &&
+			!namedInput("recoveryCodeInput").MatchString(page):
+			b.pages = append(b.pages, "try-another-way")
+			form = url.Values{"tryAnotherWay": {"on"}}
+		case namedInput("authenticationExecution").MatchString(page):
+			b.pages = append(b.pages, "select")
+			chosen := ""
+			for _, option := range selectionForm.FindAllString(page, -1) {
+				if strings.Contains(option, "Recovery") {
+					if v := regexp.MustCompile(`name="authenticationExecution" value="([^"]+)"`).FindStringSubmatch(option); v != nil {
+						chosen = v[1]
+					}
+				}
+			}
+			if chosen == "" {
+				b.t.Fatalf("the selection offers no recovery code: %q", pageMessage(page))
+			}
+			form = url.Values{"authenticationExecution": {chosen}}
+		case namedInput("generatedRecoveryAuthnCodes").MatchString(page):
+			b.pages = append(b.pages, "recovery-codes")
+			b.codes = nil
+			for _, code := range recoveryCode.FindAllStringSubmatch(page, -1) {
+				b.codes = append(b.codes, code[1])
+			}
+			if len(b.codes) == 0 {
+				b.t.Fatal("the recovery-code page shows no codes")
+			}
+		case namedInput("recoveryCodeInput").MatchString(page):
+			b.pages = append(b.pages, "recovery-code")
+			n := recoveryCodeNumber.FindStringSubmatch(page)
+			if n == nil {
+				b.t.Fatalf("the recovery-code page names no code number: %q", pageMessage(page))
+			}
+			number, _ := strconv.Atoi(n[1])
+			if number < 1 || number > len(b.codes) {
+				b.t.Fatalf("the kernel asked for recovery code #%d of the %d the test holds", number, len(b.codes))
+			}
+			b.asked = append(b.asked, number)
+			form.Set("recoveryCodeInput", b.codes[number-1])
 		case namedInput("attestationObject").MatchString(page):
 			b.pages = append(b.pages, "webauthn-register")
 			if b.key == nil {
@@ -260,6 +315,9 @@ func TestAuthenticationLevels(t *testing.T) {
 	claims = b.signIn(url.Values{"acr_values": {"aal2"}})
 	require("asked for aal2 with no second factor: TOTP is enrolled in that sign-in",
 		strings.Contains(pages(), "configure-totp"), true, pages())
+	require("and recovery codes are issued after it (ADR-IAM-005 §5.3)",
+		strings.HasSuffix(pages(), "configure-totp,recovery-codes") && len(b.codes) == 12, true,
+		fmt.Sprint(pages(), " ", len(b.codes)))
 	require("then the token carries acr aal2", claims["acr"] == "aal2", true, fmt.Sprint(claims["acr"]))
 	require("the ID token carries acr aal2", claims["id_token_acr"] == "aal2", true, fmt.Sprint(claims["id_token_acr"]))
 
@@ -340,7 +398,7 @@ func TestAuthenticationLevels(t *testing.T) {
 		switch credential.Type {
 		case "webauthn":
 			webauthns++
-		case "otp":
+		case "otp", "recovery-authn-codes":
 			if _, err := a.call(http.MethodDelete, "/admin/realms/"+realmName+"/users/"+p.userID+"/credentials/"+credential.ID,
 				nil, http.StatusNoContent); err != nil {
 				t.Fatalf("deleting a TOTP: %v", err)
@@ -364,9 +422,25 @@ func TestAuthenticationLevels(t *testing.T) {
 	})
 	other := newBrowser(t, a, c, fresh)
 	claims = other.signIn(url.Values{"acr_values": {"aal2"}})
-	require("a person with neither factor enrolls a TOTP at aal2",
-		strings.Join(other.pages, ",") == "password,configure-totp", true, strings.Join(other.pages, ","))
+	require("a person with neither factor enrolls a TOTP, then saves recovery codes, at aal2",
+		strings.Join(other.pages, ",") == "password,configure-totp,recovery-codes", true, strings.Join(other.pages, ","))
 	require("and carries aal2 after it", claims["acr"] == "aal2", true, fmt.Sprint(claims["acr"]))
+
+	// Recovery (ADR-IAM-005 §5.2): the person still holds the TOTP but not the phone, so they leave
+	// its page through "Try another way" and give a recovery code after the password.
+	time.Sleep(2 * time.Second)
+	other.recover = true
+	claims = other.signIn(url.Values{"acr_values": {"aal2"}, "max_age": {"0"}})
+	recovered := strings.Join(other.pages, ",")
+	require("a recovery code after the password reaches aal2",
+		strings.HasSuffix(recovered, "recovery-code") && claims["acr"] == "aal2", true,
+		fmt.Sprint(recovered, " ", claims["acr"]))
+	steps = append(steps, lifecycleStep{name: "recovering, the pages shown are " + recovered, observed: true})
+	time.Sleep(2 * time.Second)
+	claims = other.signIn(url.Values{"acr_values": {"aal2"}, "max_age": {"0"}})
+	require("a used code is not asked for again: the next sign-in asks for the next one",
+		len(other.asked) == 2 && other.asked[1] == other.asked[0]+1 && claims["acr"] == "aal2", true,
+		fmt.Sprint(other.asked, " ", claims["acr"]))
 
 	var out strings.Builder
 	fmt.Fprintf(&out, "## Authentication levels\n\n")
@@ -378,9 +452,9 @@ func TestAuthenticationLevels(t *testing.T) {
 	if t.Failed() {
 		fmt.Fprintf(&out, "\n**Outcome:** the realm does not reach aal1 and aal2 as ADR-IAM-004 requires.\n")
 	} else {
-		fmt.Fprintf(&out, "\n**Outcome:** a password sign-in is aal1; aal2 adds a TOTP code, enrolled at the first "+
-			"aal2 sign-in, or a WebAuthn authenticator; level 2 is reused for 300 s and asked again with "+
-			"max_age 0.\n")
+		fmt.Fprintf(&out, "\n**Outcome:** a password sign-in is aal1; aal2 adds a TOTP code, enrolled with "+
+			"recovery codes at the first aal2 sign-in, a WebAuthn authenticator, or a recovery code; level 2 is "+
+			"reused for 300 s and asked again with max_age 0.\n")
 	}
 	publish(t, out.String())
 }

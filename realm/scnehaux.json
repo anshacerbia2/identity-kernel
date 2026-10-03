@@ -11,6 +11,16 @@
   "sslRequired": "external",
   "adminEventsEnabled": true,
   "adminEventsDetailsEnabled": true,
+  "bruteForceProtected": true,
+  "permanentLockout": true,
+  "failureFactor": 10,
+  "maxTemporaryLockouts": 90,
+  "bruteForceStrategy": "MULTIPLE",
+  "waitIncrementSeconds": 60,
+  "maxFailureWaitSeconds": 900,
+  "maxDeltaTimeSeconds": 31536000,
+  "quickLoginCheckMilliSeconds": 1000,
+  "minimumQuickLoginWaitSeconds": 60,
   "attributes": {
     "adminEventsExpiration": "604800",
     "acr.loa.map": "{\"aal1\":1,\"aal2\":2}"
