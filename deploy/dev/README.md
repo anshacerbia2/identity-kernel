@@ -11,6 +11,22 @@ It is **development only**:
 - The issuer this server gets is not the production issuer.
 - Nothing issued here is evidence of anything.
 
+## Against the deployment standard
+
+Every service on the server is deployed the way STD-GLB-009 §Development Server Deployment describes:
+`git pull`, then `docker compose up -d --build`, in `deploy/dev`. This stack follows it, and differs
+from the layout in three places, each because the service is a vendor kernel rather than a Scnehaux
+service:
+
+- **No `migrate` target or `migrate.sh`.** Keycloak migrates its own database at start. The image is
+  built from `image/`, pinned like every other base.
+- **realm-apply runs on every `up`, not behind a profile.** It converges the realm to the definition
+  at the recorded revision and refuses drift, so running it on every release is the point. It is the
+  stack's one-off task in every other respect: a one-shot job on its own image.
+- **Its callers' network is `scnehaux-identity-api`**, named before the standard's
+  `scnehaux-<repository>-api` form, and joined by identity-control and organization-control as
+  external. Renaming it would break both, for no change in what it carries.
+
 ## What is exposed
 
 | Path | Reachable from |
