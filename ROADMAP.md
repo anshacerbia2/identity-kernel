@@ -411,6 +411,30 @@ required step held:
   refreshing.
 - A second delete answers `404`.
 
+### Authentication levels, for ADR-IAM-004
+
+The realm maps `acr` `aal1` and `aal2` to LoA 1 and 2 (`acr.loa.map`) and binds
+`scnehaux-browser-v1`: a password at level 1, and TOTP at level 2 reused for 300 seconds
+(TDD-identity-kernel-001 §Authentication Levels). realm-apply now manages authentication flows:
+- they are declared in `realm/authentication-flows.json`;
+- a missing flow is built whole, then bound;
+- a bound flow is never edited in place;
+- a partly built, unbound flow is rebuilt;
+- the bound flow is compared for drift.
+
+**Answered.** The pinned 26.7.5 image answered on 2026-10-03, in compat run 37150434728, and every
+required step held:
+- A password sign-in carries `aal1`.
+- Asking for `aal2` with no second factor enrolls TOTP in that sign-in. The access and ID tokens
+  then carry `aal2`.
+- Within 300 seconds, `aal2` is reused without a page. `max_age=0` asks for the password and the code
+  again.
+- An unmapped `acr` (`phr`) is never answered with that level. It got the session's `aal2`.
+
+One finding changed the flow. With TOTP and WebAuthn as alternatives, the kernel refused a person who
+held neither ("Invalid username or password") instead of offering enrollment. Level 2 therefore
+requires TOTP, and WebAuthn waits for a flow version that follows its enrollment.
+
 ## Week 3 · Event listener
 
 - Minimal listener capturing user, admin, and security events

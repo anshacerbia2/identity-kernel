@@ -1,0 +1,57 @@
+[
+  {
+    "alias": "scnehaux-browser-v1",
+    "description": "Password at LoA 1 (aal1); plus TOTP at LoA 2 (aal2). TDD-identity-kernel-001 \u00a7Authentication Levels, ADR-IAM-004.",
+    "binding": "browserFlow",
+    "executions": [
+      {
+        "authenticator": "auth-cookie",
+        "requirement": "ALTERNATIVE"
+      },
+      {
+        "flow": "scnehaux-browser-v1 forms",
+        "requirement": "ALTERNATIVE",
+        "executions": [
+          {
+            "flow": "scnehaux-browser-v1 level 1",
+            "requirement": "CONDITIONAL",
+            "executions": [
+              {
+                "authenticator": "conditional-level-of-authentication",
+                "requirement": "REQUIRED",
+                "configAlias": "scnehaux-browser-v1 loa 1",
+                "config": {
+                  "loa-condition-level": "1",
+                  "loa-max-age": "36000"
+                }
+              },
+              {
+                "authenticator": "auth-username-password-form",
+                "requirement": "REQUIRED"
+              }
+            ]
+          },
+          {
+            "flow": "scnehaux-browser-v1 level 2",
+            "requirement": "CONDITIONAL",
+            "executions": [
+              {
+                "authenticator": "conditional-level-of-authentication",
+                "requirement": "REQUIRED",
+                "configAlias": "scnehaux-browser-v1 loa 2",
+                "config": {
+                  "loa-condition-level": "2",
+                  "loa-max-age": "300"
+                }
+              },
+              {
+                "authenticator": "auth-otp-form",
+                "requirement": "REQUIRED"
+              }
+            ]
+          }
+        ]
+      }
+    ]
+  }
+]

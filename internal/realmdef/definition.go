@@ -58,7 +58,7 @@ var Files = []string{"scnehaux.json", "signing-key.generated.json", "client-scop
 
 // OptionalFiles are sources a definition may lack. A revision from before one was added is still a
 // definition, so the drift check can judge the live realm against it.
-var OptionalFiles = []string{"default-client-scopes.json"}
+var OptionalFiles = []string{"default-client-scopes.json", "authentication-flows.json"}
 
 // Definition is the declared state of one realm.
 type Definition struct {
@@ -70,6 +70,9 @@ type Definition struct {
 	// the definition does not govern them, as before it declared them; omitted from the digest then,
 	// so an earlier revision's digest is unchanged.
 	Defaults *DefaultScopes `json:"defaults,omitempty"`
+	// Flows are the authentication flows the definition declares, and the bindings they take. Nil
+	// when it declares none, as before it governed them, and omitted from the digest then.
+	Flows []Flow `json:"flows,omitempty"`
 }
 
 // DefaultScopes are the client scopes a new client holds as default and as optional scopes, by name.
@@ -156,6 +159,11 @@ func Parse(files map[string][]byte) (Definition, error) {
 		}
 		d.Defaults = &defaults
 	}
+	if content, ok := files["authentication-flows.json"]; ok {
+		if err := json.Unmarshal(content, &d.Flows); err != nil {
+			return Definition{}, fmt.Errorf("parsing authentication-flows.json: %w", err)
+		}
+	}
 	return d, d.validate()
 }
 
@@ -211,6 +219,9 @@ func (d Definition) validate() error {
 			}
 			seen[scopeName] = true
 		}
+	}
+	if err := validateFlows(d.Flows); err != nil {
+		return err
 	}
 	attributes := map[string]bool{}
 	for _, attribute := range d.Profile {
