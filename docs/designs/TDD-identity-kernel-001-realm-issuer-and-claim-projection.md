@@ -3,12 +3,12 @@ doc_meta:
   id: TDD-identity-kernel-001
   title: Realm Topology, Issuer Identity, and Token Claim Projection
   owner: Identity Platform Team
-  version: 1.11.0
+  version: 1.12.0
   status: approved
   classification: restricted
   review_cycle_days: 90
   created_date: 2026-08-11
-  last_reviewed: 2026-10-03
+  last_reviewed: 2026-10-04
   parent_sad: SAD-001
 ---
 
@@ -461,12 +461,13 @@ as Keycloak advises: "a best practice is to stick to realm mappings" [R1]. `phr`
 ADR and is left out of the map until a flow can satisfy it, because asking for a level no flow
 reaches is a failed sign-in.
 
-**The flow.** The browser binding is a flow of this realm's own, `scnehaux-browser-v2`. It follows
-the step-up flow Keycloak documents [R1], with the second factor offered as WebAuthn or TOTP, as
-Keycloak documents for a second factor [R3]:
+**The flow.** The browser binding is a flow of this realm's own, `scnehaux-browser-v3`. It follows
+the step-up flow Keycloak documents [R1]. The second factor is offered as WebAuthn or TOTP, as
+Keycloak documents for a second factor [R3], and a recovery code is offered beside them
+(`ADR-IAM-005 §5.2`) [R7]:
 
 ```text
-scnehaux-browser-v2
+scnehaux-browser-v3
 ├─ Cookie                                     ALTERNATIVE
 └─ forms                                      ALTERNATIVE
    ├─ level 1                                 CONDITIONAL
@@ -476,9 +477,12 @@ scnehaux-browser-v2
       ├─ Condition - Level Of Authentication  REQUIRED   LoA 2, max age 300 s
       └─ second factor                        REQUIRED
          ├─ WebAuthn Authenticator            ALTERNATIVE
-         └─ one-time code                     ALTERNATIVE
-            └─ OTP Form                       REQUIRED
+         ├─ one-time code                     ALTERNATIVE
+         │  └─ OTP Form                       REQUIRED
+         └─ Recovery Authentication Code Form ALTERNATIVE
 ```
+
+v3 adds the last step to v2, which stays declared and unbound, as v1 does.
 
 - **WebAuthn or TOTP at level 2.** Either is a second factor beside the password, and the pair meets
   AAL2 [R2]. `ADR-IAM-004` §5.1 names both.
@@ -497,6 +501,20 @@ scnehaux-browser-v2
   both credential types, the credential with the highest priority will be displayed by default.
   However, the *Try Another Way* option will appear" [R3]. On the pinned image, a person who enrolled
   TOTP first and then a key was shown the TOTP page.
+- **A recovery code is recovery, at level 2 (1.12.0).**
+  - The kernel generates 12 one-time codes and asks for them in order. A used code is removed, and
+    the next one is asked for at the next sign-in [R7].
+  - Password plus one code is the recovery `ADR-IAM-005 §5.2` decides.
+  - A person with TOTP and codes is shown the TOTP page. They reach the code through *Try Another
+    Way*, then the selection page. The compat suite proves this path, and that the next sign-in asks
+    for the next code.
+- **Codes are issued with the first TOTP (1.12.0).** The *Configure OTP* action asks for recovery
+  codes as it completes, by its option `add-recovery-codes` [R8]. It does so only where a flow of the
+  realm uses recovery codes and their own action, *Recovery Authentication Codes*, is enabled [R8].
+  The realm declares both:
+  - A person enrolled through their first `aal2` sign-in leaves it with a TOTP and 12 codes.
+  - A later TOTP, set up by the application-initiated action, asks for no codes when the person
+    already holds them [R8].
 - **The WebAuthn policy is the realm's default.** The relying party ID is the kernel's host name, and
   no attestation is required. Requiring attestation would restrict which authenticators a person may
   use, and no requirement asks for that.
@@ -528,11 +546,65 @@ alias, and is never edited in place.
   next apply deletes it and builds it again whole. A bound flow is never replaced.
 - **Drift.** The drift check compares the bound flow's executions, requirements, order and condition
   configurations with its declaration. Any difference was made by hand, and the apply is refused.
+- **Required actions (1.12.0).** `realm/required-actions.json` declares the fields this realm governs
+  on the kernel's required actions, by alias: whether each is enabled, and its configuration.
+  - Keycloak registers its built-in required actions with every realm. realm-apply therefore never
+    creates one: it lays the declared fields over the live action and writes it back whole, as
+    Keycloak's update replaces every field it is sent [R5].
+  - The configuration lives on the action itself, the field `config` [R5].
+  - Priority and the default-action switch are not governed, because neither changes what a person
+    proves. A declared field changed by hand is drift.
+  - The realm declares `CONFIGURE_TOTP`, with `add-recovery-codes`, and
+    `CONFIGURE_RECOVERY_AUTHN_CODES` and `webauthn-register`, both enabled.
 - **Order is set, never left to the database.** A step's position in a flow is its priority.
   realm-apply adds each step with its position as its priority, and sets the requirement with the
   priority it reads back. Keycloak's execution update copies the priority it is sent onto the step
   [R5]. An update without one resets the step to 0, which leaves the order of equal steps to the
   database. On Postgres, the upgrade job listed v2's level sub-flows with their two steps swapped.
+
+### Guessing Limits
+
+`ADR-IAM-005 §5.6` enables Keycloak's brute-force detection. It is disabled by default, and it
+applies "only to password, OTP and recovery codes" [R9]. The mode is *Lockout permanently after
+temporary lockout* [R9]:
+
+| Setting | Value | Why |
+| :-- | :-- | :-- |
+| `bruteForceProtected`, `permanentLockout` | `true`, `true` | The mixed mode |
+| `failureFactor` | 10 | The first temporary lockout comes at the 10th consecutive failure |
+| `maxTemporaryLockouts` | 90 | The permanent lockout comes at the 100th, NIST's upper bound (NIST SP 800-63B-4 §3.2.2) |
+| `bruteForceStrategy` | `MULTIPLE` | The wait grows by `waitIncrementSeconds` every `failureFactor` failures |
+| `waitIncrementSeconds`, `maxFailureWaitSeconds` | 60, 900 | One minute, rising to nine; 900 s caps it at Keycloak's default |
+| `maxDeltaTimeSeconds` | 31536000 | A count resets on a success, or after a year with no failure |
+| `quickLoginCheckMilliSeconds`, `minimumQuickLoginWaitSeconds` | 1000, 60 | Keycloak's defaults, declared |
+
+**How the count reaches 100.** Keycloak's code decides when each lockout comes [R10]. With
+`MULTIPLE`, the wait after a failure is `waitIncrementSeconds × (failures ÷ failureFactor)`, and
+every failure with a wait above zero counts one temporary lockout. The permanent lockout comes once
+the count exceeds `maxTemporaryLockouts`. So it comes at failure `failureFactor + maxTemporaryLockouts`,
+which is 100 here.
+- An attacker who keeps guessing waits about 7.5 hours in all before the 100th failure.
+- A failure during a temporary lockout is not counted [R9].
+- `internal/realmdef` asserts the arithmetic.
+
+**Why the reset is a year.** NIST counts consecutive failures, which only a success ends (§3.2.2).
+Keycloak also resets the count after *Failure Reset Time* with no failure. Its default, 12 hours,
+would let a patient attacker make 99 guesses every 12 hours. A year makes that pause impractical.
+
+**A permanent lockout disables the user.** Keycloak sets the user disabled and records the reason
+[R10]. identity-control does not know of it, and the person is recovered by assisted recovery
+(`ADR-IAM-005 §5.5`):
+- suspend, which finds the user already disabled;
+- revoke the lost factors, if any;
+- restore, which enables the user.
+
+The compat suite proves on the pinned image that enabling the user lets the right password in
+again.
+
+**Where the count lives.** Keycloak keeps login failures in its cache, not its database. A
+restart of every Keycloak node clears them. A single-node development server therefore forgets its
+counts when it restarts. A cluster keeps them through a rolling restart only while another node holds
+a copy. That is a limit of the bound, recorded rather than closed.
 
 ### Upgrade Compatibility
 
@@ -568,7 +640,9 @@ persisted against, so they are asserted rather than observed.
 | Audience client scopes | exactly one of internal, privileged, provider, workload, external | Applies the STD-IAM-002 claim allowlist |
 | Signing algorithm | `PS256` | STD-IAM-002 §3.2.2 initial baseline |
 | `acr.loa.map` | `{"aal1":1,"aal2":2}` | ADR-IAM-004 §5.1; realm-level, as Keycloak advises |
-| Browser flow | `scnehaux-browser-v2` | Password at LoA 1, plus WebAuthn or TOTP at LoA 2 (§Authentication Levels) |
+| Browser flow | `scnehaux-browser-v3` | Password at LoA 1, plus WebAuthn, TOTP or a recovery code at LoA 2 (§Authentication Levels) |
+| Recovery codes | issued with the first TOTP (`add-recovery-codes`) | ADR-IAM-005 §5.3 |
+| Brute-force detection | permanent lockout after 90 temporary ones, at the 100th failure | ADR-IAM-005 §5.6; §Guessing Limits |
 | OTP policy | TOTP, 6 digits, 30 s, `HmacSHA1` | The realm default, accepted by common authenticator apps |
 | Preview features | disabled | ADR-IAM-001 §5.8 requires a separate ADR to enable any |
 | Image | pinned by digest | SAD-001 §7.6 |
@@ -634,6 +708,14 @@ compatibility suite rather than left to operational discipline.
 - realm-apply refuses a hand-edited bound flow as drift, and building a new flow version leaves the
   previous one unbound.
 - The upgrade job builds the flows on Postgres, where an order left to the database shows as drift.
+- The first `aal2` sign-in enrolls a TOTP, then shows 12 recovery codes. A recovery code after the
+  password, reached through *Try Another Way*, carries `aal2`, and the next sign-in asks for the next
+  code.
+- `compat/lockout_test.go`, on a throwaway realm in the same mode with small values:
+  - a temporary lockout refuses even the right password;
+  - the failure after the last temporary lockout disables the user;
+  - enabling the user lets the right password in.
+- realm-apply refuses a hand-edited required action as drift.
 
 ### Upgrade
 
@@ -738,3 +820,7 @@ standard amendment.
 | R4 | Keycloak 26.7.5, *Server Administration Guide*, Registering WebAuthn credentials using AIA, same source: "The actions *Webauthn Register* (`kc_action=webauthn-register`) and *Webauthn Register Passwordless* (`kc_action=webauthn-register-passwordless`) are available for the applications if enabled in the Required actions tab." |
 | R5 | Keycloak 26.7.5, `services/src/main/java/org/keycloak/services/resources/admin/AuthenticationManagementResource.java`, `updateExecutions`: "if (model.getPriority() != rep.getPriority()) { model.setPriority(rep.getPriority()); updateExecution = true; }"; `addExecutionToFlow`: "int priority = data.containsKey("priority") ? (Integer) data.get("priority") : getNextPriority(parentFlow);" |
 | R6 | W3C, *Web Authentication: An API for accessing Public Key Credentials, Level 2*, Recommendation, 8 April 2021, <https://www.w3.org/TR/webauthn-2/>: §6.1 Authenticator Data, §6.3.3 the authenticatorGetAssertion operation (the signature over the authenticator data concatenated with the client data hash), §8.7 None Attestation Statement Format. |
+| R7 | Keycloak 26.7.5, *Server Administration Guide*, Recovery Codes, source `docs/documentation/server_admin/topics/authentication/recovery-codes.adoc` at tag 26.7.5, accessed 2026-10-04: "The Recovery Codes are a number of sequential one-time passwords (currently 12) auto-generated by {project_name}"; "When the current code is introduced by the user, it is removed and the next code will be required for the next login." |
+| R8 | Keycloak 26.7.5, `services/src/main/java/org/keycloak/authentication/requiredactions/UpdateTotp.java`: `ADD_RECOVERY_CODES = "add-recovery-codes"`, described "If this option is enabled, the user will be required to configure recovery codes following the OTP configuration. If the user already has recovery codes configured, Keycloak will not ask for setting them up. As a prerequisite, enable the recovery codes required action and enable recovery codes in your authentication flow." |
+| R9 | Keycloak 26.7.5, *Server Administration Guide*, Brute force attacks, source `docs/documentation/server_admin/topics/threat/brute-force.adoc` at tag 26.7.5: "{project_name} applies it only to password, OTP and recovery codes"; "Brute force detection is disabled by default"; *Lockout permanently after temporary lockout* "Locks user temporarily for specified number of times and then locks user permanently"; "`count` does not increment when a temporarily disabled account commits a login failure." |
+| R10 | Keycloak 26.7.5, `services/src/main/java/org/keycloak/services/managers/DefaultBruteForceProtector.java`, `failure`: with `MULTIPLE`, "waitSeconds = realm.getWaitIncrementSeconds() * ((long) userLoginFailure.getNumFailures() / realm.getFailureFactor())"; a wait above zero calls "userLoginFailure.incrementTemporaryLockouts()"; "if(userLoginFailure.getNumTemporaryLockouts() > realm.getMaxTemporaryLockouts() ...) permanentUserLockOut(...)", which calls "user.setEnabled(false)". |

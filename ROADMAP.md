@@ -457,6 +457,20 @@ One finding fixed realm-apply. Setting a step's requirement without its priority
 priority 0. On Postgres, the upgrade job then listed two steps swapped. realm-apply now gives every
 step its position as its priority.
 
+### Recovery and guessing limits, for ADR-IAM-005
+
+`scnehaux-browser-v3` adds the *Recovery Authentication Code Form* to level 2. `realm/required-actions.json`
+is new, and realm-apply now governs required actions. It declares two things:
+- *Configure OTP* issues recovery codes with the first TOTP;
+- *Recovery Authentication Codes* and *Webauthn Register* stay enabled.
+
+The realm enables brute-force detection in the mixed mode. The permanent lockout comes at the 100th
+consecutive failure (TDD-identity-kernel-001 1.12.0 §Guessing Limits). `compat/` proves:
+- codes at enrollment;
+- recovery through *Try Another Way*;
+- the next code asked for next;
+- on a throwaway realm, the lockout mode and its release by enabling the user.
+
 ## Week 3 · Event listener
 
 - Minimal listener capturing user, admin, and security events
