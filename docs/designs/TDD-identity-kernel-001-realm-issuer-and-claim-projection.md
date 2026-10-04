@@ -3,7 +3,7 @@ doc_meta:
   id: TDD-identity-kernel-001
   title: Realm Topology, Issuer Identity, and Token Claim Projection
   owner: Identity Platform Team
-  version: 1.12.0
+  version: 1.13.0
   status: approved
   classification: restricted
   review_cycle_days: 90
@@ -151,17 +151,18 @@ configuration that turns them into the STD-IAM-002 contract:
 | `scnehaux_subject_type` | `subject_type` | internal, privileged, provider, workload |
 | `scnehaux_workload_owner` | `workload_owner` | workload only |
 | authentication session (`AUTH_TIME` note), authentication level | `auth_time`, `acr` | privileged, provider |
-| projected active Tenant | `tenant_id` | internal, privileged, tenant-scoped workload |
-| projected active Workspace | `workspace_id` | optional internal/privileged/workload |
-| projected Membership version | `membership_version` | whenever `tenant_id` is present |
-| projected Tenant security version | `tenant_security_version` | whenever `tenant_id` is present |
+| the Organization selected at sign-in (its alias) | `tenant_id` | internal, privileged, tenant-scoped workload, through the `organization` scope |
 
-These mappers live in the audience client scopes of STD-IAM-002 §3.2.1:
+`workspace_id` is not projected (`ADR-IAM-006 §5.6`). The version claims left the token in
+STD-IAM-002 1.6.0.
+
+These mappers live in the audience client scopes of STD-IAM-002 §3.2.1, except `tenant_id`
+(§Tenant Context, below):
 `scnehaux-internal`, `scnehaux-privileged`, `scnehaux-provider`, and `scnehaux-workload`.
 `scnehaux-external` contains none of them and uses a pairwise `sub`.
 
 `scnehaux-provider` is the provider-scope form of the privileged profile (§3.1.1). It carries
-`principal_id`, `subject_type`, `acr`, and `auth_time`, and never `tenant_id` or a version claim,
+`principal_id`, `subject_type`, `acr`, and `auth_time`, and never `tenant_id`,
 because a provider operation belongs to no Tenant. It is what identity-control accepts to mint a
 Principal.
 
@@ -186,8 +187,8 @@ conformant provider token. No enterprise mapper is attached as a realm default, 
 would leak stable correlation and Tenant context into external tokens.
 
 `scnehaux-workload` is the workload profile. It carries `principal_id`, `subject_type` and
-`workload_owner`, and never `acr`, `auth_time`, `provider_scope` or, until the context projection
-exists, any Tenant claim. **A workload's claim-source attributes live on its client's
+`workload_owner`, and never `acr`, `auth_time` or `provider_scope`. A tenant-scoped workload adds
+`tenant_id` the way a person does (§Tenant Context). **A workload's claim-source attributes live on its client's
 service-account user.** A workload authenticates as its own client with the client credentials
 grant and a registered key (`ADR-IAM-001 §5.12`), and that grant issues its token for the
 client's service-account user, the user Keycloak creates with the client. No other user's
@@ -202,8 +203,44 @@ which STD-IAM-002 §3.2 prohibits for a workload. identity-control detaches it w
 workload (`TDD-identity-control-003`). The realm default is left as it is: removing it would change
 every client created after, and a provider token's `acr` comes from `scnehaux-provider` either way.
 `compat/workload_test.go` asserts the workload token, the detachment included, and the absence of
-`workload_owner` from an internal token. The tenant-scoped workload form waits on the context projection, as `tenant_id` does for
-every profile.
+`workload_owner` from an internal token.
+
+### Tenant Context (1.13.0)
+
+`ADR-IAM-006` decides how the active Tenant reaches a token. The realm enables Keycloak's
+Organizations, a supported feature that is on by default in the pinned kernel. Each Tenant is an
+Organization:
+- its alias is the `tenant_id`;
+- its members are the Principals with an active Membership in that Tenant;
+- it is enabled while the Tenant is active.
+
+identity-control maintains them through the Admin API (`TDD-identity-control-002`). The realm
+declares none, because they are Organization's data, not realm configuration.
+
+**The `organization` scope.** Keycloak creates this scope with every realm and makes it a realm
+default optional scope [R11]. The realm declares it in `realm/client-scopes.json` with one mapper,
+`tenant_id`: the *Organization Membership* mapper, single-valued, with the claim name `tenant_id`.
+- A single-valued mapper emits only the selected Organization's alias [R12]. The alias is the
+  `tenant_id`, so the claim is flat.
+- The scope's built-in mapper, `organization`, writes a nested `organization` object. A managed
+  scope's mapper set is the definition's, so `realm-apply` deletes it.
+- The realm's default optional scopes are a closed, empty set (§Claim Projection). So the scope is
+  never a realm default, and only a client the registration authority gives it can ask for it
+  (`ADR-IAM-006 §5.3`).
+
+**Choosing the Tenant.** A client asks with `organization:<tenant_id>`, and the kernel issues the
+claim only for a member [R13].
+- A refresh keeps the Tenant. Asked for another, it drops the Tenant rather than switching.
+- A token asked for without the scope carries no `tenant_id`.
+
+**Revocation in the kernel.** Each check is the kernel's own, made at every refresh [R12]:
+- **A member removed:** a refresh for that Tenant is refused with `invalid_grant`, and a new token
+  for it carries no `tenant_id`.
+- **The Organization disabled:** a refresh for that Tenant is refused the same way.
+- **The person's tokens for other Tenants** are unaffected.
+
+**Proof.** The proof of concept answered each of these on the pinned image, the workload token
+included (compat run 37207537199), and `compat/organizations_test.go` now requires them.
 
 **The realm's default client scopes are `basic` and `acr`, and nothing else.** Keycloak creates a
 realm with `profile`, `email`, `roles`, `web-origins` and others as default and optional client
@@ -383,17 +420,15 @@ fails a release that loosens the match.
   "principal_id": "019235f1-8c4a-7c1e-9d0b-3f4a2b6e5d71",
   "subject_type": "human",
   "tenant_id": "019235f2-4d11-7a03-b8c7-1e9f7a2c4b60",
-  "membership_version": 14,
-  "tenant_security_version": 3,
   "aud": ["hcm-api"],
   "iat": 1786000000,
   "exp": 1786000240
 }
 ```
 
-`tenant_id` and the version claims come from the projected Membership context applied
-by `identity-control`. Exactly one Tenant context appears, and at most one Workspace
-context, as STD-IAM-001 §3.3 requires. The Membership set is never placed in a token,
+`tenant_id` is the alias of the Organization the client asked for, which identity-control
+keeps as the Tenant's identifier (§Tenant Context). Exactly one Tenant context appears, as
+STD-IAM-001 §3.3 requires. The Membership set is never placed in a token,
 bounded or otherwise.
 
 ## API / Interface
@@ -645,6 +680,7 @@ persisted against, so they are asserted rather than observed.
 | Brute-force detection | permanent lockout after 90 temporary ones, at the 100th failure | ADR-IAM-005 §5.6; §Guessing Limits |
 | OTP policy | TOTP, 6 digits, 30 s, `HmacSHA1` | The realm default, accepted by common authenticator apps |
 | Preview features | disabled | ADR-IAM-001 §5.8 requires a separate ADR to enable any |
+| Organizations | enabled (`organizationsEnabled`); the `organization` scope maps `tenant_id` | ADR-IAM-006; §Tenant Context |
 | Image | pinned by digest | SAD-001 §7.6 |
 
 Signing keys are provisioned through approved protected custody. Per-process or
@@ -674,6 +710,13 @@ compatibility suite rather than left to operational discipline.
   select another verifier path.
 - `sub` and `principal_id` hold different values, confirming the claims are distinct.
 - `iss` matches the recorded issuer form exactly.
+- **Tenant context (1.13.0):** `compat/organizations_test.go` asserts the following.
+  - On the declared realm, an internal client given the `organization` scope gets a flat
+    `tenant_id` for an Organization the person belongs to. A client without the scope gets none.
+  - On a throwaway realm, the behaviour `ADR-IAM-006` relies on:
+    - the Tenant is chosen per sign-in and kept by a refresh, which drops it rather than switching;
+    - `invalid_grant` after removal or disabling, with other Tenants unaffected;
+    - a workload's token.
 
 ### Creation Paths
 
@@ -824,3 +867,6 @@ standard amendment.
 | R8 | Keycloak 26.7.5, `services/src/main/java/org/keycloak/authentication/requiredactions/UpdateTotp.java`: `ADD_RECOVERY_CODES = "add-recovery-codes"`, described "If this option is enabled, the user will be required to configure recovery codes following the OTP configuration. If the user already has recovery codes configured, Keycloak will not ask for setting them up. As a prerequisite, enable the recovery codes required action and enable recovery codes in your authentication flow." |
 | R9 | Keycloak 26.7.5, *Server Administration Guide*, Brute force attacks, source `docs/documentation/server_admin/topics/threat/brute-force.adoc` at tag 26.7.5: "{project_name} applies it only to password, OTP and recovery codes"; "Brute force detection is disabled by default"; *Lockout permanently after temporary lockout* "Locks user temporarily for specified number of times and then locks user permanently"; "`count` does not increment when a temporarily disabled account commits a login failure." |
 | R10 | Keycloak 26.7.5, `services/src/main/java/org/keycloak/services/managers/DefaultBruteForceProtector.java`, `failure`: with `MULTIPLE`, "waitSeconds = realm.getWaitIncrementSeconds() * ((long) userLoginFailure.getNumFailures() / realm.getFailureFactor())"; a wait above zero calls "userLoginFailure.incrementTemporaryLockouts()"; "if(userLoginFailure.getNumTemporaryLockouts() > realm.getMaxTemporaryLockouts() ...) permanentUserLockOut(...)", which calls "user.setEnabled(false)". |
+| R11 | Keycloak 26.7.5, `services/src/main/java/org/keycloak/protocol/oidc/OIDCLoginProtocolFactory.java`, realm creation: "ClientScopeModel organizationScope = newRealm.addClientScope(OAuth2Constants.ORGANIZATION); … organizationScope.addProtocolMapper(OrganizationMembershipMapper.create(ORGANIZATION, true, true, true)); newRealm.addDefaultClientScope(organizationScope, false);" |
+| R12 | Keycloak 26.7.5 source. `OrganizationMembershipMapper.java`: a single-valued mapper returns "organizations.get(0).getAlias()". `TokenManager.java`, `validateSelectedOrganization`: "if (organization == null \|\| !organization.isEnabled() \|\| !organization.isMember(user)) { throw new ErrorResponseException(OAuthErrorException.INVALID_GRANT, "Invalid organization" …". |
+| R13 | Keycloak 26.7.5, *Server Administration Guide*, Mapping organization claims, source `docs/documentation/server_admin/topics/organizations/mapping-organization-claims.adoc`: `organization:<alias>` "Maps to a specific organization with the given alias … If any of the aliases does not match an existing organization or the user is not a member, the request will be rejected." |

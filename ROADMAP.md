@@ -471,6 +471,19 @@ consecutive failure (TDD-identity-kernel-001 1.12.0 §Guessing Limits). `compat/
 - the next code asked for next;
 - on a throwaway realm, the lockout mode and its release by enabling the user.
 
+### Tenant context, for ADR-IAM-006
+
+The realm enables Organizations. The `organization` scope is declared with one mapper, a flat
+`tenant_id`: the alias of the Organization the client asked for with `organization:<tenant_id>`
+(TDD-identity-kernel-001 1.13.0 §Tenant Context). This answers identity-control's questions 5 and 7.
+The proof of concept ran on a throwaway realm in compat run 37207537199. `compat/` now requires:
+- a flat `tenant_id`;
+- the Tenant chosen per sign-in and kept by a refresh;
+- `invalid_grant` after the member is removed or the Organization disabled, other Tenants
+  unaffected;
+- a workload's token;
+- on the declared realm, the scope's flat claim, and no `tenant_id` for a client without the scope.
+
 ## Week 3 · Event listener
 
 - Minimal listener capturing user, admin, and security events
