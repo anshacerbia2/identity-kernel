@@ -21,6 +21,7 @@
   "maxDeltaTimeSeconds": 31536000,
   "quickLoginCheckMilliSeconds": 1000,
   "minimumQuickLoginWaitSeconds": 60,
+  "organizationsEnabled": true,
   "attributes": {
     "adminEventsExpiration": "604800",
     "acr.loa.map": "{\"aal1\":1,\"aal2\":2}"

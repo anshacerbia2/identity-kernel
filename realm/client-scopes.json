@@ -236,5 +236,29 @@
         }
       }
     ]
+  },
+  {
+    "name": "organization",
+    "description": "The active Tenant: the alias of the Organization the client asked for with organization:<tenant_id>, as a flat tenant_id. ADR-IAM-006; never a realm default.",
+    "protocol": "openid-connect",
+    "attributes": {
+      "include.in.token.scope": "true",
+      "display.on.consent.screen": "false"
+    },
+    "protocolMappers": [
+      {
+        "name": "tenant_id",
+        "protocol": "openid-connect",
+        "protocolMapper": "oidc-organization-membership-mapper",
+        "config": {
+          "claim.name": "tenant_id",
+          "multivalued": "false",
+          "jsonType.label": "String",
+          "access.token.claim": "true",
+          "id.token.claim": "true",
+          "introspection.token.claim": "true"
+        }
+      }
+    ]
   }
 ]
