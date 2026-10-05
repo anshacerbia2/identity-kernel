@@ -143,6 +143,13 @@ var loginAction = regexp.MustCompile(`action="([^"]*login-actions/authenticate[^
 // requests and the login would restart.
 func authorizationCode(t *testing.T, a *admin, c client, p principal) issuedTokens {
 	t.Helper()
+	return authorizationCodeWithScope(t, a, c, p, "openid")
+}
+
+// authorizationCodeWithScope is authorizationCode asking for the scopes given, for a sign-in that
+// selects a Tenant with organization:<tenant_id>.
+func authorizationCodeWithScope(t *testing.T, a *admin, c client, p principal, scope string) issuedTokens {
+	t.Helper()
 	verifier := randomToken(t)
 	sum := sha256.Sum256([]byte(verifier))
 	challenge := base64.RawURLEncoding.EncodeToString(sum[:])
@@ -176,7 +183,7 @@ func authorizationCode(t *testing.T, a *admin, c client, p principal) issuedToke
 		"client_id":             {c.id},
 		"response_type":         {"code"},
 		"redirect_uri":          {providerRedirect},
-		"scope":                 {"openid"},
+		"scope":                 {scope},
 		"state":                 {"compat"},
 		"code_challenge":        {challenge},
 		"code_challenge_method": {"S256"},

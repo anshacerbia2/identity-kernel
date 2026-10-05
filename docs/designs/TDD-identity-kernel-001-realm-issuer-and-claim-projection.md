@@ -3,12 +3,12 @@ doc_meta:
   id: TDD-identity-kernel-001
   title: Realm Topology, Issuer Identity, and Token Claim Projection
   owner: Identity Platform Team
-  version: 1.13.0
+  version: 1.14.0
   status: approved
   classification: restricted
   review_cycle_days: 90
   created_date: 2026-08-11
-  last_reviewed: 2026-10-04
+  last_reviewed: 2026-10-05
   parent_sad: SAD-001
 ---
 
@@ -182,6 +182,20 @@ applied before this revision, `realm-apply` deletes the mapper, because a manage
 set is the definition's. It leaves the attribute in the live user profile, because Apply deletes
 nothing whose removal is a migration (§Configuration as Code). No mapper reads it, so a value a
 user still holds reaches no token.
+**`scnehaux-privileged` is the tenant-scoped form of the privileged profile (1.14.0).** A privileged
+operation inside one Tenant, such as administering it at Organization Control (`ADR-ORG-003 §5.3`),
+needs the same four claims as a provider token and the Tenant it acts in. The scope carries
+`principal_id`, `subject_type`, `acr` and `auth_time`, with the provider scope's four mappers. The
+`tenant_id` comes from the kernel's `organization` scope, which the registration authority attaches
+to such a client as optional (`ADR-IAM-006 §5.3`). A sign-in asking for `organization:<tenant_id>`
+gets that Tenant, and one asking for none gets no `tenant_id`. The scope never carries
+`provider_scope`.
+
+Up to 1.13.0 this design named the scope and the realm did not declare it. No client could hold it,
+so the tenant-scoped form of STD-IAM-002 §3.1.1 had no way to be issued. A client holds exactly one
+audience profile scope (STD-IAM-002 §3.2.1), so a provider client cannot also be tenant-scoped: a
+console that does both is two clients.
+
 `auth_time` exists only for an authentication ceremony, so a direct grant cannot produce a
 conformant provider token. No enterprise mapper is attached as a realm default, because doing so
 would leak stable correlation and Tenant context into external tokens.
@@ -700,6 +714,10 @@ compatibility suite rather than left to operational discipline.
 - A provider token, obtained by Authorization Code with PKCE, carries `principal_id`,
   `subject_type`, `acr`, and the `auth_time` of the login, and no `provider_scope`, `tenant_id`,
   version claim, or `workload_owner`.
+- A tenant-scoped privileged token (1.14.0), obtained the same way by a client holding
+  `scnehaux-privileged` and the optional `organization` scope, carries `principal_id`,
+  `subject_type`, `acr`, `auth_time` and the `tenant_id` asked for, and no `provider_scope`. The
+  same client's sign-in asking for no Tenant gets no `tenant_id` (`compat/privileged_test.go`).
 - A workload token carries `principal_id`, `subject_type=workload`, and
   `workload_owner`.
 - Every surface the adopted configuration claims to cover carries the profile's claim

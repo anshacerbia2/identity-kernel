@@ -484,6 +484,13 @@ The proof of concept ran on a throwaway realm in compat run 37207537199. `compat
 - a workload's token;
 - on the declared realm, the scope's flat claim, and no `tenant_id` for a client without the scope.
 
+The tenant-scoped privileged profile, `scnehaux-privileged`, is declared (TDD-identity-kernel-001
+1.14.0 §Claim Projection). The design named it and the realm did not, so no client could be issued
+the tenant-scoped form a Tenant administrator needs (ADR-ORG-003 §5.3). `compat/privileged_test.go`
+signs in with Authorization Code and PKCE, asks for `organization:<tenant_id>`, and requires
+`principal_id`, `subject_type`, `acr`, `auth_time` and that `tenant_id`, and no `tenant_id` without
+the request.
+
 ## Week 3 · Event listener
 
 - Minimal listener capturing user, admin, and security events
