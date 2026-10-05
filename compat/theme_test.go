@@ -131,7 +131,9 @@ func TestASignInFailureTellsNoAccountState(t *testing.T) {
 			if !strings.Contains(text, message) {
 				t.Errorf("%s, %s: the answer does not read %q: %s", locale, name, message, snippet(answer))
 			}
-			if strings.Contains(text, "disabled") || strings.Contains(text, "dinonaktifkan") {
+			// The kernel's own wording for a disabled account, in each locale. "disabled" alone appears in
+			// the page's markup as an attribute, so the message itself is what is looked for.
+			if strings.Contains(text, "Account is disabled") || strings.Contains(text, "Akun dinonaktifkan") {
 				t.Errorf("%s, %s: the answer names the account's state", locale, name)
 			}
 		}
