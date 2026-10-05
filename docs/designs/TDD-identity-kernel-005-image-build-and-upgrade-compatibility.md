@@ -3,7 +3,7 @@ doc_meta:
   id: TDD-identity-kernel-005
   title: Image Build, Digest Pinning, and Upgrade Compatibility
   owner: Identity Platform Team
-  version: 1.4.0
+  version: 1.5.0
   status: approved
   classification: restricted
   review_cycle_days: 90
@@ -82,6 +82,30 @@ job builds it from both the candidate and the previous release, and `deploy/dev/
 it, so the development server runs what the suite asserts. Signing, the bill of materials and the
 provenance attestation of §Supply Chain follow when the image is published to a registry; until then
 it is built where it runs, from a pinned digest and this repository's files.
+
+**Optimized, with health and metrics (1.5.0, ADR-IAM-001 §5.8).** The image is built the way
+Keycloak's container guide recommends: a builder stage sets `KC_HEALTH_ENABLED`, `KC_METRICS_ENABLED`
+and `KC_DB=postgres` and runs `kc.sh build`, and the image copies its result. A server starts it with
+`start --optimized`, so the build-time options are the image's and no deployment can differ. `compat`
+starts it with `start-dev` on its own file database, which builds again in development mode.
+
+The two ports have different audiences:
+
+| Port | Serves | Reached by |
+| :-- | :-- | :-- |
+| `8080` | the realms' protocol paths, `/resources`, `/admin` | the public entrance for `/realms/scnehaux` and `/resources` only; `/admin` and `/realms/master` from the internal network |
+| `9000` | `/health/started`, `/health/live`, `/health/ready`, `/metrics` | the orchestrator and the monitoring system, internally |
+
+The probes follow Keycloak's operator: startup on `/health/started` every second, up to 600 failures;
+liveness on `/health/live` and readiness on `/health/ready`, every 10 seconds, three failures. Liveness
+checks no dependency, so a database outage makes the kernel unready and does not restart it.
+`deploy/dev/compose.yaml` checks readiness, and `caddy` and `realm-apply` wait for it.
+`compat/management_test.go` asserts the three probes and the OpenMetrics output on 9000, and that none
+of them answers on 8080.
+
+The Admin Console is in the image and is not an operating surface (ADR-IAM-001 §5.8). It is a
+build-time feature and the image is the same in every environment, so it is reached only internally:
+on the development server, the owner-only tunnel port; in production, the internal network.
 
 A tag is mutable. `quay.io/keycloak/keycloak:26.0` can point at different bytes next
 week, and an image built from a tag is not reproducible. The digest is recorded in this
@@ -348,6 +372,13 @@ and database migration, both of which are inherent to what it verifies.
 Image build time does not affect any runtime path.
 
 ## Operational Notes
+
+| Signal (1.5.0) | Source | Meaning |
+| :-- | :-- | :-- |
+| Readiness failing | `/health/ready` | Out of rotation: usually the database. Not restarted |
+| Liveness failing | `/health/live` | The process is stuck; the orchestrator restarts it |
+| Startup past its budget | `/health/started` | The image does not start: an incompatible build or database |
+| `/metrics` scrape failing | monitoring | The management port is unreachable from where it must be |
 
 | Signal | Warning | Critical |
 | :-- | :-- | :-- |

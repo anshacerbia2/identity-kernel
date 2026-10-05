@@ -551,6 +551,14 @@ a disabled account no longer tells itself apart from an unknown one. The realm u
 and the development server run it. **Not yet:** the automated accessibility check, the security
 headers, and the timing comparison of TDD-004 §Testing Strategy.
 
+✅ The kernel's operational surfaces (TDD-005 1.5.0, ADR-IAM-001 §5.8). The image is built optimized
+with health and metrics, and a server starts it with `start --optimized`. The probes are Keycloak's
+own, bound as its operator binds them, on the management port, which only the orchestrator and the
+monitoring system reach; metrics are on, which also deepens readiness. `/admin` and `/realms/master`
+are internal in every environment, and the Admin Console, kept in the one image for break-glass, is
+not an operating surface. `compat/management_test.go` asserts the probes and metrics on 9000 and
+their absence on 8080.
+
 ## Development server
 
 ✅ A long-lived development Keycloak, so local applications have a real issuer to develop against.
