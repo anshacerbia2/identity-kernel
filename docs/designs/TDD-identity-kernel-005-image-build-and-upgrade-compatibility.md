@@ -3,12 +3,12 @@ doc_meta:
   id: TDD-identity-kernel-005
   title: Image Build, Digest Pinning, and Upgrade Compatibility
   owner: Identity Platform Team
-  version: 1.2.0
+  version: 1.3.0
   status: approved
   classification: restricted
   review_cycle_days: 90
   created_date: 2026-08-11
-  last_reviewed: 2026-10-01
+  last_reviewed: 2026-10-05
   parent_sad: SAD-001
 ---
 
@@ -164,6 +164,13 @@ Runs per candidate release, before promotion:
 9. determine the rollback boundary
 10. produce the release record
 ```
+
+**Step 5 as built (1.3.0).** Each of the four paths is asserted against the pinned image on every
+change: self-registration (`TestSelfRegistrationIsClosed`), the user-editable attribute
+(`immutability_test.go`), federated auto-creation and Admin Console creation
+(`creation_paths_test.go`). The `contract` job runs them on a clean instance with the realm applied,
+which is steps 2 to 5, so a candidate digest put in `image/keycloak.ref` that reopens a path fails
+there before it is merged.
 
 A failure at step 4, 5, or 6 stops promotion. Those are the properties downstream
 domains have already persisted against, and a release that changes them is a migration

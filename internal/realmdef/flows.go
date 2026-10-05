@@ -21,7 +21,8 @@ import (
 type Flow struct {
 	Alias       string `json:"alias"`
 	Description string `json:"description,omitempty"`
-	// Binding names the realm binding this flow is bound to: browserFlow, or empty for none.
+	// Binding names the realm binding this flow is bound to: browserFlow, firstBrokerLoginFlow, or
+	// empty for none.
 	Binding    string      `json:"binding,omitempty"`
 	Executions []Execution `json:"executions"`
 }
@@ -42,7 +43,11 @@ const (
 )
 
 // The bindings a flow may take, by the realm field that holds the bound alias.
-var flowBindings = map[string]bool{"browserFlow": true}
+//
+// firstBrokerLoginFlow is the flow a new identity provider's first login takes by default
+// (TDD-identity-kernel-001 §Closing Unauthorized Creation Paths): the kernel's own runs Create User
+// If Unique, which creates an account no Principal maps.
+var flowBindings = map[string]bool{"browserFlow": true, "firstBrokerLoginFlow": true}
 
 var requirements = map[string]bool{"REQUIRED": true, "ALTERNATIVE": true, "CONDITIONAL": true, "DISABLED": true}
 

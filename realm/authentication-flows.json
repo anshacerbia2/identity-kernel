@@ -197,5 +197,16 @@
         ]
       }
     ]
+  },
+  {
+    "alias": "scnehaux-first-broker-login-v1",
+    "description": "Denies the first login through an identity provider, so federation creates no user. TDD-identity-kernel-001 \u00a7Closing Unauthorized Creation Paths.",
+    "binding": "firstBrokerLoginFlow",
+    "executions": [
+      {
+        "authenticator": "deny-access-authenticator",
+        "requirement": "REQUIRED"
+      }
+    ]
   }
 ]

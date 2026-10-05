@@ -518,9 +518,12 @@ kind below the floor of TDD-003 §Retention Constraint, one hour times twenty-fo
 `compat/user_events_test.go` asserts that a login and a failed login are recorded with the user and
 the client and carry no password.
 
-**Next:** identity-control's completeness reconciliation reads both stores through the Admin API.
-The listener follows when a consumer needs events sooner than one reconcile interval (TDD-003 1.1.0
-§Technical Context): without it the record is complete and arrives at reconcile-interval latency.
+✅ identity-control keeps the record (its TDD-007): it sweeps both stores through the Admin API in
+overlapping windows and writes each event once, until Audit & Evidence has it. **Exit met by
+construction:** with no listener there is no event in transit, and the sweep reads every event the
+kernel recorded. The listener follows when a consumer needs events sooner than one reconcile
+interval (TDD-003 1.1.0 §Technical Context, ADR-IAM-001 §5.7); an event it drops is then recovered
+by the same sweep.
 
 ## Week 4 · Theme and upgrade suite
 
@@ -531,6 +534,15 @@ The listener follows when a consumer needs events sooner than one reconcile inte
 
 **Exit:** a candidate release that changes the issuer form, drops a claim from a
 covered surface, or reopens a creation path fails the suite.
+
+✅ The upgrade suite, as `compat.yml` runs it: the `contract` job applies the realm to a clean
+instance of the pinned image and asserts the declared contract, the issuer form (question 4), every
+covered claim surface, and the four closed creation paths; the `upgrade` job has the candidate
+upgrade the previous release's database, keeps the realm in sync, starts the previous release on
+the migrated database to find the rollback boundary, and writes the release record. The four paths
+are now all asserted (TDD-005 1.3.0): federated auto-creation is closed by a first login flow that
+denies (TDD-001 1.15.0), and only service accounts manage users. **Not yet:** the login theme
+(TDD-004) and the signing key rotation rehearsal, which waits on Week 2's custody.
 
 ## Development server
 
