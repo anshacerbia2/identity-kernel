@@ -3,12 +3,12 @@ doc_meta:
   id: TDD-identity-kernel-003
   title: Event Listener Extension and Completeness Reconciliation
   owner: Identity Platform Team
-  version: 1.0.0
+  version: 1.1.0
   status: approved
   classification: restricted
   review_cycle_days: 90
   created_date: 2026-08-11
-  last_reviewed: 2026-08-11
+  last_reviewed: 2026-10-05
   parent_sad: SAD-001
 ---
 
@@ -70,6 +70,21 @@ store is the durable record, and it exists whether or not the listener works.
 
 Those three together give the design its shape: the listener is an optimisation that
 reduces latency, and the native store plus reconciliation is the guarantee.
+
+**The native store comes first (1.1.0).** Keycloak keeps no user events unless a realm saves
+them: "By default, Keycloak does not store or display events in the Admin Console. Only the
+error events are logged to the Admin Console and the server's log file" (Keycloak, _Server
+Administration Guide_, Auditing user events; ADR-IAM-001 [R42]). Until 1.1.0 the realm saved admin
+events only, so the durable record this design rests on did not hold a single login. The realm
+now saves user events for 7 days, and `realm-apply` refuses a definition that saves none or keeps
+either kind below the floor (§Retention Constraint).
+
+The order of the build follows from the guarantee. The native store, then identity-control's
+reconciliation against it, are correct without the listener, and the listener is built when a
+consumer needs events sooner than one reconcile interval. That is ADR-IAM-001 §5.7's order as well:
+supported Admin REST APIs are preferred, and a minimal event-listener extension is used "where
+required". Building the listener first would put a custom image, a Java build and a component in the
+authentication path ahead of the record they are meant to speed up.
 
 ## Component Design
 
@@ -173,7 +188,10 @@ safety factor of twenty-four, retention is at least one day; the configured defa
 seven.
 
 The relationship is asserted at startup rather than documented. A realm configured with
-retention below the floor fails the configuration diff.
+retention below the floor fails the configuration diff. `realmdef` refuses a definition whose
+`eventsEnabled`, `adminEventsEnabled` or `adminEventsDetailsEnabled` is not `true`, or whose
+`eventsExpiration` or `adminEventsExpiration` is below 86400 seconds, one hour times twenty-four
+(1.1.0).
 
 ## API / Interface
 
@@ -281,7 +299,10 @@ that something changed and not what it changed to, which is not evidence.
 
 ### Retention
 
-- A realm configured with retention below the floor fails the configuration diff.
+- A realm configured with retention below the floor fails the configuration diff
+  (`TestParseRefusesEventsKeptBelowTheFloor`), and so does one that saves no user or admin events.
+- The declared realm saves user events for 7 days, and a login and a failed login are each
+  recorded with the user and the client and no password (`compat/user_events_test.go`, 1.1.0).
 - Events remain readable through the Admin API for the full retention period.
 
 ### Content
