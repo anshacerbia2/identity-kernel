@@ -243,7 +243,7 @@ func TestParseRefusesEventsKeptBelowTheFloor(t *testing.T) {
 			`"adminEventsDetailsEnabled":true,"attributes":{"adminEventsExpiration":"604800"}}`,
 		"admin events without representation": `{"realm":"scnehaux","eventsEnabled":true,"eventsExpiration":604800,` +
 			`"adminEventsEnabled":true,"adminEventsDetailsEnabled":false,"attributes":{"adminEventsExpiration":"604800"}}`,
-		"admin events kept an hour": `{"realm":"scnehaux",` + eventSettings + `,"attributes":{"adminEventsExpiration":"3600"}}`,
+		"admin events kept an hour":  `{"realm":"scnehaux",` + eventSettings + `,"attributes":{"adminEventsExpiration":"3600"}}`,
 		"admin retention undeclared": `{"realm":"scnehaux",` + eventSettings + `}`,
 	} {
 		files := files(t)
