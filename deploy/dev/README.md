@@ -249,7 +249,9 @@ See the repository README.
 
 ## Upgrading Keycloak
 
-The image here must equal `image/keycloak.ref`, and CI fails when they differ. Upgrade
+The kernel image is built from `image/Dockerfile`: the upstream digest, which must equal
+`image/keycloak.ref` (CI fails when they differ), plus this repository's login theme. `docker compose
+up -d --build` rebuilds it. Upgrade
 both together, only after `compat/` passes against the new digest and the `upgrade` job has
 written its release record, which says whether the previous release still starts on the
 migrated database (TDD-identity-kernel-005 §Determining the Rollback Boundary). Then:

@@ -34,8 +34,8 @@ jobs:
       - name: the server runs the image the suite asserts
         run: |
           ref="$(grep -v '^[[:space:]]*#' ../../image/keycloak.ref | grep -v '^[[:space:]]*$' | head -n 1 | tr -d '[:space:]')"
-          if ! grep -Eq "^[[:space:]]*image:[[:space:]]*${ref}[[:space:]]*$" compose.yaml; then
-            echo "::error::deploy/dev/compose.yaml does not run $ref from image/keycloak.ref"
+          if ! grep -Eq "^[[:space:]]*KEYCLOAK_IMAGE:[[:space:]]*${ref}[[:space:]]*$" compose.yaml; then
+            echo "::error::deploy/dev/compose.yaml does not build the kernel image from $ref in image/keycloak.ref"
             exit 1
           fi
 

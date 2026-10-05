@@ -3,12 +3,12 @@ doc_meta:
   id: TDD-identity-kernel-004
   title: Hosted Login Theme, Accessibility, and Disclosure Discipline
   owner: Identity Platform Team
-  version: 1.0.0
+  version: 1.1.0
   status: approved
   classification: restricted
   review_cycle_days: 90
   created_date: 2026-08-11
-  last_reviewed: 2026-08-11
+  last_reviewed: 2026-10-05
   parent_sad: SAD-001
 ---
 
@@ -78,17 +78,24 @@ message bundle. Each override is listed in this design with the reason it exists
 the upgrade suite knows what to re-verify and a future engineer knows what to try to
 remove.
 
-```text
-overridden templates
-    login.ftl                 unified identifier field and provider ordering
-    login-otp.ftl             MFA challenge copy and input semantics
-    login-reset-password.ftl  enumeration-safe confirmation copy
-    error.ftl                 uniform error presentation
-    template.ftl              document shell, language attributes, skip link
-```
+**As built (1.1.0): no template is overridden.** The theme `scnehaux` names `keycloak.v2` as
+its parent and carries message bundles only (`themes/scnehaux/login/`), as ADR-IAM-001 §5.7
+decides. Keycloak documents the mechanism: "When extending a theme you can override individual
+resources (templates, stylesheets, etc.)" (ADR-IAM-001 [R33]). Version 1.0.0 planned five
+copied templates. None is copied until a test shows the stock template cannot meet the
+requirement it was planned for:
 
-Five. Anything not on that list is styled, not forked, and adding to the list is a
-reviewed decision rather than a convenience.
+| Planned override | Its reason | Status |
+| :-- | :-- | :-- |
+| `template.ftl` | language attribute | Met by the stock template, which writes `lang="${lang}"`; asserted in both locales |
+| `template.ftl` | skip link | To be judged by the accessibility check |
+| `login.ftl` | unified identifier field, provider ordering | `loginWithEmailAllowed` gives one identifier field; there is no provider |
+| `login-otp.ftl` | challenge copy, input semantics | Copy is a message bundle's; semantics to be judged by the accessibility check |
+| `login-reset-password.ftl` | enumeration-safe confirmation | Reset is not offered (`resetPasswordAllowed` false); recovery is a recovery code (ADR-IAM-005) |
+| `error.ftl` | uniform error presentation | Wording is a message bundle's |
+
+Copying a template now would freeze it at 26.7.5, and a protection the kernel adds to it
+later would not reach this page.
 
 ### Accessibility
 
@@ -130,6 +137,15 @@ not exist" leaks account existence to anyone who switches language.
 
 The bundle test asserts key parity, and enumeration-sensitive keys are asserted to
 resolve to a uniform message in every locale.
+
+**As built (1.1.0).** The kernel ships both bundles, Indonesian among its community translations,
+so the theme's bundles carry only the keys it changes. It changes one: `accountDisabledMessage`.
+The kernel's default, "Account is disabled, contact your administrator.", tells anyone who types an
+identifier that it names an account, and that the account is disabled, which is what a suspended
+Principal is. It reads as a failed sign-in in both locales, the wording the kernel already gives a
+temporary or permanent lockout. `compat/theme_test.go` signs in with an unknown identifier, a wrong
+password and a disabled account, in each locale, and requires the same status and message from all
+three.
 
 ## API / Interface
 
@@ -216,7 +232,7 @@ travelling to whatever the user visits next.
 
 | Setting | Value | Reason |
 | :-- | :-- | :-- |
-| Theme | `scnehaux` | Applied to login, account, and email |
+| Theme | `scnehaux` | Applied to login. The account console is not used: what follows sign-in is the Identity Experience's (ADR-IAM-001 §5.7). The email theme follows the notification decision |
 | Supported locales | `en`, `id` | Key parity asserted across both |
 | Default locale | `en` | Reference bundle |
 | Internationalization | enabled | Required for locale negotiation |
@@ -226,6 +242,12 @@ Static assets are served from the same origin and are fingerprinted, so a theme 
 invalidates caches without a version query string.
 
 ## Testing Strategy
+
+**As built (1.1.0):** the theme in both locales, the language attribute, and the enumeration
+message and status (`compat/theme_test.go`). **Not yet:** the automated accessibility check across
+the rendered surfaces, the security headers, and the timing comparison; each follows as its own
+change, because each needs a tool this repository does not run yet (a headless browser, a header
+policy in the realm, a timing harness).
 
 ### Accessibility
 

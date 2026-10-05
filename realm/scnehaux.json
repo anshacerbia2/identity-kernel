@@ -24,6 +24,10 @@
   "quickLoginCheckMilliSeconds": 1000,
   "minimumQuickLoginWaitSeconds": 60,
   "organizationsEnabled": true,
+  "loginTheme": "scnehaux",
+  "internationalizationEnabled": true,
+  "supportedLocales": ["en", "id"],
+  "defaultLocale": "en",
   "attributes": {
     "adminEventsExpiration": "604800",
     "acr.loa.map": "{\"aal1\":1,\"aal2\":2}"
