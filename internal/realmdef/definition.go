@@ -24,6 +24,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strconv"
 )
 
 // Environment names where a definition is applied. Only environments that may hold an in-process
@@ -201,6 +202,9 @@ func (d Definition) validate() error {
 			}
 		}
 	}
+	if err := d.validateRetention(); err != nil {
+		return err
+	}
 	if name(d.Key) == "" || d.Key["providerId"] == nil {
 		return errors.New("signing-key.generated.json needs a name and a providerId")
 	}
@@ -273,6 +277,36 @@ func listOfMaps(value any) []map[string]any {
 			}
 		}
 		return out
+	}
+	return nil
+}
+
+// minEventRetention is TDD-identity-kernel-003 §Retention Constraint's floor: a one-hour reconcile
+// interval times a safety factor of twenty-four. Events kept for less are gone from the only durable
+// record before reconciliation has read them twice.
+const minEventRetention = 24 * 60 * 60
+
+// validateRetention refuses a definition that does not keep user and admin events, or keeps them for
+// less than the floor (TDD-identity-kernel-003 §Retention Constraint): "A realm configured with
+// retention below the floor fails the configuration diff."
+func (d Definition) validateRetention() error {
+	for _, key := range []string{"eventsEnabled", "adminEventsEnabled", "adminEventsDetailsEnabled"} {
+		if enabled, _ := d.Realm[key].(bool); !enabled {
+			return fmt.Errorf("scnehaux.json must set %s true: the native event store is the durable record "+
+				"reconciliation reads (TDD-identity-kernel-003)", key)
+		}
+	}
+	userRetention, _ := d.Realm["eventsExpiration"].(float64)
+	if userRetention < minEventRetention {
+		return fmt.Errorf("scnehaux.json keeps user events %v seconds; the floor is %d (TDD-identity-kernel-003 "+
+			"§Retention Constraint)", d.Realm["eventsExpiration"], minEventRetention)
+	}
+	attributes, _ := d.Realm["attributes"].(map[string]any)
+	raw, _ := attributes["adminEventsExpiration"].(string)
+	adminRetention, err := strconv.ParseInt(raw, 10, 64)
+	if err != nil || adminRetention < minEventRetention {
+		return fmt.Errorf("scnehaux.json keeps admin events %q seconds; the floor is %d (TDD-identity-kernel-003 "+
+			"§Retention Constraint)", raw, minEventRetention)
 	}
 	return nil
 }

@@ -192,8 +192,9 @@ func TestTheDigestFollowsTheContent(t *testing.T) {
 func TestParseRefusesWhatOnlyTheApplyStepMayWrite(t *testing.T) {
 	files := files(t)
 	for _, attribute := range []string{AttrRevision, AttrDigest} {
-		files["scnehaux.json"] = []byte(`{"realm":"scnehaux","attributes":{"` + attribute + `":"x"}}`)
-		if _, err := Parse(files); err == nil {
+		files["scnehaux.json"] = []byte(`{"realm":"scnehaux",` + eventSettings + `,"attributes":{"` + attribute +
+			`":"x","adminEventsExpiration":"604800"}}`)
+		if _, err := Parse(files); err == nil || !strings.Contains(err.Error(), attribute) {
 			t.Errorf("a definition declaring %s parsed; it could forge the applied revision", attribute)
 		}
 	}
@@ -202,11 +203,11 @@ func TestParseRefusesWhatOnlyTheApplyStepMayWrite(t *testing.T) {
 // Admin-event retention has no top-level key; Keycloak keeps it as a realm attribute.
 func TestParseAcceptsAnyOtherRealmAttributeAsAString(t *testing.T) {
 	files := files(t)
-	files["scnehaux.json"] = []byte(`{"realm":"scnehaux","attributes":{"adminEventsExpiration":"604800"}}`)
+	files["scnehaux.json"] = []byte(`{"realm":"scnehaux",` + eventSettings + `,"attributes":{"adminEventsExpiration":"604800"}}`)
 	if _, err := Parse(files); err != nil {
 		t.Errorf("a definition declaring admin-event retention was refused: %v", err)
 	}
-	files["scnehaux.json"] = []byte(`{"realm":"scnehaux","attributes":{"adminEventsExpiration":604800}}`)
+	files["scnehaux.json"] = []byte(`{"realm":"scnehaux",` + eventSettings + `,"attributes":{"adminEventsExpiration":604800}}`)
 	if _, err := Parse(files); err == nil {
 		t.Error("a realm attribute declared as a number parsed; Keycloak returns it as a string, so it would read as drift")
 	}
@@ -226,6 +227,30 @@ func TestADeclaredRealmAttributeIsCompared(t *testing.T) {
 	change := find(t, compare(d, l), KindRealm, d.Name())
 	if change.Action != Update || !strings.Contains(strings.Join(change.Diffs, " "), "attributes.adminEventsExpiration") {
 		t.Errorf("a shortened admin-event retention reads as %s %v, want an update naming it", change.Action, change.Diffs)
+	}
+}
+
+// eventSettings are the event store settings every definition declares (TDD-identity-kernel-003).
+const eventSettings = `"eventsEnabled":true,"eventsExpiration":604800,"adminEventsEnabled":true,"adminEventsDetailsEnabled":true`
+
+// TDD-identity-kernel-003 §Retention Constraint: "A realm configured with retention below the floor
+// fails the configuration diff." So does one that stores no user or admin events at all.
+func TestParseRefusesEventsKeptBelowTheFloor(t *testing.T) {
+	for name, realm := range map[string]string{
+		"user events not saved": `{"realm":"scnehaux","eventsEnabled":false,"eventsExpiration":604800,"adminEventsEnabled":true,` +
+			`"adminEventsDetailsEnabled":true,"attributes":{"adminEventsExpiration":"604800"}}`,
+		"user events kept an hour": `{"realm":"scnehaux","eventsEnabled":true,"eventsExpiration":3600,"adminEventsEnabled":true,` +
+			`"adminEventsDetailsEnabled":true,"attributes":{"adminEventsExpiration":"604800"}}`,
+		"admin events without representation": `{"realm":"scnehaux","eventsEnabled":true,"eventsExpiration":604800,` +
+			`"adminEventsEnabled":true,"adminEventsDetailsEnabled":false,"attributes":{"adminEventsExpiration":"604800"}}`,
+		"admin events kept an hour": `{"realm":"scnehaux",` + eventSettings + `,"attributes":{"adminEventsExpiration":"3600"}}`,
+		"admin retention undeclared": `{"realm":"scnehaux",` + eventSettings + `}`,
+	} {
+		files := files(t)
+		files["scnehaux.json"] = []byte(realm)
+		if _, err := Parse(files); err == nil {
+			t.Errorf("%s: parsed", name)
+		}
 	}
 }
 

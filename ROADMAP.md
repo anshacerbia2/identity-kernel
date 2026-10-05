@@ -511,6 +511,17 @@ Retention has no top-level key: Keycloak keeps it as a realm attribute. So `real
 declared realm attributes, as strings, except the two that record the applied revision. It lays
 them over the live attributes on apply, so the record is never dropped.
 
+✅ User events are saved, for 7 days (`eventsEnabled`, `eventsExpiration` 604800), as
+TDD-identity-kernel-003 1.1.0 specifies. Keycloak keeps none by default, so until now the native
+store held admin events and not a single login. `realmdef` refuses a definition that saves either
+kind below the floor of TDD-003 §Retention Constraint, one hour times twenty-four.
+`compat/user_events_test.go` asserts that a login and a failed login are recorded with the user and
+the client and carry no password.
+
+**Next:** identity-control's completeness reconciliation reads both stores through the Admin API.
+The listener follows when a consumer needs events sooner than one reconcile interval (TDD-003 1.1.0
+§Technical Context): without it the record is complete and arrives at reconcile-interval latency.
+
 ## Week 4 · Theme and upgrade suite
 
 - Hosted login, MFA enrollment, and recovery theme against WCAG 2.2 AA

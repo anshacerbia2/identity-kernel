@@ -9,6 +9,8 @@
   "duplicateEmailsAllowed": false,
   "defaultSignatureAlgorithm": "PS256",
   "sslRequired": "external",
+  "eventsEnabled": true,
+  "eventsExpiration": 604800,
   "adminEventsEnabled": true,
   "adminEventsDetailsEnabled": true,
   "bruteForceProtected": true,
