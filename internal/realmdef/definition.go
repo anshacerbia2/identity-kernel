@@ -175,6 +175,9 @@ func Parse(files map[string][]byte) (Definition, error) {
 	return d, d.validate()
 }
 
+// maxScopeDescription is the length of Keycloak's CLIENT_SCOPE.DESCRIPTION column.
+const maxScopeDescription = 255
+
 func (d Definition) validate() error {
 	if d.Name() == "" {
 		return errors.New("scnehaux.json names no realm")
@@ -208,6 +211,12 @@ func (d Definition) validate() error {
 			return fmt.Errorf("client-scopes.json declares a scope with an empty or repeated name %q", scopeName)
 		}
 		scopes[scopeName] = true
+		// Keycloak stores a client scope's description in a 255-character column, and a longer one
+		// fails the create with an unexplained 500 (found applying scnehaux-privileged).
+		if description, _ := scope["description"].(string); len([]rune(description)) > maxScopeDescription {
+			return fmt.Errorf("client scope %s has a %d-character description; Keycloak stores at most %d",
+				scopeName, len([]rune(description)), maxScopeDescription)
+		}
 		mappers := map[string]bool{}
 		for _, mapper := range listOfMaps(scope["protocolMappers"]) {
 			mapperName := name(mapper)

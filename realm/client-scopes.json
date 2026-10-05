@@ -109,6 +109,72 @@
     ]
   },
   {
+    "name": "scnehaux-privileged",
+    "description": "STD-IAM-002 privileged profile, tenant-scoped form. Carries principal_id, subject_type, acr and auth_time; tenant_id only through the organization scope. Never provider_scope. Never a realm default.",
+    "protocol": "openid-connect",
+    "attributes": {
+      "include.in.token.scope": "true",
+      "display.on.consent.screen": "false"
+    },
+    "protocolMappers": [
+      {
+        "name": "principal_id",
+        "protocol": "openid-connect",
+        "protocolMapper": "oidc-usermodel-attribute-mapper",
+        "config": {
+          "user.attribute": "scnehaux_principal_id",
+          "claim.name": "principal_id",
+          "jsonType.label": "String",
+          "multivalued": "false",
+          "aggregate.attrs": "false",
+          "access.token.claim": "true",
+          "id.token.claim": "true",
+          "userinfo.token.claim": "true",
+          "introspection.token.claim": "true"
+        }
+      },
+      {
+        "name": "subject_type",
+        "protocol": "openid-connect",
+        "protocolMapper": "oidc-usermodel-attribute-mapper",
+        "config": {
+          "user.attribute": "scnehaux_subject_type",
+          "claim.name": "subject_type",
+          "jsonType.label": "String",
+          "multivalued": "false",
+          "aggregate.attrs": "false",
+          "access.token.claim": "true",
+          "id.token.claim": "true",
+          "userinfo.token.claim": "true",
+          "introspection.token.claim": "true"
+        }
+      },
+      {
+        "name": "acr",
+        "protocol": "openid-connect",
+        "protocolMapper": "oidc-acr-mapper",
+        "config": {
+          "access.token.claim": "true",
+          "id.token.claim": "true",
+          "introspection.token.claim": "true"
+        }
+      },
+      {
+        "name": "auth_time",
+        "protocol": "openid-connect",
+        "protocolMapper": "oidc-usersessionmodel-note-mapper",
+        "config": {
+          "user.session.note": "AUTH_TIME",
+          "claim.name": "auth_time",
+          "jsonType.label": "long",
+          "access.token.claim": "true",
+          "id.token.claim": "true",
+          "introspection.token.claim": "true"
+        }
+      }
+    ]
+  },
+  {
     "name": "scnehaux-workload",
     "description": "STD-IAM-002 workload profile. Carries principal_id, subject_type and workload_owner, read from the workload client's service-account user; never acr or auth_time. Never a realm default.",
     "protocol": "openid-connect",
