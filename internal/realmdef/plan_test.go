@@ -237,6 +237,14 @@ func TestParseRefusesARepeatedMapperName(t *testing.T) {
 	}
 }
 
+func TestParseRefusesADescriptionKeycloakCannotStore(t *testing.T) {
+	files := files(t)
+	files["client-scopes.json"] = []byte(`[{"name":"s","description":"` + strings.Repeat("x", 256) + `"}]`)
+	if _, err := Parse(files); err == nil {
+		t.Error("a 256-character scope description parsed; Keycloak refuses it with a 500 at apply")
+	}
+}
+
 func TestOnlyEnvironmentsWithoutRealTokensAreAccepted(t *testing.T) {
 	for _, accepted := range []string{"local", "ci", "development"} {
 		if _, err := ParseEnvironment(accepted); err != nil {

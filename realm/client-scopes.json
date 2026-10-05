@@ -110,7 +110,7 @@
   },
   {
     "name": "scnehaux-privileged",
-    "description": "STD-IAM-002 privileged profile, tenant-scoped form: a privileged operation inside one Tenant. Carries principal_id, subject_type, acr and auth_time; tenant_id only through the organization scope, for the Tenant asked for at sign-in. Never provider_scope. Never a realm default.",
+    "description": "STD-IAM-002 privileged profile, tenant-scoped form. Carries principal_id, subject_type, acr and auth_time; tenant_id only through the organization scope. Never provider_scope. Never a realm default.",
     "protocol": "openid-connect",
     "attributes": {
       "include.in.token.scope": "true",
