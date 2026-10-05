@@ -66,12 +66,14 @@ jobs:
             echo "::error::image/keycloak.ref must pin the image by sha256 digest, found '$image'"
             exit 1
           fi
-          echo "starting $image"
+          # The kernel image: the pinned upstream with this repository's theme (TDD-identity-kernel-005).
+          echo "building the kernel image from $image"
+          docker build -q -f image/Dockerfile --build-arg KEYCLOAK_IMAGE="$image" -t identity-kernel:ci . >/dev/null
           docker run -d --name keycloak -p 8080:8080 -p 9000:9000 \
             -e KC_BOOTSTRAP_ADMIN_USERNAME="$KEYCLOAK_ADMIN_USER" \
             -e KC_BOOTSTRAP_ADMIN_PASSWORD="$KEYCLOAK_ADMIN_PASSWORD" \
             -e KC_HEALTH_ENABLED=true \
-            "$image" start-dev
+            identity-kernel:ci start-dev
 
       - name: wait for Keycloak to be ready
         run: |
@@ -160,8 +162,13 @@ jobs:
             echo "::error::image/keycloak.previous.ref equals image/keycloak.ref; it names the release this one replaces"
             exit 1
           fi
-          echo "CANDIDATE=$candidate" >> "$GITHUB_ENV"
-          echo "PREVIOUS=$previous" >> "$GITHUB_ENV"
+          # Each release runs as the kernel image built from it, theme included, as a server runs it.
+          docker build -q -f image/Dockerfile --build-arg KEYCLOAK_IMAGE="$candidate" -t identity-kernel:candidate . >/dev/null
+          docker build -q -f image/Dockerfile --build-arg KEYCLOAK_IMAGE="$previous" -t identity-kernel:previous . >/dev/null
+          echo "CANDIDATE=identity-kernel:candidate" >> "$GITHUB_ENV"
+          echo "PREVIOUS=identity-kernel:previous" >> "$GITHUB_ENV"
+          echo "CANDIDATE_UPSTREAM=$candidate" >> "$GITHUB_ENV"
+          echo "PREVIOUS_UPSTREAM=$previous" >> "$GITHUB_ENV"
 
       # One Keycloak at a time, on the host network so it reaches the service's port. start-dev for
       # the reason the job above gives; the migrations a release applies are the same under start.
@@ -242,8 +249,8 @@ jobs:
             echo
             echo "| Field | Value |"
             echo "| :-- | :-- |"
-            echo "| candidate | \`$CANDIDATE\` |"
-            echo "| previous | \`$PREVIOUS\` |"
+            echo "| candidate | \`$CANDIDATE_UPSTREAM\` with the login theme |"
+            echo "| previous | \`$PREVIOUS_UPSTREAM\` with the login theme |"
             echo "| migration model after the upgrade | \`$(cat "$RUNNER_TEMP/model.txt")\` |"
             if [ -s "$RUNNER_TEMP/applied.txt" ]; then
               echo "| schema_migration_applied | yes: \`$(paste -sd, "$RUNNER_TEMP/applied.txt" | sed 's/,/\`, \`/g')\` |"
@@ -253,7 +260,7 @@ jobs:
             echo "| realm in sync after the upgrade | yes |"
             echo "| rollback_boundary | $BOUNDARY |"
             echo "| rollback_rehearsed | yes: the previous release started on the migrated database |"
-            echo "| extension_versions | none: no extension is packaged yet |"
+            echo "| extension_versions | none: no extension is packaged yet; the login theme overrides no template |"
             echo "| evaluated_at | $(date -u +%Y-%m-%dT%H:%M:%SZ) |"
           } | tee -a "$GITHUB_STEP_SUMMARY"
           # Printed as well as summarized: the log is what a run id retrieves later, and the

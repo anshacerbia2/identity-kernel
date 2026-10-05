@@ -3,7 +3,7 @@ doc_meta:
   id: TDD-identity-kernel-005
   title: Image Build, Digest Pinning, and Upgrade Compatibility
   owner: Identity Platform Team
-  version: 1.3.0
+  version: 1.4.0
   status: approved
   classification: restricted
   review_cycle_days: 90
@@ -74,6 +74,14 @@ event listener extension       built from this repository, signed
 login theme                    built from this repository
 realm definition               rendered per environment, applied at deploy
 ```
+
+**As built (1.4.0).** `image/Dockerfile` builds the kernel image `FROM` the digest in
+`image/keycloak.ref`, passed as `KEYCLOAK_IMAGE`, and copies the login theme. No extension is packaged
+yet. Every run uses it: `compat`'s `contract` job builds it before starting Keycloak, the `upgrade`
+job builds it from both the candidate and the previous release, and `deploy/dev/compose.yaml` builds
+it, so the development server runs what the suite asserts. Signing, the bill of materials and the
+provenance attestation of §Supply Chain follow when the image is published to a registry; until then
+it is built where it runs, from a pinned digest and this repository's files.
 
 A tag is mutable. `quay.io/keycloak/keycloak:26.0` can point at different bytes next
 week, and an image built from a tag is not reproducible. The digest is recorded in this

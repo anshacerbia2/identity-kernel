@@ -541,8 +541,15 @@ covered claim surface, and the four closed creation paths; the `upgrade` job has
 upgrade the previous release's database, keeps the realm in sync, starts the previous release on
 the migrated database to find the rollback boundary, and writes the release record. The four paths
 are now all asserted (TDD-005 1.3.0): federated auto-creation is closed by a first login flow that
-denies (TDD-001 1.15.0), and only service accounts manage users. **Not yet:** the login theme
-(TDD-004) and the signing key rotation rehearsal, which waits on Week 2's custody.
+denies (TDD-001 1.15.0), and only service accounts manage users. **Not yet:** the signing key rotation
+rehearsal, which waits on Week 2's custody.
+
+✅ The login theme, first part (TDD-004 1.1.0, ADR-IAM-001 §5.7). `scnehaux` names `keycloak.v2` as its
+parent and overrides no template: the kernel ships both locales, and the theme changes one message, so
+a disabled account no longer tells itself apart from an unknown one. The realm uses it, with `en` and
+`id`. The kernel image is built from the pinned digest plus the theme (TDD-005 1.4.0), and every CI job
+and the development server run it. **Not yet:** the automated accessibility check, the security
+headers, and the timing comparison of TDD-004 §Testing Strategy.
 
 ## Development server
 
