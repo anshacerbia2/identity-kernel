@@ -3,7 +3,7 @@ doc_meta:
   id: TDD-identity-kernel-001
   title: Realm Topology, Issuer Identity, and Token Claim Projection
   owner: Identity Platform Team
-  version: 1.14.0
+  version: 1.15.0
   status: approved
   classification: restricted
   review_cycle_days: 90
@@ -341,6 +341,21 @@ is closed here, by configuration rather than by policy:
 | Declarative user profile `scnehaux_principal_id` | admin-managed, not user-editable | Attribute mutation through account self-service |
 | Declarative user profile `scnehaux_subject_type` and `scnehaux_workload_owner` | admin-managed, not user-editable | Claim-source mutation through account self-service |
 | Admin Console user creation | restricted to break-glass roles | Direct console creation |
+
+**Federated auto-creation is closed by a flow that denies (1.15.0).** The kernel's own first login
+flow runs Create User If Unique, which "creates a new local {project_name} account and links it with
+the identity provider", and "By default, the `First Login Flow` option points to the `first broker
+login` flow" (Server Administration Guide, First login flow; ADR-IAM-001 [R43]). Up to 1.14.0 the
+realm declared no first login flow, so an identity provider added in the console would have created
+an account no Principal maps. The realm now binds `firstBrokerLoginFlow` to
+`scnehaux-first-broker-login-v1`, whose one execution is the kernel's `deny-access-authenticator`.
+Federation is not designed yet; when it is, a flow that links to an existing Principal replaces this
+one. `compat/creation_paths_test.go` asserts the binding and the flow, and records what a provider
+added without a flow of its own inherits.
+
+**Admin Console creation is held to service accounts.** In the realm, only a service account holds
+`manage-users` or `realm-admin`, directly or through a group, so no person signs in to the console and
+creates a user beside identity-control's path. `compat/creation_paths_test.go` asserts it.
 
 Keycloak enforces no uniqueness on user attributes, so the uniqueness invariant for
 `principal_id` is held by the Control Plane database and never by this realm. The
