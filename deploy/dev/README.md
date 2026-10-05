@@ -33,7 +33,7 @@ service:
 | :-- | :-- |
 | `/realms/scnehaux/...`: discovery, JWKS, token, login | anywhere |
 | `/admin/...` (console and REST API), `/realms/master/...` | `ADMIN_ALLOW_CIDRS` only; everyone else gets `404` |
-| management port `9000` (health, metrics) | the container only |
+| management port `9000` (`/health/started`, `/health/live`, `/health/ready`, `/metrics`) | the container only: the healthcheck reads `/health/ready`; in production the orchestrator and monitoring reach it internally (TDD-005 1.5.0) |
 
 CI brings this exact stack up on every change and asserts two things:
 

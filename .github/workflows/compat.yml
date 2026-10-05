@@ -26,6 +26,7 @@ jobs:
 
     env:
       KEYCLOAK_URL: http://localhost:8080
+      KEYCLOAK_MANAGEMENT_URL: http://localhost:9000
       # Throwaway credentials for a throwaway instance that lives for the length of this job.
       KEYCLOAK_ADMIN_USER: admin
       KEYCLOAK_ADMIN_PASSWORD: admin
@@ -69,10 +70,12 @@ jobs:
           # The kernel image: the pinned upstream with this repository's theme (TDD-identity-kernel-005).
           echo "building the kernel image from $image"
           docker build -q -f image/Dockerfile --build-arg KEYCLOAK_IMAGE="$image" -t identity-kernel:ci . >/dev/null
+          # start-dev builds again in development mode, on its own file database: the image's
+          # postgres is named back to dev-file here, and health and metrics stay on.
           docker run -d --name keycloak -p 8080:8080 -p 9000:9000 \
             -e KC_BOOTSTRAP_ADMIN_USERNAME="$KEYCLOAK_ADMIN_USER" \
             -e KC_BOOTSTRAP_ADMIN_PASSWORD="$KEYCLOAK_ADMIN_PASSWORD" \
-            -e KC_HEALTH_ENABLED=true \
+            -e KC_DB=dev-file -e KC_HEALTH_ENABLED=true -e KC_METRICS_ENABLED=true \
             identity-kernel:ci start-dev
 
       - name: wait for Keycloak to be ready
