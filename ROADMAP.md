@@ -548,7 +548,7 @@ rehearsal, which waits on Week 2's custody.
 parent and overrides no template: the kernel ships both locales, and the theme changes one message, so
 a disabled account no longer tells itself apart from an unknown one. The realm uses it, with `en` and
 `id`. The kernel image is built from the pinned digest plus the theme (TDD-005 1.4.0), and every CI job
-and the development server run it. **Not yet:** the timing comparison of TDD-004 §Testing Strategy.
+and the development server run it.
 
 ✅ The login pages' browser security headers (TDD-004 1.2.0, STD-IAM-001 2.4.0 §3.9). The realm
 declares them: no page can be framed, nothing loads from another origin, and HSTS, `nosniff` and
@@ -566,6 +566,13 @@ Security Policy violation, which proves the realm's policy against the stock tem
 accessible name, so the theme copies `template.ftl` and `login-config-totp.ftl`, each with only the
 labels corrected (keycloak#51206 for the second). `cmd/theme-overrides` proves each copy against
 the image's themes jar in the `contract` job, and `-write` makes the copies again for a new release.
+
+✅ The sign-in's timing (TDD-004 1.4.0, STD-IAM-001 2.5.0 §3.1). `compat/timing_test.go` measures by
+dudect's method: the classes interleaved at random, Welch's t, and a threshold of 10. An unknown
+identifier, a wrong password and a disabled account answer in about 44 ms, and no pair is
+separable. An empty password (keycloak#51887) and an account under lockout answer an existing
+account in about 16 ms, because the kernel skips the hash. Both are recorded gaps, measured on every
+run.
 
 ✅ The kernel's operational surfaces (TDD-005 1.5.0, ADR-IAM-001 §5.8). The image is built optimized
 with health and metrics, and a server starts it with `start --optimized`. The probes are Keycloak's

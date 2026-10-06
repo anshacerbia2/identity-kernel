@@ -3,7 +3,7 @@ doc_meta:
   id: TDD-identity-kernel-004
   title: Hosted Login Theme, Accessibility, and Disclosure Discipline
   owner: Identity Platform Team
-  version: 1.3.0
+  version: 1.4.0
   status: approved
   classification: restricted
   review_cycle_days: 90
@@ -207,6 +207,18 @@ kernel performs credential verification work in both paths; the theme's obligati
 add no branch that shortens one, and the test measures both distributions rather than
 inspecting the code.
 
+For an unknown identifier, the kernel hashes a dummy password (`AuthenticatorUtils.dummyHash`).
+Measured against 26.7.5, an unknown identifier, a wrong password and a disabled account all answer
+in about 44 ms, and no pair is separable. Two paths answer an existing account about one hash
+sooner. Both are STD-IAM-001 §3.1's recorded gaps:
+
+| Path | Why it is shorter | Measured | Upstream |
+| :-- | :-- | :-- | :-- |
+| An empty password | `validatePassword` returns before hashing for an existing account | 16.4 ms against 42.1 ms | keycloak#51887, open |
+| An account under lockout | The lockout is checked before the password | 16.0 ms against 42.1 ms | Not yet reported |
+
+The message is the same in both, so only the time tells. No realm setting changes either path.
+
 Recovery is the surface where this is most often lost, because a helpful confirmation
 naming the address is exactly what a well-meaning designer writes.
 
@@ -295,7 +307,7 @@ invalidates caches without a version query string.
 
 ## Testing Strategy
 
-**As built (1.3.0):** the theme in both locales, the language attribute, and the enumeration
+**As built (1.4.0):** the theme in both locales, the language attribute, and the enumeration
 message and status (`compat/theme_test.go`); the browser security headers on the login page, a
 failed sign-in and an error page, and the absence of any other origin on the login page
 (`compat/browser_headers_test.go`); the definition's refusal of a weaker header set
@@ -316,11 +328,19 @@ code, the passkey binding, the passkey sign-in and an error page. Each scan is a
 summary. No page may raise a Content Security Policy violation; that is the proof that the realm's
 policy allows what the stock templates run.
 
+The timing comparison is `compat/timing_test.go`, and it follows dudect's method:
+
+- the classes are measured interleaved in a random order;
+- each pair is compared with Welch's t-test on every measurement and on the fastest 90 percent;
+- an |t| above 10 is a separable difference.
+
+An unknown identifier, a wrong password and a disabled account must not be separable. The two
+recorded gaps are measured alongside them and written to the job summary.
+
 **Not yet:**
 
 - the recovery-code sign-in page and the authenticator selection page;
-- the screen-reader pass, which is manual release evidence;
-- the timing comparison, which needs a timing harness.
+- the screen-reader pass, which is manual release evidence.
 
 ### Accessibility
 
@@ -336,8 +356,9 @@ policy allows what the stock templates run.
   page structure.
 - A disabled account is indistinguishable from both.
 - Recovery renders the same confirmation for a resolving and a non-resolving identifier.
-- Response time distributions for unknown and wrong-credential paths are compared, and
-  a separable difference fails the test.
+- Response time distributions for unknown, wrong-credential and disabled paths are
+  compared, and a separable difference fails the test; the empty-password and lockout
+  paths are measured and recorded.
 
 ### Localization
 
