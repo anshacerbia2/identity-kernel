@@ -307,6 +307,32 @@ func csp(headers map[string]any, old, new string) {
 	headers["contentSecurityPolicy"] = strings.Replace(policy, old, new, 1)
 }
 
+// ADR-IAM-007 §5.4: the kernel sends no mail, so a definition with an SMTP server or the email event
+// listener is refused; an empty smtpServer, Keycloak's own default, and other listeners are not.
+func TestParseRefusesMailFromTheKernel(t *testing.T) {
+	for name, c := range map[string]struct {
+		edit    func(realm map[string]any)
+		refused bool
+	}{
+		"an SMTP server":       {func(r map[string]any) { r["smtpServer"] = map[string]any{"host": "smtp.example"} }, true},
+		"the email listener":   {func(r map[string]any) { r["eventsListeners"] = []any{"jboss-logging", "email"} }, true},
+		"an empty smtpServer":  {func(r map[string]any) { r["smtpServer"] = map[string]any{} }, false},
+		"the logging listener": {func(r map[string]any) { r["eventsListeners"] = []any{"jboss-logging"} }, false},
+		"listeners not a list": {func(r map[string]any) { r["eventsListeners"] = "email" }, true},
+	} {
+		files := files(t)
+		var realm map[string]any
+		if err := json.Unmarshal(files["scnehaux.json"], &realm); err != nil {
+			t.Fatal(err)
+		}
+		c.edit(realm)
+		files["scnehaux.json"], _ = json.Marshal(realm)
+		if _, err := Parse(files); (err != nil) != c.refused {
+			t.Errorf("%s: refused %t, want %t (%v)", name, err != nil, c.refused, err)
+		}
+	}
+}
+
 func TestParseRefusesARepeatedMapperName(t *testing.T) {
 	files := files(t)
 	files["client-scopes.json"] = []byte(`[{"name":"s","protocolMappers":[{"name":"m"},{"name":"m"}]}]`)

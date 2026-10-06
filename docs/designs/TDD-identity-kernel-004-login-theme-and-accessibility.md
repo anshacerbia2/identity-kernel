@@ -3,7 +3,7 @@ doc_meta:
   id: TDD-identity-kernel-004
   title: Hosted Login Theme, Accessibility, and Disclosure Discipline
   owner: Identity Platform Team
-  version: 1.5.0
+  version: 1.6.0
   status: approved
   classification: restricted
   review_cycle_days: 90
@@ -297,7 +297,7 @@ same way it refuses event retention below the floor.
 
 | Setting | Value | Reason |
 | :-- | :-- | :-- |
-| Theme | `scnehaux` | Applied to login. The account console is not used: what follows sign-in is the Identity Experience's (ADR-IAM-001 §5.7). The email theme follows the notification decision |
+| Theme | `scnehaux` | Applied to login. The account console is not used: what follows sign-in is the Identity Experience's (ADR-IAM-001 §5.7). There is no email theme: the kernel sends no mail, and account security notifications are the Identity Control API's to decide and the Notification Platform's to deliver (ADR-IAM-007 §5.4). `realmdef` refuses an SMTP server and the `email` event listener, and `compat/no_mail_test.go` asserts the live realm has neither |
 | Supported locales | `en`, `id` | Key parity asserted across both |
 | Default locale | `en` | Reference bundle |
 | Internationalization | enabled | Required for locale negotiation |
