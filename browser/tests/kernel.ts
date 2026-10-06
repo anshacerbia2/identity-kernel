@@ -3,6 +3,8 @@
 // asserts with, axe-core over a page and the CSP violations a page raised.
 import { createHash, createHmac, randomBytes } from "node:crypto";
 import { appendFileSync } from "node:fs";
+import { createServer } from "node:http";
+import type { AddressInfo } from "node:net";
 
 import { AxeBuilder } from "@axe-core/playwright";
 import { expect, type Page } from "@playwright/test";
@@ -10,10 +12,21 @@ import { expect, type Page } from "@playwright/test";
 export const base = required("KEYCLOAK_URL").replace(/\/+$/, "");
 export const realm = "scnehaux";
 
-// Never resolved: a .invalid name never is (RFC 6761 §6.4). The browser's request for it is answered
-// in the test, and the code it carries is the proof that the sign-in completed. compat's
-// http://127.0.0.1:9 is not usable here: Chromium refuses port 9 before any route sees the request.
-export const redirect = "http://client.invalid/callback";
+// The client's redirect: a listener of the test's own, on the runner's loopback, that answers every
+// request with an empty page. The code in the URL the browser lands on is the proof that the sign-in
+// completed. A route cannot stand in for it: Playwright does not route the request a redirect makes,
+// and compat's http://127.0.0.1:9 is a port Chromium refuses to navigate to.
+export async function callbackListener(): Promise<{ redirect: string; close(): Promise<void> }> {
+  const server = createServer((_request, response) => {
+    response.writeHead(200, { "content-type": "text/html" }).end("<!doctype html><title>callback</title>");
+  });
+  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+  const { port } = server.address() as AddressInfo;
+  return {
+    redirect: `http://127.0.0.1:${port}/callback`,
+    close: () => new Promise<void>((resolve) => server.close(() => resolve())),
+  };
+}
 
 function required(name: string): string {
   const value = process.env[name];
@@ -85,7 +98,7 @@ export class Fixtures {
   private users: string[] = [];
 
   // A confidential client with the authorization code flow and PKCE, as compat's providerCaller.
-  async client(): Promise<string> {
+  async client(redirect: string): Promise<string> {
     const clientId = `browser-${suffix()}`;
     const response = await call("POST", "/clients", {
       clientId,
@@ -140,7 +153,7 @@ export class Fixtures {
 
 // The authorization request a client's browser makes. The code is never exchanged, so the verifier
 // is not kept.
-export function authorizationURL(clientId: string, params: Record<string, string>): string {
+export function authorizationURL(clientId: string, redirect: string, params: Record<string, string>): string {
   const challenge = createHash("sha256").update(randomBytes(32).toString("base64url")).digest("base64url");
   const query = new URLSearchParams({
     client_id: clientId,

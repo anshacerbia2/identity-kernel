@@ -8,12 +8,12 @@
 // this is where that is proven (STD-IAM-001 §3.9).
 import { expect, test, type Page } from "@playwright/test";
 
-import { authorizationURL, Codes, Fixtures, recordViolations, redirect, scan, type Person } from "./kernel";
+import { authorizationURL, callbackListener, Codes, Fixtures, recordViolations, scan, type Person } from "./kernel";
 
 type Surface = "password" | "configure-totp" | "recovery-codes" | "otp" | "webauthn-register" | "webauthn";
 
 // surface names the page by what it asks for, as compat/levels_test.go does.
-async function surface(page: Page): Promise<Surface | "callback"> {
+async function surface(page: Page, redirect: string): Promise<Surface | "callback"> {
   if (page.url().startsWith(redirect)) return "callback";
   const present = async (selector: string) => (await page.locator(selector).count()) > 0;
   if (await present("#registerWebAuthn")) return "webauthn-register";
@@ -52,6 +52,7 @@ class Sequence {
     private page: Page,
     private locale: string,
     private clientId: string,
+    private redirect: string,
     private person: Person,
   ) {}
 
@@ -59,9 +60,9 @@ class Sequence {
   // returns the pages it showed.
   async signIn(params: Record<string, string> = {}): Promise<Surface[]> {
     const shown: Surface[] = [];
-    await this.page.goto(authorizationURL(this.clientId, { ui_locales: this.locale, ...params }));
+    await this.page.goto(authorizationURL(this.clientId, this.redirect, { ui_locales: this.locale, ...params }));
     for (let step = 0; step < 8; step++) {
-      const current = await surface(this.page);
+      const current = await surface(this.page, this.redirect);
       if (current === "callback") {
         expect(new URL(this.page.url()).searchParams.get("code"), "the redirect carries a code").toBeTruthy();
         return shown;
@@ -117,12 +118,9 @@ class Sequence {
 for (const locale of ["en", "id"]) {
   test(`the login pages in ${locale}: accessible, keyboard-operable, and within their policy`, async ({ page }) => {
     const fixtures = new Fixtures();
+    const callback = await callbackListener();
     try {
       const violations = await recordViolations(page);
-      // The redirect is answered here: nothing listens on it, and the code in its URL is the proof.
-      await page.route(`${redirect}**`, (route) =>
-        route.fulfill({ status: 200, contentType: "text/html", body: "<!doctype html><title>callback</title>" }),
-      );
       // Chromium's virtual authenticator answers the WebAuthn pages; the label the registration asks
       // for in a prompt is accepted as offered.
       const cdp = await page.context().newCDPSession(page);
@@ -139,12 +137,12 @@ for (const locale of ["en", "id"]) {
       });
       page.on("dialog", (dialog) => void dialog.accept(dialog.defaultValue()));
 
-      const clientId = await fixtures.client();
+      const clientId = await fixtures.client(callback.redirect);
       const person = await fixtures.person();
-      const sequence = new Sequence(page, locale, clientId, person);
+      const sequence = new Sequence(page, locale, clientId, callback.redirect, person);
 
       // A wrong password first: the answer is a page of its own, scanned before the right one.
-      await page.goto(authorizationURL(clientId, { ui_locales: locale }));
+      await page.goto(authorizationURL(clientId, callback.redirect, { ui_locales: locale }));
       await page.locator("#username").fill(person.username);
       await page.locator("#password").fill(`Wrong-${person.password}`);
       await submits(page, () => page.locator("#password").press("Enter"));
@@ -169,12 +167,13 @@ for (const locale of ["en", "id"]) {
       expect(passkey, "aal2 with a passkey").toEqual(["password", "webauthn"]);
 
       // An error page: an authorization request from a client the realm does not hold.
-      await page.goto(authorizationURL(`browser-no-such-client`, { ui_locales: locale }));
+      await page.goto(authorizationURL("browser-no-such-client", callback.redirect, { ui_locales: locale }));
       await scan(page, locale, "error page");
 
       expect(violations, "Content Security Policy violations").toEqual([]);
     } finally {
       await fixtures.remove();
+      await callback.close();
     }
   });
 }
