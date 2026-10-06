@@ -3,6 +3,8 @@ package themecheck
 import (
 	"archive/zip"
 	"bytes"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"testing/fstest"
@@ -83,5 +85,33 @@ func TestEveryDivergenceIsAFinding(t *testing.T) {
 		if findings := Check(c.theme, c.manifest, jar(t, c.stock)); len(findings) == 0 {
 			t.Errorf("%s: no finding", name)
 		}
+	}
+}
+
+// Write makes the copy from a new release's template, and writes nothing when a replacement no
+// longer finds its stock text.
+func TestWriteMakesTheCopyAgainOnlyWhenEveryReplacementApplies(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(dir, "login"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(dir, "login", "x.ftl")
+	if err := os.WriteFile(path, []byte("old copy"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	newRelease := stock + "<p>a new release</p>\n"
+	if problems := Write(dir, manifest(), jar(t, map[string]string{Parent + "login/x.ftl": newRelease})); len(problems) > 0 {
+		t.Fatalf("problems: %v", problems)
+	}
+	got, _ := os.ReadFile(path)
+	if want := strings.Replace(newRelease, `for="form-vertical-name"`, `for="totp"`, 1); string(got) != want {
+		t.Errorf("the copy is %q, want %q", got, want)
+	}
+
+	if problems := Write(dir, manifest(), jar(t, map[string]string{Parent + "login/x.ftl": fixed()})); len(problems) == 0 {
+		t.Error("a release that fixed the template was written over")
+	}
+	if after, _ := os.ReadFile(path); string(after) != string(got) {
+		t.Error("a refused write changed the copy")
 	}
 }

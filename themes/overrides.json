@@ -2,6 +2,18 @@
   "_comment": "Every template the scnehaux theme copies from keycloak.v2 (TDD-identity-kernel-004 §Override Surface). Each copy is the stock template of the pinned release with exactly these replacements; cmd/theme-overrides proves it against the image, so a release that changes or fixes the template fails CI until the copy is re-made or removed.",
   "overrides": [
     {
+      "template": "login/template.ftl",
+      "reason": "The username macro labels its read-only field with for=\"username\", while the field's id is kc-attempted-username, so on every page after the first (the one-time code, the passkey) the field has no accessible name (WCAG 2.2 1.3.1, 4.1.2). Found by axe-core in browser/.",
+      "upstream": "not yet reported to keycloak/keycloak",
+      "remove_when": "the pinned release labels the attempted-username field; cmd/theme-overrides then fails because the stock text is gone",
+      "replacements": [
+        {
+          "old": "<@field.group name=\"username\" label=label>",
+          "new": "<@field.group name=\"kc-attempted-username\" label=label>"
+        }
+      ]
+    },
+    {
       "template": "login/login-config-totp.ftl",
       "reason": "The two labels of the one-time-code enrolment page name an id no element has, so the code and device-name fields have no accessible name (WCAG 2.2 1.3.1, 4.1.2). Found by axe-core in browser/.",
       "upstream": "https://github.com/keycloak/keycloak/issues/51206",

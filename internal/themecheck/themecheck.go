@@ -93,25 +93,9 @@ func Check(theme fs.FS, manifest Manifest, themes *zip.Reader) []error {
 				"replacement", path))
 			continue
 		}
-		stock, err := readZip(themes, Parent+path)
-		if err != nil {
-			findings = append(findings, fmt.Errorf("%s: the release has no stock template to prove the copy by: %w",
-				path, err))
-			continue
-		}
-		want := stock
-		ok := true
-		for i, r := range o.Replacements {
-			if n := strings.Count(stock, r.Old); n != 1 {
-				findings = append(findings, fmt.Errorf("%s: replacement %d finds its stock text %d times in the "+
-					"release, not once; the release changed or fixed the template, so make the copy again or "+
-					"remove it (%s)", path, i+1, n, o.Upstream))
-				ok = false
-				continue
-			}
-			want = strings.Replace(want, r.Old, r.New, 1)
-		}
-		if !ok {
+		want, problems := Rebuild(o, themes)
+		if len(problems) > 0 {
+			findings = append(findings, problems...)
 			continue
 		}
 		got, err := fs.ReadFile(theme, path)
@@ -125,6 +109,49 @@ func Check(theme fs.FS, manifest Manifest, themes *zip.Reader) []error {
 		}
 	}
 	return findings
+}
+
+// Rebuild is the copy an override declares: the release's stock template with each replacement
+// applied, every replacement's stock text found exactly once.
+func Rebuild(o Override, themes *zip.Reader) (string, []error) {
+	stock, err := readZip(themes, Parent+o.Template)
+	if err != nil {
+		return "", []error{fmt.Errorf("%s: the release has no stock template to prove the copy by: %w", o.Template, err)}
+	}
+	var problems []error
+	want := stock
+	for i, r := range o.Replacements {
+		if n := strings.Count(stock, r.Old); n != 1 {
+			problems = append(problems, fmt.Errorf("%s: replacement %d finds its stock text %d times in the release, "+
+				"not once; the release changed or fixed the template, so revise the replacement or remove the copy (%s)",
+				o.Template, i+1, n, o.Upstream))
+			continue
+		}
+		want = strings.Replace(want, r.Old, r.New, 1)
+	}
+	return want, problems
+}
+
+// Write makes every declared copy again from the release's stock template, for a release upgrade.
+// It writes nothing when any replacement no longer applies.
+func Write(themeDir string, manifest Manifest, themes *zip.Reader) []error {
+	copies := map[string]string{}
+	var problems []error
+	for _, o := range manifest.Overrides {
+		want, p := Rebuild(o, themes)
+		problems = append(problems, p...)
+		copies[o.Template] = want
+	}
+	if len(problems) > 0 {
+		return problems
+	}
+	for _, path := range sortedKeys(copies) {
+		target := filepath.Join(themeDir, filepath.FromSlash(path))
+		if err := os.WriteFile(target, []byte(copies[path]), 0o644); err != nil {
+			return []error{err}
+		}
+	}
+	return nil
 }
 
 // OpenJar opens the release's themes jar.

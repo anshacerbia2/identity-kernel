@@ -83,8 +83,9 @@ jobs:
       # image the suite runs. A release that changes or fixes a copied template fails here.
       - name: the theme's copied templates match the release
         run: |
+          # The themes jar alone: keycloak-themes-vendor sits beside it under the same prefix.
           docker run --rm --entrypoint /bin/bash identity-kernel:ci \
-            -c 'cat /opt/keycloak/lib/lib/main/org.keycloak.keycloak-themes-*.jar' > "$RUNNER_TEMP/themes.jar"
+            -c 'cat /opt/keycloak/lib/lib/main/org.keycloak.keycloak-themes-[0-9]*.jar' > "$RUNNER_TEMP/themes.jar"
           go run ./cmd/theme-overrides -jar "$RUNNER_TEMP/themes.jar"
 
       - name: wait for Keycloak to be ready

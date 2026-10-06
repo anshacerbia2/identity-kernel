@@ -78,13 +78,14 @@ message bundle. Each override is listed in this design with the reason it exists
 the upgrade suite knows what to re-verify and a future engineer knows what to try to
 remove.
 
-**As built (1.3.0): one template is overridden, because a test showed the stock one fails.** The
+**As built (1.3.0): two templates are overridden, because a test showed the stock ones fail.** The
 theme `scnehaux` names `keycloak.v2` as its parent, as ADR-IAM-001 §5.7 decides. Keycloak documents
 the mechanism: "When extending a theme you can override individual resources (templates,
 stylesheets, etc.)" (ADR-IAM-001 [R33]).
 
 | Copied template | Its reason | Upstream | Removed when |
 | :-- | :-- | :-- | :-- |
+| `template.ftl` | The `username` macro labels the read-only field that shows who is signing in with `for="username"`. The field's id is `kc-attempted-username`, so on every page after the first (the one-time code, the passkey) the field has no accessible name (WCAG 2.2 1.3.1, 4.1.2). axe-core reports it as `label`, critical, in `browser/`. The copy renames the group to the field's id and changes nothing else | Not yet reported | The pinned release labels the field |
 | `login-config-totp.ftl` | Both labels on the one-time-code enrolment page point at `form-vertical-name`, an id no element has. The code field and the device-name field are left with no accessible name (WCAG 2.2 1.3.1, 4.1.2). axe-core reports it as `label`, critical, in `browser/`. The copy changes the two `for` attributes and nothing else | keycloak#51206, open | The pinned release labels both fields |
 
 A copy is declared in `themes/overrides.json` as the stock template plus a list of exact
@@ -97,15 +98,20 @@ rebuilds the copy from the release's own template and requires the result to equ
   remove the copy.
 - **A copy cannot carry a change the manifest does not declare.**
 
+`cmd/theme-overrides -write` makes every copy again from a new release's templates with the same
+replacements, so an upgrade that leaves the fixed text alone costs one command. It writes nothing
+when a replacement no longer applies; whether the release fixed the bug or moved it is a person's
+decision.
+
 Version 1.0.0 planned five copied templates. None was copied until a test showed the stock template
 cannot meet the requirement it was planned for:
 
 | Planned override | Its reason | Status |
 | :-- | :-- | :-- |
 | `template.ftl` | language attribute | Met by the stock template, which writes `lang="${lang}"`; asserted in both locales |
-| `template.ftl` | skip link | axe-core reports no `bypass` or landmark finding on any surface it scans |
+| `template.ftl` | skip link | axe-core reports no `bypass` or landmark finding on any surface it scans; the copy above fixes a label, not this |
 | `login.ftl` | unified identifier field, provider ordering | `loginWithEmailAllowed` gives one identifier field; there is no provider |
-| `login-otp.ftl` | challenge copy, input semantics | Copy is a message bundle's; axe-core reports no finding on the one-time-code page |
+| `login-otp.ftl` | challenge copy, input semantics | Copy is a message bundle's; axe-core's one finding on the page is the `template.ftl` label |
 | `login-reset-password.ftl` | enumeration-safe confirmation | Reset is not offered (`resetPasswordAllowed` false); recovery is a recovery code (ADR-IAM-005) |
 | `error.ftl` | uniform error presentation | Wording is a message bundle's |
 
