@@ -548,8 +548,7 @@ rehearsal, which waits on Week 2's custody.
 parent and overrides no template: the kernel ships both locales, and the theme changes one message, so
 a disabled account no longer tells itself apart from an unknown one. The realm uses it, with `en` and
 `id`. The kernel image is built from the pinned digest plus the theme (TDD-005 1.4.0), and every CI job
-and the development server run it. **Not yet:** the automated accessibility check and the timing
-comparison of TDD-004 §Testing Strategy.
+and the development server run it. **Not yet:** the timing comparison of TDD-004 §Testing Strategy.
 
 ✅ The login pages' browser security headers (TDD-004 1.2.0, STD-IAM-001 2.4.0 §3.9). The realm
 declares them: no page can be framed, nothing loads from another origin, and HSTS, `nosniff` and
@@ -557,6 +556,16 @@ declares them: no page can be framed, nothing loads from another origin, and HST
 them on the login page, a failed sign-in and an error page. Inline script stays allowed, a recorded
 gap that closes when the kernel ships template nonces; `form-action` is not set, because Chrome
 would block the redirect back to the client.
+
+✅ The login pages in a real browser (TDD-004 1.3.0). `browser/` drives Chromium through one person's
+sign-ins in each locale: the password and a one-time code typed from the keyboard, recovery codes
+acknowledged, and a passkey bound and used through the virtual authenticator. axe-core scans every
+surface reached against WCAG 2.2 A and AA in both colour schemes, and no page may raise a Content
+Security Policy violation, which proves the realm's policy against the stock templates. The
+`compat` workflow's `browser` job runs it. It found two stock templates with fields that have no
+accessible name, so the theme copies `template.ftl` and `login-config-totp.ftl`, each with only the
+labels corrected (keycloak#51206 for the second). `cmd/theme-overrides` proves each copy against
+the image's themes jar in the `contract` job, and `-write` makes the copies again for a new release.
 
 ✅ The kernel's operational surfaces (TDD-005 1.5.0, ADR-IAM-001 §5.8). The image is built optimized
 with health and metrics, and a server starts it with `start --optimized`. The probes are Keycloak's

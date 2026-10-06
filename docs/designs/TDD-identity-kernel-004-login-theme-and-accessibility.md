@@ -3,7 +3,7 @@ doc_meta:
   id: TDD-identity-kernel-004
   title: Hosted Login Theme, Accessibility, and Disclosure Discipline
   owner: Identity Platform Team
-  version: 1.2.0
+  version: 1.3.0
   status: approved
   classification: restricted
   review_cycle_days: 90
@@ -78,24 +78,45 @@ message bundle. Each override is listed in this design with the reason it exists
 the upgrade suite knows what to re-verify and a future engineer knows what to try to
 remove.
 
-**As built (1.1.0): no template is overridden.** The theme `scnehaux` names `keycloak.v2` as
-its parent and carries message bundles only (`themes/scnehaux/login/`), as ADR-IAM-001 §5.7
-decides. Keycloak documents the mechanism: "When extending a theme you can override individual
-resources (templates, stylesheets, etc.)" (ADR-IAM-001 [R33]). Version 1.0.0 planned five
-copied templates. None is copied until a test shows the stock template cannot meet the
-requirement it was planned for:
+**As built (1.3.0): two templates are overridden, because a test showed the stock ones fail.** The
+theme `scnehaux` names `keycloak.v2` as its parent, as ADR-IAM-001 §5.7 decides. Keycloak documents
+the mechanism: "When extending a theme you can override individual resources (templates,
+stylesheets, etc.)" (ADR-IAM-001 [R33]).
+
+| Copied template | Its reason | Upstream | Removed when |
+| :-- | :-- | :-- | :-- |
+| `template.ftl` | The `username` macro labels the read-only field that shows who is signing in with `for="username"`. The field's id is `kc-attempted-username`, so on every page after the first (the one-time code, the passkey) the field has no accessible name (WCAG 2.2 1.3.1, 4.1.2). axe-core reports it as `label`, critical, in `browser/`. The copy renames the group to the field's id and changes nothing else | Not yet reported | The pinned release labels the field |
+| `login-config-totp.ftl` | Both labels on the one-time-code enrolment page point at `form-vertical-name`, an id no element has. The code field and the device-name field are left with no accessible name (WCAG 2.2 1.3.1, 4.1.2). axe-core reports it as `label`, critical, in `browser/`. The copy changes the two `for` attributes and nothing else | keycloak#51206, open | The pinned release labels both fields |
+
+A copy is declared in `themes/overrides.json` as the stock template plus a list of exact
+replacements. `cmd/theme-overrides`, run by the `contract` job against the themes jar in the image,
+rebuilds the copy from the release's own template and requires the result to equal the file.
+
+- **A release that changes the template around a replacement fails.** The copy is then made again
+  from the new template.
+- **A release that fixes the bug fails.** The stock text is gone, and that failure is the signal to
+  remove the copy.
+- **A copy cannot carry a change the manifest does not declare.**
+
+`cmd/theme-overrides -write` makes every copy again from a new release's templates with the same
+replacements, so an upgrade that leaves the fixed text alone costs one command. It writes nothing
+when a replacement no longer applies; whether the release fixed the bug or moved it is a person's
+decision.
+
+Version 1.0.0 planned five copied templates. None was copied until a test showed the stock template
+cannot meet the requirement it was planned for:
 
 | Planned override | Its reason | Status |
 | :-- | :-- | :-- |
 | `template.ftl` | language attribute | Met by the stock template, which writes `lang="${lang}"`; asserted in both locales |
-| `template.ftl` | skip link | To be judged by the accessibility check |
+| `template.ftl` | skip link | axe-core reports no `bypass` or landmark finding on any surface it scans; the copy above fixes a label, not this |
 | `login.ftl` | unified identifier field, provider ordering | `loginWithEmailAllowed` gives one identifier field; there is no provider |
-| `login-otp.ftl` | challenge copy, input semantics | Copy is a message bundle's; semantics to be judged by the accessibility check |
+| `login-otp.ftl` | challenge copy, input semantics | Copy is a message bundle's; axe-core's one finding on the page is the `template.ftl` label |
 | `login-reset-password.ftl` | enumeration-safe confirmation | Reset is not offered (`resetPasswordAllowed` false); recovery is a recovery code (ADR-IAM-005) |
 | `error.ftl` | uniform error presentation | Wording is a message bundle's |
 
-Copying a template now would freeze it at 26.7.5, and a protection the kernel adds to it
-later would not reach this page.
+None of the planned overrides is copied. Copying one would freeze it at 26.7.5, and a protection the
+kernel added to it later would not reach this page.
 
 ### Accessibility
 
@@ -274,14 +295,32 @@ invalidates caches without a version query string.
 
 ## Testing Strategy
 
-**As built (1.2.0):** the theme in both locales, the language attribute, and the enumeration
+**As built (1.3.0):** the theme in both locales, the language attribute, and the enumeration
 message and status (`compat/theme_test.go`); the browser security headers on the login page, a
 failed sign-in and an error page, and the absence of any other origin on the login page
 (`compat/browser_headers_test.go`); the definition's refusal of a weaker header set
-(`internal/realmdef`). **Not yet:** the automated accessibility check across the rendered surfaces,
-which also records any CSP violation a page raises in a real browser, and the timing comparison.
-Each follows as its own change, because each needs a tool this repository does not run yet (a
-headless browser, a timing harness).
+(`internal/realmdef`).
+
+In a real browser (`browser/`, the `compat` workflow's `browser` job), Playwright drives Chromium
+through one person's sign-ins in each locale (STD-GLB-FE-008 names Playwright for browser tests):
+
+- the password, typed from the keyboard after a refused one;
+- a one-time code enrolled, recovery codes acknowledged, then a code typed from the keyboard;
+- a passkey bound, then used, through Chromium's virtual authenticator, the way Keycloak's own
+  WebAuthn tests answer those pages.
+
+Every surface the sequence reaches is scanned by axe-core against the WCAG 2.2 A and AA rules, in
+the light and the dark scheme. STD-GLB-FE-009 names axe-core for automated scans. The surfaces are
+the login page, the failed sign-in, the one-time-code enrolment, the recovery codes, the one-time
+code, the passkey binding, the passkey sign-in and an error page. Each scan is a row in the job
+summary. No page may raise a Content Security Policy violation; that is the proof that the realm's
+policy allows what the stock templates run.
+
+**Not yet:**
+
+- the recovery-code sign-in page and the authenticator selection page;
+- the screen-reader pass, which is manual release evidence;
+- the timing comparison, which needs a timing harness.
 
 ### Accessibility
 
@@ -338,10 +377,10 @@ The theme ships everything it loads. A font CDN on the login page is a third par
 can execute in the origin where credentials are typed, and no styling benefit justifies
 that.
 
-The five overridden templates are a security surface as well as an upgrade liability. A
-stock template that changes to add a protection will not reach a page that overrides it,
-which is why each override carries a stated reason and is re-tested for removal at every
-major upgrade.
+Every overridden template is a security surface as well as an upgrade liability. A stock
+template that changes to add a protection will not reach a page that overrides it. That is
+why each override carries a stated reason, and why `cmd/theme-overrides` fails on any release
+that changes the stock template the copy was made from.
 
 ## Performance Notes
 
