@@ -57,6 +57,8 @@ type browser struct {
 	codes   []string
 	asked   []int
 	recover bool
+	// newPassword, when set, answers the update-password page; the sign-in after it uses it.
+	newPassword string
 }
 
 var (
@@ -188,6 +190,16 @@ func (b *browser) signIn(extra url.Values) map[string]any {
 				b.t.Fatal("the kernel asked for a WebAuthn assertion the test holds no key for")
 			}
 			b.key.assert(b.t, page, origin, form)
+		case namedInput("password-new").MatchString(page):
+			b.pages = append(b.pages, "update-password")
+			if b.newPassword == "" {
+				b.t.Fatal("the kernel asked for a new password the test holds none of")
+			}
+			form.Set("password-new", b.newPassword)
+			form.Set("password-confirm", b.newPassword)
+		case namedInput("accept").MatchString(page) && strings.Contains(page, "kc-delete-text"):
+			b.pages = append(b.pages, "delete-credential")
+			form.Set("accept", "")
 		case namedInput("password").MatchString(page):
 			b.pages = append(b.pages, "password")
 			form.Set("username", b.p.username)

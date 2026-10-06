@@ -3,8 +3,8 @@ package compat
 // The events ADR-IAM-007 §5.1 notifies, as the pinned kernel records them. Identity Control decides
 // each notification from the kernel event record, so each event must be told apart there: a TOTP
 // bound and recovery codes issued at the first aal2 sign-in, a recovery code used, a security key
-// bound through the application-initiated action, and a credential a provider removes through the
-// Admin API. The test signs one person through all of them, reads the realm's user and admin events
+// bound and then removed by the person through the application-initiated actions, a password changed
+// the same way, and a credential a provider removes through the Admin API. The test signs one person through all of them, reads the realm's user and admin events
 // for that person, and records which event and which details mark each step. TDD-identity-control-008
 // maps notifications from this table, and the assertions below hold the marks it relies on.
 
@@ -91,13 +91,37 @@ func TestEachNotifiedEventIsToldApartInTheEventRecord(t *testing.T) {
 		b.key = newSoftKey(t)
 		b.signIn(url.Values{"acr_values": {"aal2"}, "max_age": {"0"}, "kc_action": {"webauthn-register"}})
 	})
-	var credentials []struct {
+	type credential struct {
 		ID   string `json:"id"`
 		Type string `json:"type"`
 	}
-	if err := a.getJSON("/admin/realms/"+realmName+"/users/"+p.userID+"/credentials", &credentials); err != nil {
-		t.Fatalf("listing the credentials: %v", err)
+	listCredentials := func() []credential {
+		var out []credential
+		if err := a.getJSON("/admin/realms/"+realmName+"/users/"+p.userID+"/credentials", &out); err != nil {
+			t.Fatalf("listing the credentials: %v", err)
+		}
+		return out
 	}
+	idOf := func(kind string) string {
+		for _, c := range listCredentials() {
+			if c.Type == kind {
+				return c.ID
+			}
+		}
+		t.Fatalf("the person holds no %s credential", kind)
+		return ""
+	}
+	nextStep()
+	mark("a security key removed by the person through kc_action=delete_credential", func() {
+		b.signIn(url.Values{"acr_values": {"aal2"}, "max_age": {"0"}, "kc_action": {"delete_credential:" + idOf("webauthn")}})
+	})
+	time.Sleep(2 * time.Second)
+	mark("a password changed through kc_action=UPDATE_PASSWORD", func() {
+		b.newPassword = "Changed-" + suffix() + "!"
+		b.signIn(url.Values{"max_age": {"0"}, "kc_action": {"UPDATE_PASSWORD"}})
+		b.p.password = b.newPassword
+	})
+	credentials := listCredentials()
 	mark("the TOTP removed by a provider through the Admin API", func() {
 		for _, credential := range credentials {
 			if credential.Type == "otp" {
@@ -156,6 +180,10 @@ func TestEachNotifiedEventIsToldApartInTheEventRecord(t *testing.T) {
 		"a security key bound through kc_action=webauthn-register": {
 			"UPDATE_CREDENTIAL (auth_method=openid-connect, credential_type=webauthn,"},
 		"the TOTP removed by a provider through the Admin API": {"ACTION USER users/…/credentials/…"},
+		"a security key removed by the person through kc_action=delete_credential": {
+			"REMOVE_CREDENTIAL (auth_method=openid-connect, credential_type=webauthn"},
+		"a password changed through kc_action=UPDATE_PASSWORD": {
+			"UPDATE_CREDENTIAL (auth_method=openid-connect, credential_type=password"},
 	} {
 		joined := strings.Join(seen[name], "; ")
 		for _, want := range wants {
