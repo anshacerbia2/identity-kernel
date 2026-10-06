@@ -6,7 +6,7 @@ package compat
 // bound through the application-initiated action, and a credential a provider removes through the
 // Admin API. The test signs one person through all of them, reads the realm's user and admin events
 // for that person, and records which event and which details mark each step. TDD-identity-control-008
-// maps notifications from this table.
+// maps notifications from this table, and the assertions below hold the marks it relies on.
 
 import (
 	"fmt"
@@ -141,20 +141,32 @@ func TestEachNotifiedEventIsToldApartInTheEventRecord(t *testing.T) {
 	}
 	publish(t, out.String())
 
-	// What the mapping needs, and nothing it does not: each step leaves an event that names it.
+	// What the mapping needs, as 26.7.5 records it. Each step's mark is the event, and the details that
+	// tell it from its neighbours:
+	//   - a binding is UPDATE_CREDENTIAL naming the credential type;
+	//   - a recovery code used is a LOGIN naming recovery-authn-codes with no required action, where
+	//     the LOGIN that ends enrolment names the same type and CONFIGURE_RECOVERY_AUTHN_CODES;
+	//   - a provider's removal is an admin ACTION, not a DELETE, on the person's credential.
 	for name, wants := range map[string][]string{
-		"a TOTP bound and recovery codes issued, at the first aal2 sign-in": {"credential_type=otp", "credential_type=recovery-authn-codes"},
-		"a security key bound through kc_action=webauthn-register":          {"credential_type=webauthn"},
-		"the TOTP removed by a provider through the Admin API":              {"DELETE"},
+		"a TOTP bound and recovery codes issued, at the first aal2 sign-in": {
+			"UPDATE_CREDENTIAL (auth_method=openid-connect, credential_type=otp,",
+			"UPDATE_CREDENTIAL (auth_method=openid-connect, credential_type=recovery-authn-codes,"},
+		"a recovery code used, after the password": {
+			"LOGIN (auth_method=openid-connect, credential_type=recovery-authn-codes)"},
+		"a security key bound through kc_action=webauthn-register": {
+			"UPDATE_CREDENTIAL (auth_method=openid-connect, credential_type=webauthn,"},
+		"the TOTP removed by a provider through the Admin API": {"ACTION USER users/…/credentials/…"},
 	} {
 		joined := strings.Join(seen[name], "; ")
 		for _, want := range wants {
 			if !strings.Contains(joined, want) {
-				t.Errorf("%s: no event names %q; recorded %s", name, want, orDash(joined))
+				t.Errorf("%s: no event reads %q; recorded %s", name, want, orDash(joined))
 			}
 		}
 	}
-	if len(seen["a recovery code used, after the password"]) == 0 {
-		t.Error("a recovery code used left no event")
+	// The enrolment's own LOGIN is not a recovery: it carries the required action.
+	if enrolment := strings.Join(seen["a TOTP bound and recovery codes issued, at the first aal2 sign-in"], "; "); strings.Contains(enrolment,
+		"LOGIN (auth_method=openid-connect, credential_type=recovery-authn-codes)") {
+		t.Errorf("the enrolment's LOGIN reads as a recovery: %s", enrolment)
 	}
 }
