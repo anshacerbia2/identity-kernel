@@ -192,7 +192,7 @@ func TestTheDigestFollowsTheContent(t *testing.T) {
 func TestParseRefusesWhatOnlyTheApplyStepMayWrite(t *testing.T) {
 	files := files(t)
 	for _, attribute := range []string{AttrRevision, AttrDigest} {
-		files["scnehaux.json"] = []byte(`{"realm":"scnehaux",` + eventSettings + `,"attributes":{"` + attribute +
+		files["scnehaux.json"] = []byte(`{"realm":"scnehaux",` + realmSettings + `,"attributes":{"` + attribute +
 			`":"x","adminEventsExpiration":"604800"}}`)
 		if _, err := Parse(files); err == nil || !strings.Contains(err.Error(), attribute) {
 			t.Errorf("a definition declaring %s parsed; it could forge the applied revision", attribute)
@@ -203,11 +203,11 @@ func TestParseRefusesWhatOnlyTheApplyStepMayWrite(t *testing.T) {
 // Admin-event retention has no top-level key; Keycloak keeps it as a realm attribute.
 func TestParseAcceptsAnyOtherRealmAttributeAsAString(t *testing.T) {
 	files := files(t)
-	files["scnehaux.json"] = []byte(`{"realm":"scnehaux",` + eventSettings + `,"attributes":{"adminEventsExpiration":"604800"}}`)
+	files["scnehaux.json"] = []byte(`{"realm":"scnehaux",` + realmSettings + `,"attributes":{"adminEventsExpiration":"604800"}}`)
 	if _, err := Parse(files); err != nil {
 		t.Errorf("a definition declaring admin-event retention was refused: %v", err)
 	}
-	files["scnehaux.json"] = []byte(`{"realm":"scnehaux",` + eventSettings + `,"attributes":{"adminEventsExpiration":604800}}`)
+	files["scnehaux.json"] = []byte(`{"realm":"scnehaux",` + realmSettings + `,"attributes":{"adminEventsExpiration":604800}}`)
 	if _, err := Parse(files); err == nil {
 		t.Error("a realm attribute declared as a number parsed; Keycloak returns it as a string, so it would read as drift")
 	}
@@ -233,6 +233,16 @@ func TestADeclaredRealmAttributeIsCompared(t *testing.T) {
 // eventSettings are the event store settings every definition declares (TDD-identity-kernel-003).
 const eventSettings = `"eventsEnabled":true,"eventsExpiration":604800,"adminEventsEnabled":true,"adminEventsDetailsEnabled":true`
 
+// headerSettings are the login pages' browser security headers every definition declares
+// (STD-IAM-001 §3.9).
+const headerSettings = `"browserSecurityHeaders":{"contentSecurityPolicy":"default-src 'self'; script-src 'self' 'unsafe-inline'; ` +
+	`img-src 'self' data:; frame-ancestors 'none'; object-src 'none'; base-uri 'none'","xFrameOptions":"DENY",` +
+	`"xContentTypeOptions":"nosniff","strictTransportSecurity":"max-age=31536000; includeSubDomains",` +
+	`"referrerPolicy":"no-referrer"}`
+
+// realmSettings are what every definition declares.
+const realmSettings = eventSettings + "," + headerSettings
+
 // TDD-identity-kernel-003 §Retention Constraint: "A realm configured with retention below the floor
 // fails the configuration diff." So does one that stores no user or admin events at all.
 func TestParseRefusesEventsKeptBelowTheFloor(t *testing.T) {
@@ -243,8 +253,8 @@ func TestParseRefusesEventsKeptBelowTheFloor(t *testing.T) {
 			`"adminEventsDetailsEnabled":true,"attributes":{"adminEventsExpiration":"604800"}}`,
 		"admin events without representation": `{"realm":"scnehaux","eventsEnabled":true,"eventsExpiration":604800,` +
 			`"adminEventsEnabled":true,"adminEventsDetailsEnabled":false,"attributes":{"adminEventsExpiration":"604800"}}`,
-		"admin events kept an hour":  `{"realm":"scnehaux",` + eventSettings + `,"attributes":{"adminEventsExpiration":"3600"}}`,
-		"admin retention undeclared": `{"realm":"scnehaux",` + eventSettings + `}`,
+		"admin events kept an hour":  `{"realm":"scnehaux",` + realmSettings + `,"attributes":{"adminEventsExpiration":"3600"}}`,
+		"admin retention undeclared": `{"realm":"scnehaux",` + realmSettings + `}`,
 	} {
 		files := files(t)
 		files["scnehaux.json"] = []byte(realm)
@@ -252,6 +262,49 @@ func TestParseRefusesEventsKeptBelowTheFloor(t *testing.T) {
 			t.Errorf("%s: parsed", name)
 		}
 	}
+}
+
+// STD-IAM-001 §3.9: a definition that would let another origin frame the login pages, load from
+// another origin, set form-action, or drop a transport header is refused before anything is applied.
+func TestParseRefusesWeakerBrowserHeaders(t *testing.T) {
+	for name, edit := range map[string]func(headers map[string]any){
+		"no headers declared":      func(h map[string]any) { clear(h) },
+		"same-origin framing":      func(h map[string]any) { h["xFrameOptions"] = "SAMEORIGIN" },
+		"sniffing allowed":         func(h map[string]any) { delete(h, "xContentTypeOptions") },
+		"a referrer sent":          func(h map[string]any) { h["referrerPolicy"] = "strict-origin" },
+		"HSTS for a day":           func(h map[string]any) { h["strictTransportSecurity"] = "max-age=86400; includeSubDomains" },
+		"HSTS for one host":        func(h map[string]any) { h["strictTransportSecurity"] = "max-age=31536000" },
+		"framed by its own origin": func(h map[string]any) { csp(h, "frame-ancestors 'none'", "frame-ancestors 'self'") },
+		"no frame-ancestors":       func(h map[string]any) { csp(h, "frame-ancestors 'none'; ", "") },
+		"plugins allowed":          func(h map[string]any) { csp(h, "object-src 'none'", "object-src 'self'") },
+		"no base-uri":              func(h map[string]any) { csp(h, "; base-uri 'none'", "") },
+		"a script origin":          func(h map[string]any) { csp(h, "script-src 'self'", "script-src 'self' https://cdn.example") },
+		"any https origin":         func(h map[string]any) { csp(h, "default-src 'self'", "default-src 'self' https:") },
+		"eval":                     func(h map[string]any) { csp(h, "'unsafe-inline'", "'unsafe-inline' 'unsafe-eval'") },
+		"a data: script":           func(h map[string]any) { csp(h, "script-src 'self'", "script-src 'self' data:") },
+		"form-action":              func(h map[string]any) { csp(h, "base-uri 'none'", "base-uri 'none'; form-action 'self'") },
+	} {
+		files := files(t)
+		var realm map[string]any
+		if err := json.Unmarshal(files["scnehaux.json"], &realm); err != nil {
+			t.Fatal(err)
+		}
+		edit(realm["browserSecurityHeaders"].(map[string]any))
+		files["scnehaux.json"], _ = json.Marshal(realm)
+		if _, err := Parse(files); err == nil {
+			t.Errorf("%s: parsed", name)
+		}
+	}
+}
+
+// csp replaces old with new in the declared policy; it panics when old is not there, so a case
+// cannot pass by editing nothing.
+func csp(headers map[string]any, old, new string) {
+	policy := headers["contentSecurityPolicy"].(string)
+	if !strings.Contains(policy, old) {
+		panic("the declared policy has no " + old)
+	}
+	headers["contentSecurityPolicy"] = strings.Replace(policy, old, new, 1)
 }
 
 func TestParseRefusesARepeatedMapperName(t *testing.T) {

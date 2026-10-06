@@ -205,6 +205,9 @@ func (d Definition) validate() error {
 	if err := d.validateRetention(); err != nil {
 		return err
 	}
+	if err := d.validateBrowserHeaders(); err != nil {
+		return err
+	}
 	if name(d.Key) == "" || d.Key["providerId"] == nil {
 		return errors.New("signing-key.generated.json needs a name and a providerId")
 	}

@@ -28,6 +28,15 @@
   "internationalizationEnabled": true,
   "supportedLocales": ["en", "id"],
   "defaultLocale": "en",
+  "browserSecurityHeaders": {
+    "contentSecurityPolicy": "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; frame-src 'self'; frame-ancestors 'none'; object-src 'none'; base-uri 'none'",
+    "contentSecurityPolicyReportOnly": "",
+    "xFrameOptions": "DENY",
+    "xContentTypeOptions": "nosniff",
+    "xRobotsTag": "none",
+    "strictTransportSecurity": "max-age=31536000; includeSubDomains",
+    "referrerPolicy": "no-referrer"
+  },
   "attributes": {
     "adminEventsExpiration": "604800",
     "acr.loa.map": "{\"aal1\":1,\"aal2\":2}"
