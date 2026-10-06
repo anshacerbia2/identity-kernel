@@ -3,12 +3,12 @@ doc_meta:
   id: TDD-identity-kernel-004
   title: Hosted Login Theme, Accessibility, and Disclosure Discipline
   owner: Identity Platform Team
-  version: 1.1.0
+  version: 1.2.0
   status: approved
   classification: restricted
   review_cycle_days: 90
   created_date: 2026-08-11
-  last_reviewed: 2026-10-05
+  last_reviewed: 2026-10-06
   parent_sad: SAD-001
 ---
 
@@ -208,25 +208,56 @@ page is both a defect and a disclosure, because key names describe conditions.
 
 ### Browser Security
 
-Every unauthenticated page carries, per STD-GLB-FE-003 and STD-IAM-001 §3.9:
+Every page the realm renders carries the realm's `browserSecurityHeaders`, which STD-IAM-001 §3.9
+(2.4.0) fixes. Keycloak sends them on each HTML answer of the realm: the login page, the answer to a
+failed sign-in, the second-factor and passkey pages, and its error pages.
 
 ```text
-Content-Security-Policy      default-src 'none'; script-src 'self'; style-src 'self';
-                             img-src 'self' data:; form-action 'self'; frame-ancestors 'none'
+Content-Security-Policy      default-src 'self'; script-src 'self' 'unsafe-inline';
+                             style-src 'self' 'unsafe-inline'; img-src 'self' data:;
+                             frame-src 'self'; frame-ancestors 'none'; object-src 'none';
+                             base-uri 'none'
 Strict-Transport-Security    max-age=31536000; includeSubDomains
 X-Frame-Options              DENY
 X-Content-Type-Options       nosniff
 Referrer-Policy              no-referrer
+X-Robots-Tag                 none
 ```
 
-No inline script, no inline event handler, no third-party origin. The login page loads
-nothing it does not ship, which means no analytics, no font CDN, and no tag manager.
+**No page can be framed.** `frame-ancestors 'none'` and `X-Frame-Options: DENY` together close
+clickjacking on the one page where a click grants a session. Keycloak's default allows its own
+origin; this realm allows none. The OpenID Connect session-status iframe and sign-in inside an
+iframe are therefore unavailable, and no client uses them: a browser application signs in through
+its BFF.
 
-`frame-ancestors 'none'` and `X-Frame-Options: DENY` together close clickjacking on the
-one page where a click grants a session.
+**Nothing is loaded from another origin.** No analytics, no font CDN, no tag manager. `img-src`
+also allows `data:` because the one-time-code enrolment page renders its QR code as one.
+
+**Inline script is allowed: a recorded gap.** 1.1.0 asked for `script-src 'self'` with no inline
+script. The stock `keycloak.v2` templates cannot meet it. Each of the following carries inline
+script or inline handlers:
+
+- `template.ftl`, which every page uses: an import map, module scripts, and an `onclick`;
+- `login.ftl`: an `onsubmit`;
+- `login-otp.ftl`: an inline script and `onclick`;
+- `webauthn-authenticate.ftl`: an inline module script holding the request's `challenge`.
+
+Of the 33 templates in 26.7.5, ten carry inline script and eleven inline handlers, sixteen in all.
+Because the challenge changes with every request, no hash can name the passkey script. Meeting 1.1.0
+would mean copying those sixteen templates, `template.ftl` among them. That contradicts §Override Surface, and every copy would
+stop receiving the kernel's fixes. The gap closes when the kernel ships template nonces (Keycloak
+pull request #49879, open). That upgrade then replaces `'unsafe-inline'` with a nonce and
+`'strict-dynamic'`. Until then, the policy still refuses every script from another origin.
+
+**No `form-action`.** Chrome applies it to the redirect that follows a form submission, so
+`form-action 'self'` would block the return to the client after sign-in.
 
 `Referrer-Policy: no-referrer` prevents identifiers or state parameters in the URL from
-travelling to whatever the user visits next.
+travelling to whatever the user visits next. HSTS takes effect behind the production load balancer's
+TLS; a browser ignores it over the development server's plain HTTP.
+
+`internal/realmdef` refuses a definition that weakens any of this before anything is applied, the
+same way it refuses event retention below the floor.
 
 ## Configuration
 
@@ -243,11 +274,14 @@ invalidates caches without a version query string.
 
 ## Testing Strategy
 
-**As built (1.1.0):** the theme in both locales, the language attribute, and the enumeration
-message and status (`compat/theme_test.go`). **Not yet:** the automated accessibility check across
-the rendered surfaces, the security headers, and the timing comparison; each follows as its own
-change, because each needs a tool this repository does not run yet (a headless browser, a header
-policy in the realm, a timing harness).
+**As built (1.2.0):** the theme in both locales, the language attribute, and the enumeration
+message and status (`compat/theme_test.go`); the browser security headers on the login page, a
+failed sign-in and an error page, and the absence of any other origin on the login page
+(`compat/browser_headers_test.go`); the definition's refusal of a weaker header set
+(`internal/realmdef`). **Not yet:** the automated accessibility check across the rendered surfaces,
+which also records any CSP violation a page raises in a real browser, and the timing comparison.
+Each follows as its own change, because each needs a tool this repository does not run yet (a
+headless browser, a timing harness).
 
 ### Accessibility
 
@@ -275,10 +309,12 @@ policy in the realm, a timing harness).
 
 ### Browser Security
 
-- Every unauthenticated page carries the full header set.
-- The Content-Security-Policy contains no `unsafe-inline` and no `unsafe-eval`.
+- Every page the realm renders carries the declared header set.
+- The Content-Security-Policy names no other origin, no `unsafe-eval`, and no `form-action`;
+  `'unsafe-inline'` is the recorded gap until template nonces.
 - No page loads a third-party origin.
 - The login page cannot be framed.
+- In a real browser, sign-in, the one-time code and the passkey pages raise no CSP violation.
 
 ### Upgrade
 
@@ -340,7 +376,7 @@ incompatibility during an upgrade.
 | Realizes | SAD-002 — hosted login portion of the Identity Experience |
 | Governed by | ADR-IAM-001 §5.7 — themes and supported UI extension points |
 | Conforms to | PAD-PLT-001 §6.6 — WCAG 2.2 AA, safe recovery, no unnecessary account enumeration |
-| Conforms to | STD-IAM-001 §3.9 — browser security controls |
+| Conforms to | STD-IAM-001 §3.9 (2.4.0) — browser security controls, the login pages' header set |
 | Conforms to | STD-GLB-FE-003 — security headers |
 | Conforms to | STD-GLB-FE-009 — accessibility and internationalization |
 | Related design | `TDD-identity-kernel-005` — the upgrade suite that re-verifies every override |

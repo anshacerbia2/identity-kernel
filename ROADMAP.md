@@ -548,8 +548,15 @@ rehearsal, which waits on Week 2's custody.
 parent and overrides no template: the kernel ships both locales, and the theme changes one message, so
 a disabled account no longer tells itself apart from an unknown one. The realm uses it, with `en` and
 `id`. The kernel image is built from the pinned digest plus the theme (TDD-005 1.4.0), and every CI job
-and the development server run it. **Not yet:** the automated accessibility check, the security
-headers, and the timing comparison of TDD-004 §Testing Strategy.
+and the development server run it. **Not yet:** the automated accessibility check and the timing
+comparison of TDD-004 §Testing Strategy.
+
+✅ The login pages' browser security headers (TDD-004 1.2.0, STD-IAM-001 2.4.0 §3.9). The realm
+declares them: no page can be framed, nothing loads from another origin, and HSTS, `nosniff` and
+`no-referrer` are sent. `realmdef` refuses a weaker set, and `compat/browser_headers_test.go` asserts
+them on the login page, a failed sign-in and an error page. Inline script stays allowed, a recorded
+gap that closes when the kernel ships template nonces; `form-action` is not set, because Chrome
+would block the redirect back to the client.
 
 ✅ The kernel's operational surfaces (TDD-005 1.5.0, ADR-IAM-001 §5.8). The image is built optimized
 with health and metrics, and a server starts it with `start --optimized`. The probes are Keycloak's
