@@ -562,7 +562,10 @@ sign-ins in each locale: the password and a one-time code typed from the keyboar
 acknowledged, and a passkey bound and used through the virtual authenticator. axe-core scans every
 surface reached against WCAG 2.2 A and AA in both colour schemes, and no page may raise a Content
 Security Policy violation, which proves the realm's policy against the stock templates. The
-`compat` workflow's `browser` job runs it.
+`compat` workflow's `browser` job runs it. It found two stock templates with fields that have no
+accessible name, so the theme copies `template.ftl` and `login-config-totp.ftl`, each with only the
+labels corrected (keycloak#51206 for the second). `cmd/theme-overrides` proves each copy against
+the image's themes jar in the `contract` job, and `-write` makes the copies again for a new release.
 
 ✅ The kernel's operational surfaces (TDD-005 1.5.0, ADR-IAM-001 §5.8). The image is built optimized
 with health and metrics, and a server starts it with `start --optimized`. The probes are Keycloak's
