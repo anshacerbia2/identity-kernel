@@ -28,6 +28,18 @@
           "new": "<label class=\"pf-v5-c-form__label\" for=\"userLabel\">\n                        <span class=\"pf-v5-c-form__label-text\">${msg(\"loginTotpDeviceName\")}</span>"
         }
       ]
+    },
+    {
+      "template": "login/select-authenticator.ftl",
+      "reason": "Each choice on the authenticator selection page is a div with role button and tabindex 0 that acts on click alone, so a person without a pointer reaches it by Tab and cannot activate it (WCAG 2.2 2.1.1). The WAI-ARIA button pattern activates a button on Enter and on Space; the copy adds that handler and nothing else. Found by the keyboard path in browser/; axe-core does not test activation.",
+      "upstream": "https://github.com/keycloak/keycloak/issues/45227 (closed by 6550d1b, which added the role and tabindex but no key handler)",
+      "remove_when": "the pinned release activates a choice from the keyboard; cmd/theme-overrides then fails because the stock text is gone",
+      "replacements": [
+        {
+          "old": "<div role=\"button\" class=\"${properties.kcSelectAuthListItemClass!}\" onclick=\"document.forms[${authenticationSelection?index}].requestSubmit()\" tabindex=\"0\">",
+          "new": "<div role=\"button\" class=\"${properties.kcSelectAuthListItemClass!}\" onclick=\"document.forms[${authenticationSelection?index}].requestSubmit()\" onkeydown=\"if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); document.forms[${authenticationSelection?index}].requestSubmit(); }\" tabindex=\"0\">"
+        }
+      ]
     }
   ]
 }
