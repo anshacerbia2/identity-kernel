@@ -10,9 +10,10 @@ import { expect, type Page } from "@playwright/test";
 export const base = required("KEYCLOAK_URL").replace(/\/+$/, "");
 export const realm = "scnehaux";
 
-// Never listened on: the browser's request for it is answered in the test, and the code it carries
-// is the proof that the sign-in completed.
-export const redirect = "http://127.0.0.1:9/callback";
+// Never resolved: a .invalid name never is (RFC 6761 §6.4). The browser's request for it is answered
+// in the test, and the code it carries is the proof that the sign-in completed. compat's
+// http://127.0.0.1:9 is not usable here: Chromium refuses port 9 before any route sees the request.
+export const redirect = "http://client.invalid/callback";
 
 function required(name: string): string {
   const value = process.env[name];
