@@ -170,6 +170,8 @@ func TestEachNotifiedEventIsToldApartInTheEventRecord(t *testing.T) {
 	//   - a binding is UPDATE_CREDENTIAL naming the credential type;
 	//   - a recovery code used is a LOGIN naming recovery-authn-codes with no required action, where
 	//     the LOGIN that ends enrolment names the same type and CONFIGURE_RECOVERY_AUTHN_CODES;
+	//   - a removal by the person is REMOVE_CREDENTIAL naming the credential type;
+	//   - a changed password is UPDATE_CREDENTIAL naming password, beside the legacy UPDATE_PASSWORD;
 	//   - a provider's removal is an admin ACTION, not a DELETE, on the person's credential.
 	for name, wants := range map[string][]string{
 		"a TOTP bound and recovery codes issued, at the first aal2 sign-in": {
@@ -181,7 +183,7 @@ func TestEachNotifiedEventIsToldApartInTheEventRecord(t *testing.T) {
 			"UPDATE_CREDENTIAL (auth_method=openid-connect, credential_type=webauthn,"},
 		"the TOTP removed by a provider through the Admin API": {"ACTION USER users/…/credentials/…"},
 		"a security key removed by the person through kc_action=delete_credential": {
-			"REMOVE_CREDENTIAL (auth_method=openid-connect, credential_type=webauthn"},
+			"REMOVE_CREDENTIAL (auth_method=openid-connect, credential_id=…, credential_type=webauthn,"},
 		"a password changed through kc_action=UPDATE_PASSWORD": {
 			"UPDATE_CREDENTIAL (auth_method=openid-connect, credential_type=password"},
 	} {
