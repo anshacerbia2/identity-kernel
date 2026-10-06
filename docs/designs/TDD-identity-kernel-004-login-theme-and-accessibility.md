@@ -3,7 +3,7 @@ doc_meta:
   id: TDD-identity-kernel-004
   title: Hosted Login Theme, Accessibility, and Disclosure Discipline
   owner: Identity Platform Team
-  version: 1.2.0
+  version: 1.3.0
   status: approved
   classification: restricted
   review_cycle_days: 90
@@ -274,14 +274,32 @@ invalidates caches without a version query string.
 
 ## Testing Strategy
 
-**As built (1.2.0):** the theme in both locales, the language attribute, and the enumeration
+**As built (1.3.0):** the theme in both locales, the language attribute, and the enumeration
 message and status (`compat/theme_test.go`); the browser security headers on the login page, a
 failed sign-in and an error page, and the absence of any other origin on the login page
 (`compat/browser_headers_test.go`); the definition's refusal of a weaker header set
-(`internal/realmdef`). **Not yet:** the automated accessibility check across the rendered surfaces,
-which also records any CSP violation a page raises in a real browser, and the timing comparison.
-Each follows as its own change, because each needs a tool this repository does not run yet (a
-headless browser, a timing harness).
+(`internal/realmdef`).
+
+In a real browser (`browser/`, the `compat` workflow's `browser` job), Playwright drives Chromium
+through one person's sign-ins in each locale (STD-GLB-FE-008 names Playwright for browser tests):
+
+- the password, typed from the keyboard after a refused one;
+- a one-time code enrolled, recovery codes acknowledged, then a code typed from the keyboard;
+- a passkey bound, then used, through Chromium's virtual authenticator, the way Keycloak's own
+  WebAuthn tests answer those pages.
+
+Every surface the sequence reaches is scanned by axe-core against the WCAG 2.2 A and AA rules, in
+the light and the dark scheme. STD-GLB-FE-009 names axe-core for automated scans. The surfaces are
+the login page, the failed sign-in, the one-time-code enrolment, the recovery codes, the one-time
+code, the passkey binding, the passkey sign-in and an error page. Each scan is a row in the job
+summary. No page may raise a Content Security Policy violation; that is the proof that the realm's
+policy allows what the stock templates run.
+
+**Not yet:**
+
+- the recovery-code sign-in page and the authenticator selection page;
+- the screen-reader pass, which is manual release evidence;
+- the timing comparison, which needs a timing harness.
 
 ### Accessibility
 

@@ -15,3 +15,8 @@ coverage
 *.swp
 .DS_Store
 Thumbs.db
+
+# The browser suite's dependencies and output.
+node_modules/
+test-results/
+playwright-report/

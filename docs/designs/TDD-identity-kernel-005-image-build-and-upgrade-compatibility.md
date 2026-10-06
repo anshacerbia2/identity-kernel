@@ -3,12 +3,12 @@ doc_meta:
   id: TDD-identity-kernel-005
   title: Image Build, Digest Pinning, and Upgrade Compatibility
   owner: Identity Platform Team
-  version: 1.5.0
+  version: 1.5.1
   status: approved
   classification: restricted
   review_cycle_days: 90
   created_date: 2026-08-11
-  last_reviewed: 2026-10-05
+  last_reviewed: 2026-10-06
   parent_sad: SAD-001
 ---
 
@@ -77,8 +77,8 @@ realm definition               rendered per environment, applied at deploy
 
 **As built (1.4.0).** `image/Dockerfile` builds the kernel image `FROM` the digest in
 `image/keycloak.ref`, passed as `KEYCLOAK_IMAGE`, and copies the login theme. No extension is packaged
-yet. Every run uses it: `compat`'s `contract` job builds it before starting Keycloak, the `upgrade`
-job builds it from both the candidate and the previous release, and `deploy/dev/compose.yaml` builds
+yet. Every run uses it: `compat`'s `contract` and `browser` jobs build it before starting Keycloak, the
+`upgrade` job builds it from both the candidate and the previous release, and `deploy/dev/compose.yaml` builds
 it, so the development server runs what the suite asserts. Signing, the bill of materials and the
 provenance attestation of §Supply Chain follow when the image is published to a registry; until then
 it is built where it runs, from a pinned digest and this repository's files.

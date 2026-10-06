@@ -112,6 +112,82 @@ jobs:
         if: failure()
         run: docker logs keycloak
 
+  # The hosted login pages in a real browser (TDD-identity-kernel-004 §Testing Strategy): axe-core
+  # over every surface a sign-in reaches, in both locales and both colour schemes; the password and
+  # the one-time code typed from the keyboard; a passkey through Chromium's virtual authenticator;
+  # and no Content Security Policy violation on any page (STD-IAM-001 §3.9). The same kernel image
+  # and realm as the contract job, on an instance of its own.
+  browser:
+    runs-on: ubuntu-latest
+
+    env:
+      KEYCLOAK_URL: http://localhost:8080
+      KEYCLOAK_ADMIN_USER: admin
+      KEYCLOAK_ADMIN_PASSWORD: admin
+
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+
+      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          check-latest: false
+
+      - uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4
+        with:
+          package_json_file: browser/package.json
+
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: "24"
+          cache: pnpm
+          cache-dependency-path: browser/pnpm-lock.yaml
+
+      # The lockfile is the dependency set; an install that would change it fails.
+      - name: install the suite
+        working-directory: browser
+        run: |
+          pnpm install --frozen-lockfile
+          pnpm exec playwright install --with-deps chromium
+
+      - name: start the kernel image
+        run: |
+          image="$(grep -v '^[[:space:]]*#' image/keycloak.ref | grep -v '^[[:space:]]*$' | head -n 1 | tr -d '[:space:]')"
+          docker build -q -f image/Dockerfile --build-arg KEYCLOAK_IMAGE="$image" -t identity-kernel:ci . >/dev/null
+          docker run -d --name keycloak -p 8080:8080 -p 9000:9000 \
+            -e KC_BOOTSTRAP_ADMIN_USERNAME="$KEYCLOAK_ADMIN_USER" \
+            -e KC_BOOTSTRAP_ADMIN_PASSWORD="$KEYCLOAK_ADMIN_PASSWORD" \
+            -e KC_DB=dev-file -e KC_HEALTH_ENABLED=true -e KC_METRICS_ENABLED=true \
+            identity-kernel:ci start-dev
+          for i in $(seq 1 90); do
+            if curl -fsS http://localhost:9000/health/ready >/dev/null 2>&1; then exit 0; fi
+            sleep 2
+          done
+          echo "::error::Keycloak did not report ready within 180s"
+          docker logs keycloak
+          exit 1
+
+      - name: apply the realm definition
+        run: go run ./cmd/realm-apply -environment ci -apply
+
+      - name: the login pages in a browser
+        working-directory: browser
+        run: |
+          {
+            echo "### The login pages under axe-core (WCAG 2.2 A and AA)"
+            echo
+            echo "| Surface | Locale | Scheme | Rules passed | Violations |"
+            echo "| :-- | :-- | :-- | --: | --: |"
+          } >> "$GITHUB_STEP_SUMMARY"
+          pnpm test
+
+      - name: the suite left the realm as the definition describes it
+        run: go run ./cmd/realm-apply -environment ci -require-in-sync
+
+      - name: Keycloak log
+        if: failure()
+        run: docker logs keycloak
+
   # The rollback boundary, determined by attempting the downgrade (TDD-identity-kernel-005
   # §Determining the Rollback Boundary). On PostgreSQL, the database every server runs: the
   # in-process database start-dev uses in the job above is not one anybody upgrades. The previous
