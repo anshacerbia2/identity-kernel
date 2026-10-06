@@ -562,9 +562,14 @@ sign-ins in each locale: the password and a one-time code typed from the keyboar
 acknowledged, and a passkey bound and used through the virtual authenticator. axe-core scans every
 surface reached against WCAG 2.2 A and AA in both colour schemes, and no page may raise a Content
 Security Policy violation, which proves the realm's policy against the stock templates. The
-`compat` workflow's `browser` job runs it. It found two stock templates with fields that have no
-accessible name, so the theme copies `template.ftl` and `login-config-totp.ftl`, each with only the
-labels corrected (keycloak#51206 for the second). `cmd/theme-overrides` proves each copy against
+`compat` workflow's `browser` job runs it, and it also uses a recovery code through "Try another
+way". It found three stock templates that fail WCAG, so the theme copies each with one fix and
+nothing else:
+
+- `template.ftl` and `login-config-totp.ftl` have fields with no accessible name; their labels are
+  corrected (keycloak#51206 for the second);
+- `select-authenticator.ftl` has choices that cannot be activated from the keyboard; a key handler is
+  added (keycloak#45227 left it out). `cmd/theme-overrides` proves each copy against
 the image's themes jar in the `contract` job, and `-write` makes the copies again for a new release.
 
 ✅ The sign-in's timing (TDD-004 1.4.0, STD-IAM-001 2.5.0 §3.1). `compat/timing_test.go` measures by
