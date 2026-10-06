@@ -1,0 +1,21 @@
+{
+  "_comment": "Every template the scnehaux theme copies from keycloak.v2 (TDD-identity-kernel-004 §Override Surface). Each copy is the stock template of the pinned release with exactly these replacements; cmd/theme-overrides proves it against the image, so a release that changes or fixes the template fails CI until the copy is re-made or removed.",
+  "overrides": [
+    {
+      "template": "login/login-config-totp.ftl",
+      "reason": "The two labels of the one-time-code enrolment page name an id no element has, so the code and device-name fields have no accessible name (WCAG 2.2 1.3.1, 4.1.2). Found by axe-core in browser/.",
+      "upstream": "https://github.com/keycloak/keycloak/issues/51206",
+      "remove_when": "the pinned release labels both fields; cmd/theme-overrides then fails because the stock text is gone",
+      "replacements": [
+        {
+          "old": "<label class=\"pf-v5-c-form__label\" for=\"form-vertical-name\">\n                        <span class=\"pf-v5-c-form__label-text\">${msg(\"authenticatorCode\")}</span>",
+          "new": "<label class=\"pf-v5-c-form__label\" for=\"totp\">\n                        <span class=\"pf-v5-c-form__label-text\">${msg(\"authenticatorCode\")}</span>"
+        },
+        {
+          "old": "<label class=\"pf-v5-c-form__label\" for=\"form-vertical-name\">\n                        <span class=\"pf-v5-c-form__label-text\">${msg(\"loginTotpDeviceName\")}</span>",
+          "new": "<label class=\"pf-v5-c-form__label\" for=\"userLabel\">\n                        <span class=\"pf-v5-c-form__label-text\">${msg(\"loginTotpDeviceName\")}</span>"
+        }
+      ]
+    }
+  ]
+}

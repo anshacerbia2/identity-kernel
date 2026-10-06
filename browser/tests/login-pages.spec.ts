@@ -156,6 +156,7 @@ for (const locale of ["en", "id"]) {
         "recovery-codes",
       ]);
 
+      await page.waitForTimeout(2_000); // max_age is measured in whole seconds
       const binding = await sequence.signIn({ acr_values: "aal2", max_age: "0", kc_action: "webauthn-register" });
       expect(binding, "a passkey is bound after an aal2 sign-in").toContain("otp");
       expect(binding.at(-1), "a passkey is bound after an aal2 sign-in").toBe("webauthn-register");

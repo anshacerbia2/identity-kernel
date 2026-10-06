@@ -78,24 +78,39 @@ message bundle. Each override is listed in this design with the reason it exists
 the upgrade suite knows what to re-verify and a future engineer knows what to try to
 remove.
 
-**As built (1.1.0): no template is overridden.** The theme `scnehaux` names `keycloak.v2` as
-its parent and carries message bundles only (`themes/scnehaux/login/`), as ADR-IAM-001 §5.7
-decides. Keycloak documents the mechanism: "When extending a theme you can override individual
-resources (templates, stylesheets, etc.)" (ADR-IAM-001 [R33]). Version 1.0.0 planned five
-copied templates. None is copied until a test shows the stock template cannot meet the
-requirement it was planned for:
+**As built (1.3.0): one template is overridden, because a test showed the stock one fails.** The
+theme `scnehaux` names `keycloak.v2` as its parent, as ADR-IAM-001 §5.7 decides. Keycloak documents
+the mechanism: "When extending a theme you can override individual resources (templates,
+stylesheets, etc.)" (ADR-IAM-001 [R33]).
+
+| Copied template | Its reason | Upstream | Removed when |
+| :-- | :-- | :-- | :-- |
+| `login-config-totp.ftl` | Both labels on the one-time-code enrolment page point at `form-vertical-name`, an id no element has. The code field and the device-name field are left with no accessible name (WCAG 2.2 1.3.1, 4.1.2). axe-core reports it as `label`, critical, in `browser/`. The copy changes the two `for` attributes and nothing else | keycloak#51206, open | The pinned release labels both fields |
+
+A copy is declared in `themes/overrides.json` as the stock template plus a list of exact
+replacements. `cmd/theme-overrides`, run by the `contract` job against the themes jar in the image,
+rebuilds the copy from the release's own template and requires the result to equal the file.
+
+- **A release that changes the template around a replacement fails.** The copy is then made again
+  from the new template.
+- **A release that fixes the bug fails.** The stock text is gone, and that failure is the signal to
+  remove the copy.
+- **A copy cannot carry a change the manifest does not declare.**
+
+Version 1.0.0 planned five copied templates. None was copied until a test showed the stock template
+cannot meet the requirement it was planned for:
 
 | Planned override | Its reason | Status |
 | :-- | :-- | :-- |
 | `template.ftl` | language attribute | Met by the stock template, which writes `lang="${lang}"`; asserted in both locales |
-| `template.ftl` | skip link | To be judged by the accessibility check |
+| `template.ftl` | skip link | axe-core reports no `bypass` or landmark finding on any surface it scans |
 | `login.ftl` | unified identifier field, provider ordering | `loginWithEmailAllowed` gives one identifier field; there is no provider |
-| `login-otp.ftl` | challenge copy, input semantics | Copy is a message bundle's; semantics to be judged by the accessibility check |
+| `login-otp.ftl` | challenge copy, input semantics | Copy is a message bundle's; axe-core reports no finding on the one-time-code page |
 | `login-reset-password.ftl` | enumeration-safe confirmation | Reset is not offered (`resetPasswordAllowed` false); recovery is a recovery code (ADR-IAM-005) |
 | `error.ftl` | uniform error presentation | Wording is a message bundle's |
 
-Copying a template now would freeze it at 26.7.5, and a protection the kernel adds to it
-later would not reach this page.
+None of the planned overrides is copied. Copying one would freeze it at 26.7.5, and a protection the
+kernel added to it later would not reach this page.
 
 ### Accessibility
 
@@ -356,10 +371,10 @@ The theme ships everything it loads. A font CDN on the login page is a third par
 can execute in the origin where credentials are typed, and no styling benefit justifies
 that.
 
-The five overridden templates are a security surface as well as an upgrade liability. A
-stock template that changes to add a protection will not reach a page that overrides it,
-which is why each override carries a stated reason and is re-tested for removal at every
-major upgrade.
+Every overridden template is a security surface as well as an upgrade liability. A stock
+template that changes to add a protection will not reach a page that overrides it. That is
+why each override carries a stated reason, and why `cmd/theme-overrides` fails on any release
+that changes the stock template the copy was made from.
 
 ## Performance Notes
 

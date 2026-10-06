@@ -78,6 +78,15 @@ jobs:
             -e KC_DB=dev-file -e KC_HEALTH_ENABLED=true -e KC_METRICS_ENABLED=true \
             identity-kernel:ci start-dev
 
+      # Every template the theme copies is the release's own with the replacements
+      # themes/overrides.json declares (TDD-identity-kernel-004 §Override Surface), read from the
+      # image the suite runs. A release that changes or fixes a copied template fails here.
+      - name: the theme's copied templates match the release
+        run: |
+          docker run --rm --entrypoint /bin/bash identity-kernel:ci \
+            -c 'cat /opt/keycloak/lib/lib/main/org.keycloak.keycloak-themes-*.jar' > "$RUNNER_TEMP/themes.jar"
+          go run ./cmd/theme-overrides -jar "$RUNNER_TEMP/themes.jar"
+
       - name: wait for Keycloak to be ready
         run: |
           for i in $(seq 1 90); do
