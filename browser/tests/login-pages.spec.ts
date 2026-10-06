@@ -1,16 +1,24 @@
 // The hosted login pages in a real browser (TDD-identity-kernel-004 §Testing Strategy).
 //
 // In each locale, one person signs in the way a person does: the password typed from the keyboard,
-// a one-time code enrolled and then typed, recovery codes acknowledged, a passkey registered and
-// then used, through Chromium's virtual authenticator, as Keycloak's own WebAuthn tests do. Every
+// a one-time code enrolled and then typed, recovery codes acknowledged and one used through "Try
+// another way", a passkey registered and then used, through Chromium's virtual authenticator, as Keycloak's own WebAuthn tests do. Every
 // surface the sequence reaches is scanned by axe-core in both colour schemes, and no page may raise
 // a Content Security Policy violation: the realm's policy allows what the stock templates run, and
 // this is where that is proven (STD-IAM-001 §3.9).
-import { expect, test, type Page } from "@playwright/test";
+import { expect, test, type Locator, type Page } from "@playwright/test";
 
 import { authorizationURL, callbackListener, Codes, Fixtures, recordViolations, scan, type Person } from "./kernel";
 
-type Surface = "password" | "configure-totp" | "recovery-codes" | "otp" | "webauthn-register" | "webauthn";
+type Surface =
+  | "password"
+  | "configure-totp"
+  | "recovery-codes"
+  | "otp"
+  | "select-authenticator"
+  | "recovery-code"
+  | "webauthn-register"
+  | "webauthn";
 
 // surface names the page by what it asks for, as compat/levels_test.go does.
 async function surface(page: Page, redirect: string): Promise<Surface | "callback"> {
@@ -19,6 +27,8 @@ async function surface(page: Page, redirect: string): Promise<Surface | "callbac
   if (await present("#registerWebAuthn")) return "webauthn-register";
   if (await present("#authenticateWebAuthnButton")) return "webauthn";
   if (await present("#kcRecoveryCodesConfirmationCheck")) return "recovery-codes";
+  if (await present("input[name=authenticationExecution]")) return "select-authenticator";
+  if (await present("#recoveryCodeInput")) return "recovery-code";
   if (await present("#totpSecret")) return "configure-totp";
   if (await present("input[name=otp]")) return "otp";
   if (await present("#password")) return "password";
@@ -27,18 +37,18 @@ async function surface(page: Page, redirect: string): Promise<Surface | "callbac
 
 // tabTo moves the focus to the element with the keyboard alone, as a person who cannot use a
 // pointer reaches it.
-async function tabTo(page: Page, selector: string): Promise<void> {
-  const target = page.locator(selector);
+async function tabTo(page: Page, element: string | Locator): Promise<void> {
+  const target = typeof element === "string" ? page.locator(element) : element;
   for (let presses = 0; presses < 20; presses++) {
     if (await target.evaluate((element) => element === document.activeElement)) return;
     await page.keyboard.press("Tab");
   }
-  throw new Error(`${selector} is not reachable by Tab`);
+  throw new Error(`${target} is not reachable by Tab`);
 }
 
 // submits runs an action that ends in a navigation, and waits for the page it loads.
 async function submits(page: Page, action: () => Promise<void>): Promise<void> {
-  const loaded = page.waitForEvent("load");
+  const loaded = page.waitForEvent("load", { timeout: 15_000 });
   await action();
   await loaded;
 }
@@ -47,6 +57,9 @@ class Sequence {
   readonly seen: Surface[] = [];
   private scanned = new Set<Surface>();
   codes?: Codes;
+  // recover, when set, leaves the one-time-code page through "Try another way" for a recovery code.
+  recover = false;
+  private recoveryCodes: string[] = [];
 
   constructor(
     private page: Page,
@@ -98,12 +111,34 @@ class Sequence {
         return submits(page, () => page.locator("#saveTOTPBtn").click());
       }
       case "recovery-codes":
+        this.recoveryCodes = await page.locator("#kc-recovery-codes-list li").allInnerTexts();
         await page.locator("#kcRecoveryCodesConfirmationCheck").check();
         return submits(page, () => page.locator("#saveRecoveryAuthnCodesBtn").click());
       case "otp": {
+        if (this.recover) {
+          await tabTo(page, "#try-another-way");
+          return submits(page, () => page.keyboard.press("Enter"));
+        }
         if (!this.codes) throw new Error("the kernel asked for a code before one was enrolled");
         const code = await this.codes.next(page);
         await tabTo(page, "input[name=otp]");
+        await page.keyboard.type(code);
+        return submits(page, () => page.keyboard.press("Enter"));
+      }
+      case "select-authenticator": {
+        // Each choice is a div with role button; a person without a pointer reaches it by Tab and
+        // activates it with Enter.
+        const recovery = page.locator("div[role=button]", { hasText: /Recovery|Pemulihan/ });
+        await tabTo(page, recovery);
+        return submits(page, () => page.keyboard.press("Enter"));
+      }
+      case "recovery-code": {
+        const label = await page.locator("label[for=recoveryCodeInput]").innerText();
+        const number = Number(/#\s*(\d+)/.exec(label)?.[1]);
+        const code = this.recoveryCodes[number - 1];
+        if (!code)
+          throw new Error(`the kernel asked for recovery code ${label} of the ${this.recoveryCodes.length} held`);
+        await tabTo(page, "#recoveryCodeInput");
         await page.keyboard.type(code);
         return submits(page, () => page.keyboard.press("Enter"));
       }
@@ -156,7 +191,14 @@ for (const locale of ["en", "id"]) {
         "recovery-codes",
       ]);
 
+      // A recovery code in place of the one-time code, through "Try another way" (ADR-IAM-005 §5.2).
       await page.waitForTimeout(2_000); // max_age is measured in whole seconds
+      sequence.recover = true;
+      const recovery = await sequence.signIn({ acr_values: "aal2", max_age: "0" });
+      sequence.recover = false;
+      expect(recovery, "a recovery code at aal2").toEqual(["password", "otp", "select-authenticator", "recovery-code"]);
+
+      await page.waitForTimeout(2_000);
       const binding = await sequence.signIn({ acr_values: "aal2", max_age: "0", kc_action: "webauthn-register" });
       expect(binding, "a passkey is bound after an aal2 sign-in").toContain("otp");
       expect(binding.at(-1), "a passkey is bound after an aal2 sign-in").toBe("webauthn-register");
