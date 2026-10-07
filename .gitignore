@@ -5,6 +5,10 @@
 keys/
 *.pem
 
+# A server's own compose changes, copied from deploy/dev/compose.override.example.yaml. Never committed.
+deploy/dev/compose.override.yaml
+deploy/dev/compose.local.yaml
+
 # Build and test output.
 *.out
 coverage
