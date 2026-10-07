@@ -244,7 +244,13 @@ func (b *browser) signIn(extra url.Values) map[string]any {
 			}
 			b.t.Fatalf("an unexpected page after pages %v, saying %q, with inputs %v", b.pages, pageMessage(page), names)
 		}
-		request, _ = http.NewRequest(http.MethodPost, html.UnescapeString(action[1]), strings.NewReader(form.Encode()))
+		// Most pages post to an absolute URL; the consent page's url.oauthAction is a path. Either
+		// resolves against the server, as a browser resolves it against the page.
+		target, err := base.Parse(html.UnescapeString(action[1]))
+		if err != nil {
+			b.t.Fatalf("the page's form action %q: %v", action[1], err)
+		}
+		request, _ = http.NewRequest(http.MethodPost, target.String(), strings.NewReader(form.Encode()))
 		request.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 		response, page = b.send(request)
 	}
