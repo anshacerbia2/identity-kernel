@@ -6,11 +6,14 @@ package compat
 // optional, so a token carries a form only when the authorization request names one. A Tenant
 // sign-in asks for scnehaux-privileged organization:<tenant_id> and gets that Tenant in the access
 // token and the ID token, where the client checks it on the callback. A provider sign-in asks for
-// scnehaux-provider and gets no Tenant in either. A sign-in naming neither form gets no principal_id,
-// which every resource refuses.
+// scnehaux-provider and gets no Tenant in either. A refresh keeps each form, in the ID token too,
+// which the BFF holds to the Tenant its session was issued for. A sign-in naming neither form gets
+// no principal_id, which every resource refuses.
 
 import (
+	"encoding/json"
 	"net/http"
+	"net/url"
 	"slices"
 	"strings"
 	"testing"
@@ -64,6 +67,19 @@ func TestOneClientObtainsEachPrivilegedFormPerSignIn(t *testing.T) {
 		t.Errorf("the Tenant sign-in's access token has scope %v, want scnehaux-privileged and not scnehaux-provider", scopes)
 	}
 
+	// A refresh keeps the Tenant, in the ID token as well as the access token (ADR-IAM-006 §5.2).
+	refreshed := secretRefresh(t, a, caller, inTenant)
+	for name, token := range map[string]string{"access": refreshed.AccessToken, "ID": refreshed.IDToken} {
+		if token == "" {
+			t.Errorf("the Tenant refresh returned no %s token", name)
+			continue
+		}
+		if got, _ := jwtClaims(t, token)["tenant_id"].(string); got != tenant {
+			t.Errorf("the Tenant refresh's %s token carries tenant_id=%v, want %s", name, jwtClaims(t, token)["tenant_id"],
+				tenant)
+		}
+	}
+
 	// The provider form: no Tenant in either token.
 	provider := authorizationCodeWithScope(t, a, caller, who, "openid scnehaux-provider")
 	access, id = jwtClaims(t, provider.AccessToken), jwtClaims(t, provider.IDToken)
@@ -81,6 +97,15 @@ func TestOneClientObtainsEachPrivilegedFormPerSignIn(t *testing.T) {
 	}
 	if scopes := scopeNames(access); !slices.Contains(scopes, "scnehaux-provider") || slices.Contains(scopes, "scnehaux-privileged") {
 		t.Errorf("the provider sign-in's access token has scope %v, want scnehaux-provider and not scnehaux-privileged", scopes)
+	}
+	refreshed = secretRefresh(t, a, caller, provider)
+	for name, token := range map[string]string{"access": refreshed.AccessToken, "ID": refreshed.IDToken} {
+		if token == "" {
+			continue
+		}
+		if value, present := jwtClaims(t, token)["tenant_id"]; present {
+			t.Errorf("the provider refresh's %s token carries tenant_id=%v", name, value)
+		}
 	}
 
 	// Neither form: no principal_id, so no resource accepts the token.
@@ -127,6 +152,20 @@ func perSignInCaller(t *testing.T, a *admin) client {
 		attachOptionalScope(t, a, c.uuid, scope)
 	}
 	return c
+}
+
+// secretRefresh redeems a sign-in's refresh token as the confidential client, asking for no scope,
+// as the BFF does.
+func secretRefresh(t *testing.T, a *admin, c client, from issuedTokens) issuedTokens {
+	t.Helper()
+	var tokens issuedTokens
+	body := postForm(t, a, a.realmURL("/token"), url.Values{
+		"grant_type": {"refresh_token"}, "client_id": {c.id}, "client_secret": {c.secret},
+		"refresh_token": {from.RefreshToken}})
+	if err := json.Unmarshal(body, &tokens); err != nil {
+		t.Fatalf("reading the refresh response: %v", err)
+	}
+	return tokens
 }
 
 // scopeNames splits an access token's scope claim.

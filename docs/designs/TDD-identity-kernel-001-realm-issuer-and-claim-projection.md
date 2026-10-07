@@ -739,6 +739,8 @@ compatibility suite rather than left to operational discipline.
   - `scnehaux-privileged organization:<tenant_id>` carries that `tenant_id` in the access token and
     the ID token, where the client checks it.
   - `scnehaux-provider` carries no `tenant_id` in either.
+  - A refresh keeps each form, in the ID token as in the access token, which the BFF holds to the
+    Tenant its session was issued for.
   - A sign-in naming neither form carries no `principal_id`.
 - A workload token carries `principal_id`, `subject_type=workload`, and
   `workload_owner`.

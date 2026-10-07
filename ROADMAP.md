@@ -538,6 +538,7 @@ obtain either privileged form, chosen by the request. `compat/per_sign_in_test.g
 both form scopes and `organization` as optional scopes. A request for
 `scnehaux-privileged organization:<tenant_id>` gets that Tenant in the access and ID tokens. A
 request for `scnehaux-provider` gets none, and a request naming neither gets no `principal_id`.
+A refresh keeps each form, in the ID token as well as the access token.
 Organization Experience signs in this way.
 
 ## Week 3 · Event listener
