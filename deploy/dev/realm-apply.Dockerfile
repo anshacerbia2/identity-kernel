@@ -18,8 +18,8 @@ COPY internal ./internal
 RUN CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" -o /out/realm-apply ./cmd/realm-apply && \
     CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" -o /out/client-key ./cmd/client-key
 
-# alpine/git:2.54.0
-FROM alpine/git@sha256:ae0f6f4bce38d2b8c40becc0d6241a08d9f57186ea03029de2189a2b5e722d94
+# alpine/git:2.54.0, the rebuild of 2026-10-04, resolved 2026-10-07
+FROM alpine/git@sha256:a4bb51f1a3553df194ce679fc1db721d8bfba2046fa1a88fe9d4ac551ffbce25
 COPY --from=build /out/realm-apply /usr/local/bin/realm-apply
 # client-key rides in the same image, so a server makes and installs client keys with the Docker
 # it already has: no Go and no openssl on the host (new-client-key.sh, set-client-key.sh).

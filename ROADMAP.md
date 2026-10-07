@@ -46,6 +46,12 @@ and context switch mechanism — are exercised here but decided in `identity-con
 - ⏳ Digest-pinned Keycloak running from a reproducible image build — **the upstream image is
   pinned by digest** (`image/keycloak.ref`, 26.7.5 since 2026-10-01; 26.7.4 before) and runs in CI; there is no image of our own
   yet, because there are no extensions to package. The reproducible build lands with the first one
+- ✅ Every shipped image scanned for vulnerabilities (STD-GLB-009 1.4.0 §Container Images) — the
+  `image-scan` workflow builds the kernel image and realm-apply's, and scans them and every
+  digest-pinned image `deploy/dev/compose.yaml` names, on every change and daily, with Grype pinned
+  by digest (`scripts/image-scan.sh`). It fails on a High or Critical vulnerability with a fix. The
+  pinned Keycloak 26.7.5 had none; the first scan moved the Caddy and alpine/git pins. A finding in
+  Keycloak is fixed by moving `image/keycloak.ref`, through the compatibility suite
 - ✅ Realm definition applied and diffed by the pipeline — `cmd/realm-apply`, which the development
   server runs as a one-shot job on every `docker compose up`, so a pulled change reaches the realm without
   a remembered command, and console drift fails the next up instead of being overwritten. CI applies the realm
