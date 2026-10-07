@@ -1,0 +1,19 @@
+# What a server MAY add in its own uncommitted file (STD-GLB-009 §Development Server Deployment,
+# rule 4). README.md, A local override, says where the copy goes:
+#
+#   behind a DNS name   compose.override.yaml, which compose reads beside compose.yaml by itself
+#   tunnel mode         compose.local.yaml, listed last in COMPOSE_FILE in .env
+#
+# Subnet pins, for a host whose own networks (a VPN pool, the LAN, a Kubernetes CNI) overlap the
+# ranges Docker would pick. The values are the development server's; pick ranges no network on your
+# host uses. A pin applies to a network created after it, so set it before the first start.
+#
+# networks:
+#   internal:
+#     ipam:
+#       config:
+#         - subnet: 172.28.240.0/24
+#   api:
+#     ipam:
+#       config:
+#         - subnet: 172.28.241.0/24
