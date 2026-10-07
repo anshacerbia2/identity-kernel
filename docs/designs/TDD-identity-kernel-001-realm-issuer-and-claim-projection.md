@@ -3,12 +3,12 @@ doc_meta:
   id: TDD-identity-kernel-001
   title: Realm Topology, Issuer Identity, and Token Claim Projection
   owner: Identity Platform Team
-  version: 1.15.0
+  version: 1.16.0
   status: approved
   classification: restricted
   review_cycle_days: 90
   created_date: 2026-08-11
-  last_reviewed: 2026-10-05
+  last_reviewed: 2026-10-07
   parent_sad: SAD-001
 ---
 
@@ -733,6 +733,13 @@ compatibility suite rather than left to operational discipline.
   `scnehaux-privileged` and the optional `organization` scope, carries `principal_id`,
   `subject_type`, `acr`, `auth_time` and the `tenant_id` asked for, and no `provider_scope`. The
   same client's sign-in asking for no Tenant gets no `tenant_id` (`compat/privileged_test.go`).
+- **The per-sign-in form (1.16.0, `ADR-IAM-008`):** one client holding `scnehaux-provider`,
+  `scnehaux-privileged` and `organization`, all optional, gets each form from the request alone.
+  `compat/per_sign_in_test.go` asserts three sign-ins:
+  - `scnehaux-privileged organization:<tenant_id>` carries that `tenant_id` in the access token and
+    the ID token, where the client checks it.
+  - `scnehaux-provider` carries no `tenant_id` in either.
+  - A sign-in naming neither form carries no `principal_id`.
 - A workload token carries `principal_id`, `subject_type=workload`, and
   `workload_owner`.
 - Every surface the adopted configuration claims to cover carries the profile's claim

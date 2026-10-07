@@ -533,6 +533,13 @@ signs in with Authorization Code and PKCE, asks for `organization:<tenant_id>`, 
 `principal_id`, `subject_type`, `acr`, `auth_time` and that `tenant_id`, and no `tenant_id` without
 the request.
 
+The per-sign-in form (ADR-IAM-008, TDD-identity-kernel-001 1.16.0) lets one confidential client
+obtain either privileged form, chosen by the request. `compat/per_sign_in_test.go` gives one client
+both form scopes and `organization` as optional scopes. A request for
+`scnehaux-privileged organization:<tenant_id>` gets that Tenant in the access and ID tokens. A
+request for `scnehaux-provider` gets none, and a request naming neither gets no `principal_id`.
+Organization Experience signs in this way.
+
 ## Week 3 · Event listener
 
 - Minimal listener capturing user, admin, and security events
