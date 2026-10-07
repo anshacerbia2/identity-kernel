@@ -59,6 +59,8 @@ type browser struct {
 	recover bool
 	// newPassword, when set, answers the update-password page; the sign-in after it uses it.
 	newPassword string
+	// refresh is the refresh token of the last sign-in.
+	refresh string
 }
 
 var (
@@ -197,6 +199,10 @@ func (b *browser) signIn(extra url.Values) map[string]any {
 			}
 			form.Set("password-new", b.newPassword)
 			form.Set("password-confirm", b.newPassword)
+		case namedInput("accept").MatchString(page) && strings.Contains(page, `id="kc-oauth"`):
+			// The consent page (login-oauth-grant.ftl): "Yes" grants the client what it asked for.
+			b.pages = append(b.pages, "consent")
+			form.Set("accept", "")
 		case namedInput("accept").MatchString(page) && strings.Contains(page, "kc-delete-text"):
 			b.pages = append(b.pages, "delete-credential")
 			form.Set("accept", "")
@@ -238,7 +244,13 @@ func (b *browser) signIn(extra url.Values) map[string]any {
 			}
 			b.t.Fatalf("an unexpected page after pages %v, saying %q, with inputs %v", b.pages, pageMessage(page), names)
 		}
-		request, _ = http.NewRequest(http.MethodPost, html.UnescapeString(action[1]), strings.NewReader(form.Encode()))
+		// Most pages post to an absolute URL; the consent page's url.oauthAction is a path. Either
+		// resolves against the server, as a browser resolves it against the page.
+		target, err := base.Parse(html.UnescapeString(action[1]))
+		if err != nil {
+			b.t.Fatalf("the page's form action %q: %v", action[1], err)
+		}
+		request, _ = http.NewRequest(http.MethodPost, target.String(), strings.NewReader(form.Encode()))
 		request.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 		response, page = b.send(request)
 	}
@@ -256,6 +268,7 @@ func (b *browser) exchange(code, verifier string) map[string]any {
 	if err := json.Unmarshal(body, &tokens); err != nil || tokens.AccessToken == "" {
 		b.t.Fatalf("the code exchange returned no tokens: %s", body)
 	}
+	b.refresh = tokens.RefreshToken
 	claims := jwtClaims(b.t, tokens.AccessToken)
 	if tokens.IDToken != "" {
 		claims["id_token_acr"] = jwtClaims(b.t, tokens.IDToken)["acr"]
