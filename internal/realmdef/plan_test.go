@@ -613,3 +613,37 @@ func TestThePermanentLockoutComesByTheHundredthFailure(t *testing.T) {
 		t.Errorf("the failure reset time %v is not above the longest wait %v", reset, wait)
 	}
 }
+
+// A realm applied before a policy rule existed must still be the baseline drift is judged against.
+// The development server's realm was applied at a revision before the event retention floor, and
+// Parse refused that revision, so realm-apply refused every later apply (2026-10-07).
+func TestABaselineIsHeldToStructureNotTodaysPolicy(t *testing.T) {
+	files := files(t)
+	files["scnehaux.json"] = []byte(`{"realm":"scnehaux"}`)
+	if _, err := Parse(files); err == nil {
+		t.Fatal("Parse accepted a definition without the event retention floor; a definition to apply must meet it")
+	}
+	baseline, err := ParseBaseline(files)
+	if err != nil {
+		t.Fatalf("ParseBaseline refused a revision for a policy added after it was applied: %v", err)
+	}
+	if baseline.Name() != "scnehaux" {
+		t.Errorf("the baseline names realm %q", baseline.Name())
+	}
+}
+
+// What drift is computed on still binds the baseline: a revision that forged the applied revision,
+// or named one object twice, cannot be the baseline either.
+func TestABaselineIsStillHeldToItsStructure(t *testing.T) {
+	for name, realm := range map[string]string{
+		"no realm name":          `{}`,
+		"the applied revision":   `{"realm":"scnehaux","attributes":{"` + AttrRevision + `":"abc"}}`,
+		"a non-string attribute": `{"realm":"scnehaux","attributes":{"adminEventsExpiration":604800}}`,
+	} {
+		files := files(t)
+		files["scnehaux.json"] = []byte(realm)
+		if _, err := ParseBaseline(files); err == nil {
+			t.Errorf("%s: ParseBaseline accepted it", name)
+		}
+	}
+}
