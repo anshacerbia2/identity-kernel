@@ -116,15 +116,18 @@ func TestAConsentIsListedAndWithdrawnThroughTheAdminAPI(t *testing.T) {
 	if refreshes(granted) || refreshes(again.refresh) {
 		t.Error("a refresh token issued on the withdrawn consent still refreshes")
 	}
+	// A second withdrawal, before anything is granted again, answers 404 ("Consent nor offline token
+	// not found"): recorded, not required. identity-control treats a consent already gone as withdrawn
+	// either way.
+	if _, err := a.call(http.MethodDelete, consentsPath+"/"+url.PathEscape(c.id), nil, http.StatusNotFound); err != nil {
+		t.Logf("a second withdrawal did not answer 404: %v", err)
+	} else {
+		t.Log("a second withdrawal answered 404")
+	}
 	after := newBrowser(t, a, c, p)
 	after.signIn(nil)
 	if !slices.Contains(after.pages, "consent") {
 		t.Errorf("the sign-in after the withdrawal showed pages %v, with no consent page", after.pages)
 	}
 
-	// A second withdrawal answers 404 ("Consent nor offline token not found"): recorded, not required.
-	// identity-control treats a consent already gone as withdrawn either way.
-	if _, err := a.call(http.MethodDelete, consentsPath+"/"+url.PathEscape(c.id), nil, http.StatusNotFound); err != nil {
-		t.Logf("a second withdrawal did not answer 404: %v", err)
-	}
 }
