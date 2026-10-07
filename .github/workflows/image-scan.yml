@@ -1,0 +1,36 @@
+name: image-scan
+
+# STD-GLB-009 1.4.0 §Container Images: every image this repository ships or runs is scanned on every
+# change and daily, because a new advisory changes an unchanged image's findings. The gate fails on
+# a High or Critical vulnerability with a fix; scripts/image-scan.sh says how. A finding in Keycloak
+# itself is fixed by moving image/keycloak.ref to a release that fixes it, through the compatibility
+# suite like every upgrade.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  schedule:
+    - cron: "11 5 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  scan:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+
+      # The kernel image the server runs (image/Dockerfile on the pinned Keycloak, as compose builds
+      # it) and realm-apply's. The digest-pinned images compose names, Postgres and Caddy, are
+      # scanned from their registry by the script.
+      - name: build the shipped images
+        run: |
+          image="$(grep -v '^[[:space:]]*#' image/keycloak.ref | grep -v '^[[:space:]]*$' | head -n 1 | tr -d '[:space:]')"
+          docker build -f image/Dockerfile --build-arg KEYCLOAK_IMAGE="$image" -t scan/identity-kernel .
+          docker build -f deploy/dev/realm-apply.Dockerfile -t scan/realm-apply .
+
+      - name: scan
+        run: scripts/image-scan.sh scan/identity-kernel scan/realm-apply
