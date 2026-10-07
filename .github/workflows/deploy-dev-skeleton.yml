@@ -1,0 +1,25 @@
+name: deploy-dev skeleton
+
+# STD-GLB-009 §Development Server Deployment: deploy/dev follows the service skeleton. Its own
+# workflow rather than a job in another file: a reusable workflow that cannot be resolved fails the
+# whole calling file, and the other jobs must not depend on it.
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  deploy-dev-skeleton:
+    uses: anshacerbia2/scnehaux-architecture/.github/workflows/deploy-dev-skeleton.yml@main
+    with:
+      kind: service
+      # The names in use before the standard, stated in deploy/dev/README.md: renaming the project
+      # would leave Keycloak on an empty database, and the other stacks join the network by name.
+      # Caddy publishes 80 and 443 in DNS-name mode.
+      project_name: scnehaux-identity-dev
+      api_network: scnehaux-identity-api
+      public_ports: "80 443"
