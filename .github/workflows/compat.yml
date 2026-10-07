@@ -349,7 +349,7 @@ jobs:
             echo "| realm in sync after the upgrade | yes |"
             echo "| rollback_boundary | $BOUNDARY |"
             echo "| rollback_rehearsed | yes: the previous release started on the migrated database |"
-            echo "| extension_versions | none: no extension is packaged yet; the login theme overrides no template |"
+            echo "| extension_versions | no extension is packaged yet; the login theme is git tree \`$(git rev-parse HEAD:themes/scnehaux)\` |"
             echo "| evaluated_at | $(date -u +%Y-%m-%dT%H:%M:%SZ) |"
           } | tee -a "$GITHUB_STEP_SUMMARY"
           # Printed as well as summarized: the log is what a run id retrieves later, and the

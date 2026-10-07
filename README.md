@@ -91,7 +91,9 @@ Realm configuration, extensions, theme, image
 | `themes/scnehaux/` | Hosted login, MFA, and recovery theme |
 | `image/` | Container build, digest pinning, extension packaging |
 | `compat/` | Upgrade compatibility suite |
+| `scripts/` | CI checks of the images: the vulnerability scan, and the two-build comparison with its bill of materials |
 | `docs/designs/` | Technical Design Documents |
+| `docs/runbooks/` | Operating procedures the production gate requires |
 
 ## Designs
 

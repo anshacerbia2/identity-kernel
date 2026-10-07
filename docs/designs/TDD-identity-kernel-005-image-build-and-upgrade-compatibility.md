@@ -287,7 +287,8 @@ about identity.
 include CVE-2026-93999, a token-exchange refresh that kept issuing tokens for a disabled
 audience client, and which carries one data changeset (`26.7.0-backfill-group-org-id`, a
 backfill of `KEYCLOAK_GROUP.ORG_ID` for Organizations). There is no theme or extension to
-defer yet. Its release record is in ROADMAP.md.
+defer yet. Its release record is the `upgrade` job's summary, which every run writes again; main run
+37683329327 records `reversible`, with that one changeset applied.
 
 ## Configuration
 
@@ -331,9 +332,9 @@ requirements.
 **Why the digests differ.** A reproducible build is one where "any party can recreate bit-by-bit
 identical copies of all specified artifacts" [R3]. Two of the kernel's files are not: the jars that
 Keycloak's `kc.sh build` writes, `lib/quarkus/generated-bytecode.jar` and
-`lib/quarkus/transformed-bytecode.jar`. CI measured 26.7.5 on 2026-10-07:
+`lib/quarkus/transformed-bytecode.jar`. Measured on 26.7.5 on 2026-10-07, `image-build` run 37686287003:
 
-- **Generated class names.** About 130 classes differ. Hibernate's proxies carry ByteBuddy field names
+- **Generated class names.** About 130 classes differ (132 in that run). Hibernate's proxies carry ByteBuddy field names
   such as `cachedValue$LDoFC2eQ$…`. ByteBuddy's default factory "uses a random suffix for accessors"
   [R4]. Quarkus also numbers its recorded proxies (`proxykey108`) in the order its build steps finish.
 - **Dates.** Every jar entry carries the build's clock, and `keycloak-persisted.properties` begins with
@@ -356,6 +357,9 @@ default, GitHub "stores build logs and artifacts for 90 days" [R5]. That is enou
 retention. When the image is published to a registry, the bill of materials travels with the image,
 as §Supply Chain requires. CycloneDX 1.7 is ECMA-424 2nd edition [R6], the format ADR-UIP-SEC-001
 chose for the UI Platform's packages.
+
+The release record's `extension_versions` names the theme by the same git tree id, so a record and a
+bill of materials for one commit agree.
 
 ### Contract Assertion
 
