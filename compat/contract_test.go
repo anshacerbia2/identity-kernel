@@ -462,8 +462,9 @@ func newPrincipal(a *admin, principalID string, enabled bool) (principal, error)
 // ---------------------------------------------------------------------------------------------
 
 type issuedTokens struct {
-	AccessToken string `json:"access_token"`
-	IDToken     string `json:"id_token"`
+	AccessToken  string `json:"access_token"`
+	IDToken      string `json:"id_token"`
+	RefreshToken string `json:"refresh_token"`
 }
 
 func (a *admin) realmURL(path string) string {

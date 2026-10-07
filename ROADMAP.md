@@ -175,6 +175,7 @@ unused.
 - ✅ RFC 9068 access tokens, asked by STD-IAM-002 §3.2 — **the kernel issues them once a client
   carries the `at+jwt` attribute and a `client_id` mapper**; the realm's built-in default scopes put
   claims the claim closure prohibits into both tokens; see below
+- ⏳ Consents, asked by identity-control — listing and withdrawal through the Admin API; see below
 - ✅ Client suspension and deletion, asked by identity-control — **a disabled or deleted client
   gets no new token and no refresh**; an access token issued before verifies offline until it
   expires; see below
@@ -416,6 +417,29 @@ required step held:
 - The delete ends that session alone: its refresh token is refused, and the other session keeps
   refreshing.
 - A second delete answers `404`.
+
+### Consents, asked by identity-control
+
+TDD-identity-control-005 §Self-Service as Built leaves slice 3b, a person's consents, waiting on
+this proof. identity-control would list a person's consents and withdraw one through the Admin API,
+as it does everything else. `compat/consent_test.go` asks of the pinned image, for a client that
+requires consent:
+- whether the first sign-in shows the consent page, and a second one, in a new browser, does not;
+- whether `GET /admin/realms/{realm}/users/{id}/consents` lists the grant, with its client, its
+  scopes and its date;
+- whether `DELETE .../consents/{clientId}` withdraws it, refuses the refresh tokens issued on it, and
+  brings the consent page back;
+- what a second withdrawal answers. This is recorded, not required.
+
+**What the source says first.** 26.7.5 shows the consent page only for client scopes marked
+"display on consent screen" (`AuthenticationManager.getClientScopesToApproveOnConsentScreen`). With
+none to show, it records no consent at all. Every scope this realm declares is marked `false`, so
+today no client here, consent-required or not, can produce a consent. The test adds a scope of its
+own. Withdrawal (`UserConsentManager.revokeConsentToClient`) also revokes the client's offline
+tokens and logs the user out of that client's sessions by backchannel. It needs `manage-users`, and
+it is recorded as an admin `ACTION`.
+
+**Answered:** pending the compat run.
 
 ### Authentication levels, for ADR-IAM-004
 
