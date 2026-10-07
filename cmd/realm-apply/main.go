@@ -91,7 +91,9 @@ func run(args []string, stdout, stderr io.Writer) int {
 			return fail("the realm was last applied from revision %s, which this checkout cannot read (%v); "+
 				"fetch it, or compare the live realm by hand and pass -adopt", recorded.Revision, err)
 		}
-		parsed, err := realmdef.Parse(files)
+		// The baseline is judged by the structure drift is computed on, not by today's policy: a
+		// rule added after that revision was applied would otherwise refuse every later apply.
+		parsed, err := realmdef.ParseBaseline(files)
 		if err != nil {
 			return fail("the definition at the recorded revision %s does not parse: %v", recorded.Revision, err)
 		}

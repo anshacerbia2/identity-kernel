@@ -3,7 +3,7 @@ doc_meta:
   id: TDD-identity-kernel-001
   title: Realm Topology, Issuer Identity, and Token Claim Projection
   owner: Identity Platform Team
-  version: 1.16.0
+  version: 1.17.0
   status: approved
   classification: restricted
   review_cycle_days: 90
@@ -504,6 +504,18 @@ definition in the realm's own attributes. The next run reads the definition at t
 revision and compares it with the live realm; any difference was made outside the
 pipeline. Keeping this state in the realm means every operator and every pipeline reads
 the same baseline, with no state file to lose or diverge.
+
+**The baseline is held to its structure, not to today's policy (1.17.0).** The definition
+at the recorded revision is read with `ParseBaseline`.
+- **What it checks.** Names that identify each object once, realm attributes Keycloak can
+  keep, and the apply step's own attributes left to it. Drift is computed on these, and
+  every revision ever applied met them.
+- **What it does not check.** The policy rules: the event retention floor, the browser
+  header set and the ban on kernel mail. A rule added after a revision was applied would
+  otherwise refuse that revision as a baseline, and with it every later apply.
+- **Where it was found.** On 2026-10-07 the development server's realm, applied at
+  `6beb86d` before the retention floor existed, was refused that way.
+- **The definition being applied** is still read with `Parse` and held to every rule.
 
 Two limits are part of the design rather than gaps in it:
 

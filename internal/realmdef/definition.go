@@ -134,9 +134,31 @@ func Load(dir string) (Definition, error) {
 	return Parse(files)
 }
 
-// Parse builds a definition from file contents by name, the way Load reads them from a directory
-// and a caller reads them from an earlier revision.
+// Parse builds a definition to apply from file contents by name, the way Load reads them from a
+// directory. It holds the definition to every rule, its structure and today's policy alike.
 func Parse(files map[string][]byte) (Definition, error) {
+	d, err := decode(files)
+	if err != nil {
+		return Definition{}, err
+	}
+	return d, d.validate()
+}
+
+// ParseBaseline builds the definition a realm was last applied from, read from its recorded
+// revision, to judge drift against. It holds that definition to the structure drift is computed on,
+// and not to today's policy: a rule added since, such as the event retention floor, did not exist
+// when that revision was applied, and refusing the baseline for it would refuse every later apply.
+// Policy binds the definition being applied, which Parse checks.
+func ParseBaseline(files map[string][]byte) (Definition, error) {
+	d, err := decode(files)
+	if err != nil {
+		return Definition{}, err
+	}
+	return d, d.validateStructure()
+}
+
+// decode reads the definition's files, without judging them.
+func decode(files map[string][]byte) (Definition, error) {
 	var d Definition
 	var profile struct {
 		Attributes []map[string]any `json:"attributes"`
@@ -173,13 +195,30 @@ func Parse(files map[string][]byte) (Definition, error) {
 			return Definition{}, fmt.Errorf("parsing required-actions.json: %w", err)
 		}
 	}
-	return d, d.validate()
+	return d, nil
 }
 
 // maxScopeDescription is the length of Keycloak's CLIENT_SCOPE.DESCRIPTION column.
 const maxScopeDescription = 255
 
+// validate holds a definition to apply to every rule: today's policy, then its structure.
 func (d Definition) validate() error {
+	if err := d.validateRetention(); err != nil {
+		return err
+	}
+	if err := d.validateBrowserHeaders(); err != nil {
+		return err
+	}
+	if err := d.validateNoMail(); err != nil {
+		return err
+	}
+	return d.validateStructure()
+}
+
+// validateStructure holds a definition to what applying it and computing drift against it need:
+// names that identify each object once, realm attributes Keycloak can keep, and the apply step's
+// own attributes left to it. Every revision ever applied met these.
+func (d Definition) validateStructure() error {
 	if d.Name() == "" {
 		return errors.New("scnehaux.json names no realm")
 	}
@@ -201,15 +240,6 @@ func (d Definition) validate() error {
 					"realm attributes as strings, so anything else would read as drift", key, value)
 			}
 		}
-	}
-	if err := d.validateRetention(); err != nil {
-		return err
-	}
-	if err := d.validateBrowserHeaders(); err != nil {
-		return err
-	}
-	if err := d.validateNoMail(); err != nil {
-		return err
 	}
 	if name(d.Key) == "" || d.Key["providerId"] == nil {
 		return errors.New("signing-key.generated.json needs a name and a providerId")

@@ -539,6 +539,12 @@ both form scopes and `organization` as optional scopes. A request for
 `scnehaux-privileged organization:<tenant_id>` gets that Tenant in the access and ID tokens. A
 request for `scnehaux-provider` gets none, and a request naming neither gets no `principal_id`.
 A refresh keeps each form, in the ID token as well as the access token.
+
+realm-apply reads the definition at the recorded revision as a baseline, held to its
+structure and not to today's policy (TDD-identity-kernel-001 1.17.0). The development
+server's realm, applied at `6beb86d` before the event retention floor existed, was refused
+as a baseline, and with it every later apply. `TestABaselineIsHeldToStructureNotTodaysPolicy`
+pins the fix.
 Organization Experience signs in this way.
 
 ## Week 3 · Event listener
