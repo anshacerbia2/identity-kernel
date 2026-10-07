@@ -175,7 +175,8 @@ unused.
 - ✅ RFC 9068 access tokens, asked by STD-IAM-002 §3.2 — **the kernel issues them once a client
   carries the `at+jwt` attribute and a `client_id` mapper**; the realm's built-in default scopes put
   claims the claim closure prohibits into both tokens; see below
-- ⏳ Consents, asked by identity-control — listing and withdrawal through the Admin API; see below
+- ✅ Consents, asked by identity-control — **listed and withdrawn through the Admin API; a withdrawal
+  ends the refresh tokens issued on it**; the consent page needs a scope shown on it; see below
 - ✅ Client suspension and deletion, asked by identity-control — **a disabled or deleted client
   gets no new token and no refresh**; an access token issued before verifies offline until it
   expires; see below
@@ -439,7 +440,18 @@ own. Withdrawal (`UserConsentManager.revokeConsentToClient`) also revokes the cl
 tokens and logs the user out of that client's sessions by backchannel. It needs `manage-users`, and
 it is recorded as an admin `ACTION`.
 
-**Answered:** pending the compat run.
+**Answered.** The pinned 26.7.5 image answered on 2026-10-07, in compat run 37607165522, and every
+required step held:
+- The first sign-in shows the consent page, and a second one, in a new browser, does not.
+- The listing names the client, the scope granted (only the scope shown on the screen, not `basic`
+  or `acr`) and its date.
+- The withdrawal empties the listing. The refresh tokens of both sign-ins are refused, and the next
+  sign-in shows the consent page again.
+- A second withdrawal, before anything is granted again, answers `404`.
+
+What identity-control's slice 3b still waits for is not the kernel: a registered client has to
+require consent, with a scope shown on the consent screen. That is a decision about which clients
+ask a person's consent, and no client here does yet.
 
 ### Authentication levels, for ADR-IAM-004
 
