@@ -72,7 +72,9 @@ jobs:
           docker build -q -f image/Dockerfile --build-arg KEYCLOAK_IMAGE="$image" -t identity-kernel:ci . >/dev/null
           # start-dev builds again in development mode, on its own file database: the image's
           # postgres is named back to dev-file here, and health and metrics stay on.
-          docker run -d --name keycloak -p 8080:8080 -p 9000:9000 \
+          # host.docker.internal is the runner, where compat/back_channel_logout_test.go listens for the
+          # logout tokens the kernel posts (ADR-IAM-009).
+          docker run -d --name keycloak -p 8080:8080 -p 9000:9000 --add-host host.docker.internal:host-gateway \
             -e KC_BOOTSTRAP_ADMIN_USERNAME="$KEYCLOAK_ADMIN_USER" \
             -e KC_BOOTSTRAP_ADMIN_PASSWORD="$KEYCLOAK_ADMIN_PASSWORD" \
             -e KC_DB=dev-file -e KC_HEALTH_ENABLED=true -e KC_METRICS_ENABLED=true \
@@ -164,7 +166,9 @@ jobs:
         run: |
           image="$(grep -v '^[[:space:]]*#' image/keycloak.ref | grep -v '^[[:space:]]*$' | head -n 1 | tr -d '[:space:]')"
           docker build -q -f image/Dockerfile --build-arg KEYCLOAK_IMAGE="$image" -t identity-kernel:ci . >/dev/null
-          docker run -d --name keycloak -p 8080:8080 -p 9000:9000 \
+          # host.docker.internal is the runner, where compat/back_channel_logout_test.go listens for the
+          # logout tokens the kernel posts (ADR-IAM-009).
+          docker run -d --name keycloak -p 8080:8080 -p 9000:9000 --add-host host.docker.internal:host-gateway \
             -e KC_BOOTSTRAP_ADMIN_USERNAME="$KEYCLOAK_ADMIN_USER" \
             -e KC_BOOTSTRAP_ADMIN_PASSWORD="$KEYCLOAK_ADMIN_PASSWORD" \
             -e KC_DB=dev-file -e KC_HEALTH_ENABLED=true -e KC_METRICS_ENABLED=true \

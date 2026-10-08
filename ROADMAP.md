@@ -440,6 +440,26 @@ required step held:
   refreshing.
 - A second delete answers `404`.
 
+### Back-channel logout, for ADR-IAM-009
+
+ADR-IAM-009 has a BFF learn of a session the kernel removed by OpenID Connect Back-Channel Logout,
+and rejects front-channel logout, because the kernel ends sessions through the Admin API, where no
+browser is present. identity-control writes the client's back-channel URL with front-channel logout
+off (TDD-identity-control-003 1.37.0). `compat/back_channel_logout_test.go` asks of the pinned image,
+with the test's own listener as the receiver, which the container reaches at `host.docker.internal`:
+- whether `DELETE /admin/realms/{realm}/sessions/{id}` posts a logout token to the client's
+  back-channel URL, and before the delete answers;
+- whether `POST /admin/realms/{realm}/users/{id}/logout`, identity-control's containment, does too;
+- whether the token is typed `logout+jwt`, signed `PS256`, issued by the realm, for the client,
+  carries the back-channel logout event, the removed session's `sid` and the user's `sub`, and no
+  `nonce` (Back-Channel Logout 1.0 §2.4);
+- whether a client with front-channel logout on is sent none, whatever URL it holds.
+
+**What the source says first.** In 26.7.5, `AuthenticationManager.backchannelLogoutClientSession`
+returns before sending for a client with front-channel logout on, and `RealmAdminResource.deleteSession`
+calls the back channel before it answers. A logout token is signed with the client's ID token
+algorithm, which is the realm's `PS256` when the client sets none (`DefaultTokenManager`).
+
 ### Consents, asked by identity-control
 
 TDD-identity-control-005 §Self-Service as Built leaves slice 3b, a person's consents, waiting on
