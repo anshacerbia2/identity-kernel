@@ -7,8 +7,8 @@
 #
 # Bases pinned by digest, with the tag each was resolved from beside it.
 
-# golang:1.26.8-alpine
-FROM golang@sha256:8ac98ca534ac3f51e1f420a1dd2c15e74c75cfa0f23f3ad27eb5d7236c349a0c AS build
+# golang:1.26.9-alpine
+FROM golang@sha256:cdfd4fe2da6b225d8b40c6b7a105736e548e83ff56d5d8f9394446eeb5eb84e0 AS build
 WORKDIR /src
 # The module has no dependencies, so there is nothing to download: no proxy is involved, and a
 # network that intercepts one does not break this build.
