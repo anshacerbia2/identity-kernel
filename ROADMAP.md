@@ -460,6 +460,15 @@ returns before sending for a client with front-channel logout on, and `RealmAdmi
 calls the back channel before it answers. A logout token is signed with the client's ID token
 algorithm, which is the realm's `PS256` when the client sets none (`DefaultTokenManager`).
 
+**Answered.** The pinned 26.7.5 image answered on 2026-10-08, in compat run 37841761669, and every
+required step held:
+- A session delete posts a logout token to the client's back-channel URL, and it has arrived by the
+  time the delete answers.
+- A user logout posts one for the session it ends.
+- Each token is `logout+jwt`, `PS256`, the realm's, for the client, with the back-channel logout event,
+  the removed session's `sid` and the user's `sub`, and no `nonce`.
+- A client with front-channel logout on is sent none.
+
 ### Consents, asked by identity-control
 
 TDD-identity-control-005 §Self-Service as Built leaves slice 3b, a person's consents, waiting on
