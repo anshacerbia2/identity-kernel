@@ -1,0 +1,50 @@
+name: image-build
+
+# TDD-identity-kernel-005 §Build Reproducibility, on every change: the kernel image is built twice from
+# nothing, by two builders that share no cache, and the two are compared; what the image holds is
+# checked; and its bill of materials is written. scripts/image-build-check.sh says how.
+#
+# The two builds do not have the same digest. Keycloak's own build step (kc.sh build) writes classes
+# with random names, so the comparison records those differences and fails on any other. The job
+# summary has both digests and what differed.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  reproducibility:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+
+      # Two BuildKit instances, each its own container with its own cache, from moby/buildkit:v0.32.2
+      # pinned by digest (resolved from Docker Hub on 2026-10-07). The docker-container driver is what
+      # exports an OCI archive with rewritten timestamps.
+      - name: two independent builders
+        run: |
+          for i in 1 2; do
+            docker buildx create --name "kernel-$i" --driver docker-container \
+              --driver-opt image=moby/buildkit@sha256:28a898719c18a33f4e8000685287fa36fd0dd9560c6440227d3a732d79bb41d8
+            docker buildx inspect --bootstrap "kernel-$i" >/dev/null
+          done
+
+      - name: build twice, compare, and write the bill of materials
+        env:
+          BUILDER_1: kernel-1
+          BUILDER_2: kernel-2
+        run: scripts/image-build-check.sh "$RUNNER_TEMP/image-build"
+
+      # Kept with the run until the image is published to a registry, when it travels with the image
+      # (TDD-identity-kernel-005 §Supply Chain).
+      - name: keep the bill of materials
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: identity-kernel-sbom
+          path: ${{ runner.temp }}/image-build/sbom.cdx.json
+          if-no-files-found: error

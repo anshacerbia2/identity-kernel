@@ -44,8 +44,18 @@ and context switch mechanism — are exercised here but decided in `identity-con
 ## Week 1 · Pinned instance and the realm contract
 
 - ⏳ Digest-pinned Keycloak running from a reproducible image build — **the upstream image is
-  pinned by digest** (`image/keycloak.ref`, 26.7.5 since 2026-10-01; 26.7.4 before) and runs in CI; there is no image of our own
-  yet, because there are no extensions to package. The reproducible build lands with the first one
+  pinned by digest** (`image/keycloak.ref`, 26.7.5 since 2026-10-01; 26.7.4 before). The kernel image
+  is built from that digest plus the login theme (TDD-005 1.4.0), and every CI job and the development
+  server run it. The `image-build` workflow builds it twice from nothing and compares the two
+  (TDD-005 1.6.0 §Build Reproducibility, first run 37686287003):
+  - ✅ the image holds no secret, no realm export and no development keystore: its own layers hold
+    only Keycloak's build output and the theme as git holds it;
+  - ✅ a CycloneDX 1.7 bill of materials lists every extension with its version (none yet), the theme
+    by its git tree id, and Keycloak's own packages. The run keeps it until the image is published;
+  - **not met: the same digest.** Keycloak's `kc.sh build` writes about 130 classes with random
+    names (ByteBuddy's accessor suffix) and dated jar entries. Every other layer and file is the same,
+    and a difference anywhere else fails. Recorded on every run; it closes when Keycloak's build is
+    deterministic
 - ✅ Every shipped image scanned for vulnerabilities (STD-GLB-009 1.4.0 §Container Images) — the
   `image-scan` workflow builds the kernel image and realm-apply's, and scans them and every
   digest-pinned image `deploy/dev/compose.yaml` names, on every change and daily, with Grype pinned
@@ -80,12 +90,16 @@ and context switch mechanism — are exercised here but decided in `identity-con
   (compat run 36739171569 found it). `compat/workload_test.go` asserts the token with a real
   key-signed grant and the scope detached, and that `workload_owner` reaches no internal token
   (first passing run 36739629606, 26.7.4). It unblocks workload registration in
-  identity-control (TDD-identity-control-003) and TDD-identity-control-004. The tenant-scoped
-  privileged scope is still undeclared: it needs `tenant_id` and the version claims, which wait on
-  the context projection (questions 5 to 7)
+  identity-control (TDD-identity-control-003) and TDD-identity-control-004
 
 **Exit:** the declared realm contract is asserted by test — issuer form, claim presence
 per covered surface, and the four closed creation paths.
+
+✅ **Exit met.** The `compat` workflow's `contract` job asserts all three on every change: the issuer
+form (`TestQuestion4IssuerURIForm`), every covered surface (`TestQuestion1ProtocolMapperCoverage`),
+and the four paths (`TestSelfRegistrationIsClosed`, `TestTheUserCannotChangeTheirOwnIdentifier`,
+`TestFederatedFirstLoginCreatesNoUser`, `TestOnlyServiceAccountsManageUsers`). Latest main run
+37683329327, on 26.7.5.
 
 ### Question 1, answered
 
@@ -156,14 +170,18 @@ unused.
   `{frontend URL}/realms/{realm name}`, and a realm rename moves it too (compat run 36113564506).
   The production hostname and realm name are therefore fixed together before the first token.
   Answered early because it is irreversible and cheap to ask
-- Questions 5, 6, 7 exercised and handed to the consuming repositories
+- ✅ Questions 5, 6, 7 exercised and handed to the consuming repositories — 5 and 7 by the Tenant
+  context proof (compat run 37207537199, below), 6 by one session ended (compat run 37137921752) and
+  user containment. identity-control records all three in TDD-identity-control-002 §Proof-of-Concept
+  Questions, Answered
 - ✅ Client key rotation, asked by identity-control — **signed-JWT keys overlap and revoke at
   once**; see below
-- ⏳ The claim closure (STD-IAM-002 §3.2, §3.2.1) — the realm's default client scopes are `basic` and
+- ✅ The claim closure (STD-IAM-002 §3.2, §3.2.1) — the realm's default client scopes are `basic` and
   `acr` only, declared in `realm/default-client-scopes.json` and held as closed sets by
   `realm-apply`; `scnehaux-profile` gives a BFF its name in the ID token alone;
   `compat/claim_closure_test.go` asserts no access token carries a claim outside the closure, for a
-  BFF's user token and a workload's (TDD-identity-kernel-001 1.8.0 §Claim Projection)
+  BFF's user token and a workload's (TDD-identity-kernel-001 1.8.0 §Claim Projection). The
+  `contract` job runs it: first passing main run 36827186288 (26.7.4), latest 37683329327 (26.7.5)
 - ✅ `service_account` keeps only its `client_id` mapper (STD-IAM-002 §3.2.1). Keycloak attaches the
   scope again on every update of a client with service accounts enabled
   (`ClientManager.updateClientServiceAccount`), so identity-control's detachment from a workload was
@@ -278,8 +296,11 @@ they put into its tokens:
 Some come from scopes the realm attaches by default (`profile`, `email`, `roles`, and
 `service_account`'s client address), and some Keycloak writes itself (`azp`, `sid`, `typ`).
 STD-IAM-002 §3.2 prohibits personal data beyond what the audience requires and any claim it does
-not define, so the next step is a decision on both groups, recorded in STD-IAM-002 and realized in
-`realm/` and in identity-control. The test stays in the suite, and its claim list shows the effect.
+not define. ✅ **Decided** for both groups, in STD-IAM-002 §3.2 and §3.2.1 and TDD-identity-kernel-001
+1.8.0 §Claim Projection: an access token carries no personal data and no role; the realm's defaults
+are `basic` and `acr`; and `azp`, `sid` and a payload `typ`, which the kernel writes itself, are
+admitted. It is realized in `realm/` and in identity-control's registration; see the claim closure
+above. The test stays in the suite, and its claim list shows the effect.
 
 ### Client suspension and deletion, asked by identity-control
 
@@ -513,6 +534,11 @@ consecutive failure (TDD-identity-kernel-001 1.12.0 §Guessing Limits). `compat/
 - the next code asked for next;
 - on a throwaway realm, the lockout mode and its release by enabling the user.
 
+✅ **Proven** on 2026-10-04 in compat run 37164028271, the merge of #41 on 26.7.5, and on every main
+run since (latest 37683329327): `TestAuthenticationLevels` covers the codes, *Try Another Way* and
+the next code, and `TestTheLockoutModeAndItsRelease` the lockout. The `browser` job also signs in
+with a recovery code.
+
 ### Tenant context, for ADR-IAM-006
 
 The realm enables Organizations. The `organization` scope is declared with one mapper, a flat
@@ -551,8 +577,11 @@ Organization Experience signs in this way.
 
 - Minimal listener capturing user, admin, and security events
 - Delivery failure does not erase the source event
-- Completeness reconciliation against supported event and admin state
-- Compatibility tests against the pinned release
+- ✅ Completeness reconciliation against supported event and admin state — identity-control's sweep
+  (its TDD-007), below
+- ✅ Compatibility tests against the pinned release — `compat/events_test.go`,
+  `user_events_test.go` and `notified_events_test.go`, in every `contract` run (latest main run
+  37683329327)
 
 **Exit:** an event dropped in transit is detected by reconciliation rather than lost.
 
@@ -583,10 +612,13 @@ by the same sweep.
 
 ## Week 4 · Theme and upgrade suite
 
-- Hosted login, MFA enrollment, and recovery theme against WCAG 2.2 AA
+- ⏳ Hosted login, MFA enrollment, and recovery theme against WCAG 2.2 AA — the automated scan
+  (axe-core, WCAG 2.2 A and AA, both schemes, both locales) and the keyboard paths pass in the
+  `browser` job. **Not yet:** the screen-reader pass, which TDD-004 §Testing Strategy makes manual
+  release evidence
 - Rotation rehearsed end to end, including the retirement window
-- Upgrade compatibility suite: apply realm to a clean instance, assert the declared
-  contract, assert the closed creation paths, rehearse rollback
+- ✅ Upgrade compatibility suite: apply realm to a clean instance, assert the declared
+  contract, assert the closed creation paths, rehearse rollback — see below
 
 **Exit:** a candidate release that changes the issuer form, drops a claim from a
 covered surface, or reopens a creation path fails the suite.
@@ -713,7 +745,16 @@ Recorded so scope creep is visible rather than convenient:
 against the pinned release and their outcomes recorded in the designs that depend on
 them.
 
+✅ **Met.** All five designs are approved, at 1.17.0, 1.1.0, 1.1.0, 1.6.0 and 1.6.0. Questions 1 to 4
+are answered against the pinned release and recorded in TDD-identity-kernel-001 §Open
+Proof-of-Concept Questions, and questions 2 and 3 also in TDD-identity-control-001.
+
 **Production gate.** The design gate, plus: key rotation and emergency rotation
 rehearsed in staging, restore-to-earlier-point key reconciliation exercised, upgrade
 and rollback rehearsed against production-like realm data, and runbooks written for
 key ceremony, console drift, failed upgrade, and consumer reporting an unknown `kid`.
+
+- ✅ Runbooks for console drift, failed upgrade and an unknown `kid`, in
+  [`docs/runbooks/`](docs/runbooks/README.md). They are written for the development server, the one
+  server there is, and each names what production still needs.
+- The key ceremony runbook waits on custody (Week 2).

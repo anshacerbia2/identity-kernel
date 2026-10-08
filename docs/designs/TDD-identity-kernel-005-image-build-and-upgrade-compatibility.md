@@ -3,12 +3,12 @@ doc_meta:
   id: TDD-identity-kernel-005
   title: Image Build, Digest Pinning, and Upgrade Compatibility
   owner: Identity Platform Team
-  version: 1.5.1
+  version: 1.6.0
   status: approved
   classification: restricted
   review_cycle_days: 90
   created_date: 2026-08-11
-  last_reviewed: 2026-10-06
+  last_reviewed: 2026-10-07
   parent_sad: SAD-001
 ---
 
@@ -79,9 +79,10 @@ realm definition               rendered per environment, applied at deploy
 `image/keycloak.ref`, passed as `KEYCLOAK_IMAGE`, and copies the login theme. No extension is packaged
 yet. Every run uses it: `compat`'s `contract` and `browser` jobs build it before starting Keycloak, the
 `upgrade` job builds it from both the candidate and the previous release, and `deploy/dev/compose.yaml` builds
-it, so the development server runs what the suite asserts. Signing, the bill of materials and the
-provenance attestation of §Supply Chain follow when the image is published to a registry; until then
-it is built where it runs, from a pinned digest and this repository's files.
+it, so the development server runs what the suite asserts. Since 1.6.0 every change also builds it
+twice and writes its bill of materials (§Testing Strategy, Build Reproducibility as built). Signing and
+the provenance attestation of §Supply Chain follow when the image is published to a registry; until
+then it is built where it runs, from a pinned digest and this repository's files.
 
 **Optimized, with health and metrics (1.5.0, ADR-IAM-001 §5.8).** The image is built the way
 Keycloak's container guide recommends: a builder stage sets `KC_HEALTH_ENABLED`, `KC_METRICS_ENABLED`
@@ -286,7 +287,8 @@ about identity.
 include CVE-2026-93999, a token-exchange refresh that kept issuing tokens for a disabled
 audience client, and which carries one data changeset (`26.7.0-backfill-group-org-id`, a
 backfill of `KEYCLOAK_GROUP.ORG_ID` for Organizations). There is no theme or extension to
-defer yet. Its release record is in ROADMAP.md.
+defer yet. Its release record is the `upgrade` job's summary, which every run writes again; main run
+37683329327 records `reversible`, with that one changeset applied.
 
 ## Configuration
 
@@ -312,6 +314,52 @@ the kernel at all. They authenticate with registered public keys (`ADR-IAM-001 �
 - The image contains no secret, no realm export carrying credentials, and no
   development keystore.
 - The software bill of materials lists every extension and its version.
+
+**As built (1.6.0).** The `image-build` workflow runs `scripts/image-build-check.sh` on every change.
+It builds the image twice from nothing, with two BuildKit instances that share no cache. Both builds
+take `SOURCE_DATE_EPOCH` from the commit and export with `rewrite-timestamp`. Docker: the variable
+"makes the timestamps in the image index, config, and file metadata reflect the specified Unix time",
+and the option will "Rewrite the file timestamps to the `SOURCE_DATE_EPOCH` value" [R1] [R2]. So the
+build date is not a difference. `scripts/image-build-compare.py` then checks each of the three
+requirements.
+
+| Requirement | As built | Met |
+| :-- | :-- | :-- |
+| Same image digest | **Not met; a recorded gap.** The digests differ (below). Every other layer and file is compared byte for byte, and a difference outside Keycloak's build output fails | no |
+| No secret, realm export or development keystore | The bottom layers must be the pinned upstream manifest's, unchanged. The layers above may hold only `lib/quarkus/` and `themes/scnehaux/`, each theme file byte-identical to git's copy. No key, certificate, `.json`, `.conf` or `.env` file may be added, no file deleted, and no `Env` name may carry a password, secret, token or credential | yes |
+| The bill of materials lists every extension and its version | CycloneDX 1.7 JSON, written by Syft pinned by digest. Every jar in `providers/` must be listed with a version; none is packaged yet. The theme is added as a component, versioned by its git tree id, and Keycloak's own version must be listed | yes |
+
+**Why the digests differ.** A reproducible build is one where "any party can recreate bit-by-bit
+identical copies of all specified artifacts" [R3]. Two of the kernel's files are not: the jars that
+Keycloak's `kc.sh build` writes, `lib/quarkus/generated-bytecode.jar` and
+`lib/quarkus/transformed-bytecode.jar`. Measured on 26.7.5 on 2026-10-07, `image-build` run 37686287003:
+
+- **Generated class names.** About 130 classes differ (132 in that run). Hibernate's proxies carry ByteBuddy field names
+  such as `cachedValue$LDoFC2eQ$…`. ByteBuddy's default factory "uses a random suffix for accessors"
+  [R4]. Quarkus also numbers its recorded proxies (`proxykey108`) in the order its build steps finish.
+- **Dates.** Every jar entry carries the build's clock, and `keycloak-persisted.properties` begins with
+  the date `java.util.Properties` wrote it.
+
+The upstream layers, the theme, `quarkus-application.dat` and `build-system.properties` are identical.
+This repository cannot remove the gap without rewriting Keycloak's output. Starting without
+`--optimized` does not remove it either: each start would run the same build, and every container
+would differ instead of every image. The comparison therefore records the differing classes in the job
+summary and fails on any difference elsewhere. The gap closes when Keycloak's build is deterministic,
+and the check then reports one digest.
+
+What the gap costs. Promotion is unaffected, because the one digest evaluated is the one promoted
+(§Build Output); nothing is rebuilt for production. What a rebuild cannot do is confirm a published
+digest bit for bit. That has to rest on the provenance attestation (§Supply Chain), which links the
+digest to its commit.
+
+**Where the bill of materials is kept.** The run keeps it as the artifact `identity-kernel-sbom`. By
+default, GitHub "stores build logs and artifacts for 90 days" [R5]. That is enough for review, not
+retention. When the image is published to a registry, the bill of materials travels with the image,
+as §Supply Chain requires. CycloneDX 1.7 is ECMA-424 2nd edition [R6], the format ADR-UIP-SEC-001
+chose for the UI Platform's packages.
+
+The release record's `extension_versions` names the theme by the same git tree id, so a record and a
+bill of materials for one commit agree.
 
 ### Contract Assertion
 
@@ -412,3 +460,14 @@ release.
 1. ~~Which upstream Keycloak release is pinned for the initial baseline.~~ Answered:
    26.7.4 was the proof-of-concept baseline (2026-09-25), and 26.7.5 is the first release
    with a release record (2026-10-01, ROADMAP.md).
+
+## References
+
+| Ref | Source |
+| :-- | :-- |
+| R1 | Docker Docs, *Reproducible builds with GitHub Actions*, accessed 2026-10-07. <https://docs.docker.com/build/ci/github-actions/reproducible-builds/>. "Setting the environment variable for a build makes the timestamps in the image index, config, and file metadata reflect the specified Unix time." |
+| R2 | Docker Docs, *OCI and Docker exporters*, accessed 2026-10-07. <https://docs.docker.com/build/exporters/oci-docker/>. `rewrite-timestamp`: "Rewrite the file timestamps to the `SOURCE_DATE_EPOCH` value." |
+| R3 | Reproducible Builds, *Definitions*, accessed 2026-10-07. <https://reproducible-builds.org/docs/definition/>. "A build is reproducible if given the same source code, build environment and build instructions, any party can recreate bit-by-bit identical copies of all specified artifacts." |
+| R4 | ByteBuddy, `Implementation.Context.Default.Factory`, accessed 2026-10-07. <https://github.com/raphw/byte-buddy/blob/master/byte-buddy-dep/src/main/java/net/bytebuddy/implementation/Implementation.java>. "A factory for creating a `Default` that uses a random suffix for accessors"; the cached field is named `FIELD_CACHE_PREFIX + "$" + suffix + "$" + RandomString.hashOf(hashCode)`. |
+| R5 | GitHub Docs, *Removing workflow artifacts*, accessed 2026-10-07. <https://docs.github.com/en/actions/how-tos/manage-workflow-runs/remove-workflow-artifacts>. "By default, GitHub stores build logs and artifacts for 90 days, and this retention period can be customized." |
+| R6 | Ecma International, *ECMA-424, CycloneDX Bill of materials specification*, 2nd edition, December 2025. <https://ecma-international.org/publications-and-standards/standards/ecma-424/>. "This Standard defines the CycloneDX v1.7 Bill of materials specification". |
