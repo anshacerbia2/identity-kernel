@@ -482,10 +482,10 @@ func mustJSON(t *testing.T, d Definition) []byte {
 func TestAnAbsentFlowIsBuiltAndThenBound(t *testing.T) {
 	d := definition(t)
 	l := liveFrom(d)
-	delete(l.flows, "scnehaux-browser-v3")
-	l.realm["browserFlow"] = "scnehaux-browser-v2"
+	delete(l.flows, "scnehaux-browser-v4")
+	l.realm["browserFlow"] = "scnehaux-browser-v3"
 	changes := compare(d, l)
-	if c := find(t, changes, KindFlow, "scnehaux-browser-v3"); c.Action != Create {
+	if c := find(t, changes, KindFlow, "scnehaux-browser-v4"); c.Action != Create {
 		t.Errorf("flow: %s", c.Action)
 	}
 	if c := find(t, changes, KindBinding, "browserFlow"); c.Action != Update {
@@ -509,18 +509,56 @@ func TestAnAbsentFlowIsBuiltAndThenBound(t *testing.T) {
 func TestAHandEditedFlowIsADifference(t *testing.T) {
 	d := definition(t)
 	l := liveFrom(d)
-	forms := l.flows["scnehaux-browser-v3"][1]
+	forms := l.flows["scnehaux-browser-v4"][2]
 	level2 := forms.Executions[1]
 	level2.Executions[1].Executions[1].Executions[0].Requirement = "DISABLED"
-	c := find(t, compare(d, l), KindFlow, "scnehaux-browser-v3")
+	c := find(t, compare(d, l), KindFlow, "scnehaux-browser-v4")
 	if c.Action != Update || !has(c.Diffs, "auth-otp-form: requirement live DISABLED, definition REQUIRED") {
 		t.Errorf("%s %v", c.Action, c.Diffs)
 	}
 	l = liveFrom(d)
-	l.flows["scnehaux-browser-v3"][1].Executions[1].Executions[0].Config["loa-max-age"] = "0"
-	c = find(t, compare(d, l), KindFlow, "scnehaux-browser-v3")
+	l.flows["scnehaux-browser-v4"][2].Executions[1].Executions[0].Config["loa-max-age"] = "0"
+	c = find(t, compare(d, l), KindFlow, "scnehaux-browser-v4")
 	if c.Action != Update || !has(c.Diffs, "loa-max-age live \"0\", definition \"300\"") {
 		t.Errorf("%s %v", c.Action, c.Diffs)
+	}
+}
+
+// The organization step answers only a Tenant sign-in on a session (TDD-identity-kernel-001 1.18.0
+// §Authentication Levels). Each condition that narrows it is held to its declaration: a step left with
+// only one would put a sign-in through the organization's identity-first page.
+func TestTheOrganizationStepKeepsBothConditions(t *testing.T) {
+	d := definition(t)
+	flow, ok := flowNamed(d, "scnehaux-browser-v4")
+	if !ok || flow.Binding != "browserFlow" {
+		t.Fatalf("scnehaux-browser-v4 is not the declared browser flow: %v %+v", ok, flow.Binding)
+	}
+	if len(flow.Executions) != 3 || flow.Executions[1].Flow != "scnehaux-browser-v4 organization" {
+		t.Fatalf("the organization step is not second, between the cookie and the forms: %+v", flow.Executions)
+	}
+	session := flow.Executions[1].Executions[0]
+	var steps []string
+	for _, e := range session.Executions {
+		steps = append(steps, e.Authenticator+" "+e.Requirement)
+	}
+	want := []string{"conditional-client-scope REQUIRED", "conditional-user-role REQUIRED", "organization ALTERNATIVE"}
+	if session.Requirement != "CONDITIONAL" || strings.Join(steps, ", ") != strings.Join(want, ", ") {
+		t.Errorf("the organization session step is %s %v, want CONDITIONAL %v", session.Requirement, steps, want)
+	}
+	for name, edit := range map[string]func(l *live){
+		"the scope condition removed": func(l *live) {
+			s := &l.flows["scnehaux-browser-v4"][1].Executions[0]
+			s.Executions = s.Executions[1:]
+		},
+		"the role condition naming another role": func(l *live) {
+			l.flows["scnehaux-browser-v4"][1].Executions[0].Executions[1].Config["condUserRole"] = "offline_access"
+		},
+	} {
+		l := liveFrom(d)
+		edit(l)
+		if c := find(t, compare(d, l), KindFlow, "scnehaux-browser-v4"); c.Action != Update {
+			t.Errorf("%s: %s", name, c.Action)
+		}
 	}
 }
 

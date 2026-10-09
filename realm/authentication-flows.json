@@ -126,7 +126,6 @@
   {
     "alias": "scnehaux-browser-v3",
     "description": "Password at LoA 1 (aal1); plus WebAuthn, TOTP or a recovery code at LoA 2 (aal2), enrolling TOTP for a person with none. TDD-identity-kernel-001 \u00a7Authentication Levels, ADR-IAM-004, ADR-IAM-005.",
-    "binding": "browserFlow",
     "executions": [
       {
         "authenticator": "auth-cookie",
@@ -206,6 +205,115 @@
       {
         "authenticator": "deny-access-authenticator",
         "requirement": "REQUIRED"
+      }
+    ]
+  },
+  {
+    "alias": "scnehaux-browser-v4",
+    "description": "Password at LoA 1 (aal1); plus WebAuthn, TOTP or a recovery code at LoA 2 (aal2), enrolling TOTP for a person with none; a Tenant sign-in (organization:<tenant_id>) on an existing session is answered by the session. TDD-identity-kernel-001 \u00a7Authentication Levels, ADR-IAM-004, ADR-IAM-005, ADR-IAM-008.",
+    "binding": "browserFlow",
+    "executions": [
+      {
+        "authenticator": "auth-cookie",
+        "requirement": "ALTERNATIVE"
+      },
+      {
+        "flow": "scnehaux-browser-v4 organization",
+        "requirement": "ALTERNATIVE",
+        "executions": [
+          {
+            "flow": "scnehaux-browser-v4 organization session",
+            "requirement": "CONDITIONAL",
+            "executions": [
+              {
+                "authenticator": "conditional-client-scope",
+                "requirement": "REQUIRED",
+                "configAlias": "scnehaux-browser-v4 organization scope",
+                "config": {
+                  "client_scope": "organization",
+                  "negate": "false"
+                }
+              },
+              {
+                "authenticator": "conditional-user-role",
+                "requirement": "REQUIRED",
+                "configAlias": "scnehaux-browser-v4 known user",
+                "config": {
+                  "condUserRole": "default-roles-scnehaux",
+                  "negate": "false"
+                }
+              },
+              {
+                "authenticator": "organization",
+                "requirement": "ALTERNATIVE"
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "flow": "scnehaux-browser-v4 forms",
+        "requirement": "ALTERNATIVE",
+        "executions": [
+          {
+            "flow": "scnehaux-browser-v4 level 1",
+            "requirement": "CONDITIONAL",
+            "executions": [
+              {
+                "authenticator": "conditional-level-of-authentication",
+                "requirement": "REQUIRED",
+                "configAlias": "scnehaux-browser-v4 loa 1",
+                "config": {
+                  "loa-condition-level": "1",
+                  "loa-max-age": "36000"
+                }
+              },
+              {
+                "authenticator": "auth-username-password-form",
+                "requirement": "REQUIRED"
+              }
+            ]
+          },
+          {
+            "flow": "scnehaux-browser-v4 level 2",
+            "requirement": "CONDITIONAL",
+            "executions": [
+              {
+                "authenticator": "conditional-level-of-authentication",
+                "requirement": "REQUIRED",
+                "configAlias": "scnehaux-browser-v4 loa 2",
+                "config": {
+                  "loa-condition-level": "2",
+                  "loa-max-age": "300"
+                }
+              },
+              {
+                "flow": "scnehaux-browser-v4 second factor",
+                "requirement": "REQUIRED",
+                "executions": [
+                  {
+                    "authenticator": "webauthn-authenticator",
+                    "requirement": "ALTERNATIVE"
+                  },
+                  {
+                    "flow": "scnehaux-browser-v4 one-time code",
+                    "requirement": "ALTERNATIVE",
+                    "executions": [
+                      {
+                        "authenticator": "auth-otp-form",
+                        "requirement": "REQUIRED"
+                      }
+                    ]
+                  },
+                  {
+                    "authenticator": "auth-recovery-authn-code-form",
+                    "requirement": "ALTERNATIVE"
+                  }
+                ]
+              }
+            ]
+          }
+        ]
       }
     ]
   }
