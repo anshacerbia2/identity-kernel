@@ -634,13 +634,24 @@ without success, which Keycloak reports as invalid credentials. TDD-identity-ker
 ✅ **Fixed in the realm.** `scnehaux-browser-v4` adds the organization step between the cookie and the
 forms. It runs only for a Tenant sign-in on a session that has already identified a person, so a sign-in
 in a new browser keeps its pages, with no identity-first page. A step-up, `max_age` or `prompt=login`
-still asks again. The test stays in the suite.
+still asks again. Compat run 37915283758 (this change, 26.7.5) passed every required step:
+- the Tenant sign-in on the provider sign-in's session, and on the `aal1` session, is answered
+  without a page and carries the Tenant;
+- a provider sign-in after it carries no Tenant;
+- `max_age=0` asks for the password and the code;
+- a non-member is refused.
+
+The `browser` job's pages and the `upgrade` job's flow order on Postgres are unchanged. The test stays
+in the suite.
 
 **Nothing changes in a consumer.** Organization Experience's BFF already sends what ADR-IAM-008 §5.2
-says, and needs no `prompt=login`. Once this is merged, its stack proof should record "signed in to
-the Tenant on the provider sign-in's kernel session" (`provider-mode.json`). Its ROADMAP item can then
-close, and the proof can drop the separate browser it uses because of this defect. That is
-organization-experience's change to make.
+says, and needs no `prompt=login`. So does identity-experience's BFF, which builds the same Tenant
+request. Proven against this branch: Organization Experience's stack proof, dispatched with
+`kernel_ref=batch3` (its run 37916092312), recorded "signed in to the Tenant on the provider sign-in's
+kernel session" in `provider-mode.json`, and every journey passed. Once this is merged, its ROADMAP
+item can close. Its proof can then require the switch instead of recording it, and can drop the
+separate browser it uses because of this defect. Those are organization-experience's changes to
+make.
 
 ## Week 3 · Event listener
 
