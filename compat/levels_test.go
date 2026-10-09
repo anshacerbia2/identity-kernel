@@ -98,17 +98,7 @@ func (b *browser) send(request *http.Request) (*http.Response, string) {
 func (b *browser) signIn(extra url.Values) map[string]any {
 	b.t.Helper()
 	b.pages = nil
-	verifier := randomToken(b.t)
-	sum := sha256.Sum256([]byte(verifier))
-	query := url.Values{
-		"client_id": {b.c.id}, "response_type": {"code"}, "redirect_uri": {providerRedirect},
-		"scope": {"openid"}, "state": {"compat"}, "nonce": {randomToken(b.t)},
-		"code_challenge": {base64.RawURLEncoding.EncodeToString(sum[:])}, "code_challenge_method": {"S256"},
-	}
-	for k, v := range extra {
-		query[k] = v
-	}
-	request, _ := http.NewRequest(http.MethodGet, b.a.realmURL("/auth?"+query.Encode()), nil)
+	request, verifier := b.authorizationRequest(extra)
 	response, page := b.send(request)
 	for step := 0; step < 8; step++ {
 		if response.StatusCode == http.StatusFound || response.StatusCode == http.StatusSeeOther {
@@ -256,6 +246,63 @@ func (b *browser) signIn(extra url.Values) map[string]any {
 	}
 	b.t.Fatalf("the sign-in did not reach a code; pages %v", b.pages)
 	return nil
+}
+
+// authorizationRequest is the browser's authorization request, with PKCE, and the verifier that
+// redeems its code. extra adds or replaces parameters: scope, acr_values, max_age, kc_action.
+func (b *browser) authorizationRequest(extra url.Values) (*http.Request, string) {
+	b.t.Helper()
+	verifier := randomToken(b.t)
+	sum := sha256.Sum256([]byte(verifier))
+	query := url.Values{
+		"client_id": {b.c.id}, "response_type": {"code"}, "redirect_uri": {providerRedirect},
+		"scope": {"openid"}, "state": {"compat"}, "nonce": {randomToken(b.t)},
+		"code_challenge": {base64.RawURLEncoding.EncodeToString(sum[:])}, "code_challenge_method": {"S256"},
+	}
+	for k, v := range extra {
+		query[k] = v
+	}
+	request, _ := http.NewRequest(http.MethodGet, b.a.realmURL("/auth?"+query.Encode()), nil)
+	return request, verifier
+}
+
+// silentSignIn runs one authorization request on the browser's session and fills no page. A sign-in
+// the session answers alone reaches its code and returns the access token's claims; anything else --
+// a page, an error sent to the client, a refused code -- returns nil and says what it was, so a test
+// can record it rather than stop.
+func (b *browser) silentSignIn(extra url.Values) (map[string]any, string) {
+	b.t.Helper()
+	b.pages = nil
+	request, verifier := b.authorizationRequest(extra)
+	response, page := b.send(request)
+	for step := 0; step < 8 && (response.StatusCode == http.StatusFound || response.StatusCode == http.StatusSeeOther); step++ {
+		location, _ := url.Parse(response.Header.Get("Location"))
+		if strings.HasPrefix(location.String(), providerRedirect) {
+			if failure := location.Query().Get("error"); failure != "" {
+				return nil, "the client was sent error=" + failure + " (" + location.Query().Get("error_description") + ")"
+			}
+			form := url.Values{
+				"grant_type": {"authorization_code"}, "code": {location.Query().Get("code")},
+				"redirect_uri": {providerRedirect}, "client_id": {b.c.id}, "client_secret": {b.c.secret},
+				"code_verifier": {verifier},
+			}
+			answer, err := b.a.http.PostForm(b.a.realmURL("/token"), form)
+			if err != nil {
+				b.t.Fatalf("redeeming the code: %v", err)
+			}
+			body, _ := io.ReadAll(answer.Body)
+			_ = answer.Body.Close()
+			var tokens issuedTokens
+			if answer.StatusCode != http.StatusOK || json.Unmarshal(body, &tokens) != nil || tokens.AccessToken == "" {
+				return nil, fmt.Sprintf("the code was refused, %d: %s", answer.StatusCode, snippet(string(body)))
+			}
+			b.refresh = tokens.RefreshToken
+			return jwtClaims(b.t, tokens.AccessToken), "answered without a page"
+		}
+		request, _ = http.NewRequest(http.MethodGet, location.String(), nil)
+		response, page = b.send(request)
+	}
+	return nil, fmt.Sprintf("a page, %d, saying %q", response.StatusCode, pageMessage(page))
 }
 
 func (b *browser) exchange(code, verifier string) map[string]any {
