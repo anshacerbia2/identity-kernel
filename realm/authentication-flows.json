@@ -210,7 +210,7 @@
   },
   {
     "alias": "scnehaux-browser-v4",
-    "description": "Password at LoA 1 (aal1); plus WebAuthn, TOTP or a recovery code at LoA 2 (aal2), enrolling TOTP for a person with none; a Tenant sign-in (organization:<tenant_id>) on an existing session is answered by the session. TDD-identity-kernel-001 \u00a7Authentication Levels, ADR-IAM-004, ADR-IAM-005, ADR-IAM-008.",
+    "description": "v3, plus the organization step: a Tenant sign-in on a session is answered by the session. TDD-identity-kernel-001 \u00a7Authentication Levels, ADR-IAM-004, ADR-IAM-005, ADR-IAM-008.",
     "binding": "browserFlow",
     "executions": [
       {

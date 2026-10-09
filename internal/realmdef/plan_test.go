@@ -366,6 +366,22 @@ func TestParseRefusesADescriptionKeycloakCannotStore(t *testing.T) {
 	}
 }
 
+func TestParseRefusesAFlowDescriptionKeycloakCannotStore(t *testing.T) {
+	flows := `[{"alias":"a","description":"` + strings.Repeat("x", 256) + `","executions":[]}]`
+	var declared []Flow
+	if err := json.Unmarshal([]byte(flows), &declared); err != nil {
+		t.Fatal(err)
+	}
+	if err := validateFlows(declared); err == nil {
+		t.Error("a 256-character flow description was accepted; Keycloak refuses it with a 500 at apply")
+	}
+	for _, f := range definition(t).Flows {
+		if len([]rune(f.Description)) > maxScopeDescription {
+			t.Errorf("realm/authentication-flows.json: %s has a %d-character description", f.Alias, len([]rune(f.Description)))
+		}
+	}
+}
+
 func TestOnlyEnvironmentsWithoutRealTokensAreAccepted(t *testing.T) {
 	for _, accepted := range []string{"local", "ci", "development"} {
 		if _, err := ParseEnvironment(accepted); err != nil {
