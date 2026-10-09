@@ -3,12 +3,12 @@ doc_meta:
   id: TDD-identity-kernel-005
   title: Image Build, Digest Pinning, and Upgrade Compatibility
   owner: Identity Platform Team
-  version: 1.6.0
+  version: 1.7.0
   status: approved
   classification: restricted
   review_cycle_days: 90
   created_date: 2026-08-11
-  last_reviewed: 2026-10-07
+  last_reviewed: 2026-10-09
   parent_sad: SAD-001
 ---
 
@@ -35,6 +35,7 @@ build failure rather than a production discovery.
 - The upgrade compatibility suite and what it asserts.
 - Determining and recording the rollback boundary per candidate release.
 - The accelerated path for security releases.
+- The server options the image fixes for every environment, the session store among them (1.7.0).
 
 **Out of scope**
 
@@ -112,6 +113,64 @@ A tag is mutable. `quay.io/keycloak/keycloak:26.0` can point at different bytes 
 week, and an image built from a tag is not reproducible. The digest is recorded in this
 repository and changed by a reviewed commit, so a kernel version change is visible in
 history rather than absorbed by a rebuild.
+
+### Session Store (1.7.0)
+
+Sessions are read from the database, and the in-memory session cache in front of it is off. The image
+sets `KC_SPI_USER_SESSIONS__INFINISPAN__USE_CACHES=false`, the environment form of
+`spi-user-sessions--infinispan--use-caches`, a runtime option, so `start --optimized` and the suite's
+`start-dev` both read it. Persistent user sessions, on by default, stay on. Every environment runs the
+image, so none can differ.
+
+**Why.** With the cache on, the pinned 26.7.5 kernel kept refreshing sessions it had removed.
+Organization Experience's stack proof found it: identity-control removed a session with
+`DELETE /admin/realms/{realm}/sessions/{id}`, the Admin API stopped listing it, and the BFF's refresh
+four minutes later was granted. The source gives the mechanism:
+
+- A commit sends its cache changes first and writes the database after: "sends all the cache requests
+  and queues any pending database writes", then "apply the database changes in a blocking fashion, and
+  in a single transaction" [R7]. A delete therefore empties the cache entry while its row is still
+  committed.
+- A read that misses the cache loads the session from the database and puts it into the cache with
+  `putIfAbsent` [R8]. Between the two steps of a delete, that read restores the entry.
+- The Admin API lists a user's sessions from the database, so the restored session is not listed. A
+  refresh reads the cache first, finds it, and is granted; the refresh's own database update finds no
+  row and is dropped with a debug message, "No user session found" [R9].
+
+The vendor knows it as keycloak#51127, "cache-miss unconditionally re-hydrates cache from DB,
+resurrecting deleted sessions". Its maintainer's advice is this setting: "As a workaround, I recommend
+to disable the cache, but keep persistent sessions enabled. Use the option
+`spi-user-sessions--infinispan--use-caches` for that" [R10]. The fix, a short-lived tombstone written
+on removal, is in 26.8.0 and not in 26.7.x; by its own description it protects user sessions and
+not client sessions [R11]. The option exists in 26.7.5 and is read at startup [R12]. Keycloak's own
+guide documents it from 26.8.0 [R13].
+
+**Measured.** `compat/removed_session_test.go` removes sessions while something else reads them, which
+is what a deployed estate does: identity-control lists the sessions to confirm a removal, and a BFF
+calls UserInfo or refreshes. Two runs on the pinned image, each in four configurations. With the cache
+on, 801 of 1,800 removed sessions were refreshed after their removal answered, under `start-dev` and
+under `start --optimized` on PostgreSQL alike. With it off, none of 1,800 was. ROADMAP.md (A removed
+session refreshed) has the table.
+
+**What else was tried and why it is not the setting.**
+
+| Alternative | Result |
+| :-- | :-- |
+| Persistent user sessions off (`--features-disabled=persistent-user-sessions`) | Online sessions are memory-only and stay removed, but offline sessions are still database-backed and cached: 36 of 100 were refreshed after removal. Online sessions would also be lost on every restart |
+| identity-control ending a session by user logout (`POST /users/{id}/logout`) instead | Not affected, 0 of 200 with the cache on: the logout sets the user's not-before, and the refresh refuses a token issued before it [R14]. It ends every session of the user, so it is no substitute for ending one |
+| Rotating refresh tokens (`revokeRefreshToken`) | Not measured. It limits each refresh token to one use, and the session's holder, the BFF, always presents the latest one; the session itself is untouched. Not a fix |
+| Upgrading to 26.8.0 | Carries the tombstone fix for user sessions, and the option stays. An upgrade goes through this design's suite on its own; the setting stays until the suite shows it can go |
+
+**What it costs.** "When session caching is disabled, every session read goes directly to the
+database. This may increase database connection usage and CPU load, especially for workloads that rely
+heavily on token introspection or token exchange" [R13]. Consumers verify access tokens locally
+(STD-IAM-002), so the reads are sign-ins, refreshes, UserInfo and the Admin API: sized by the database,
+not by API traffic.
+
+**What remains.** A refresh whose read reaches the database before the removal commits is granted, and
+its access token lives out its lifetime. That is a refresh ordered before the removal, not a removed
+session coming back: its next refresh is refused. It is bounded by the access token lifetime
+(STD-IAM-002 §3.3).
 
 ### Build Output
 
@@ -296,6 +355,8 @@ defer yet. Its release record is the `upgrade` job's summary, which every run wr
 | :-- | :-- | :-- |
 | Upstream image reference | `sha256:` digest, recorded in this repository | A tag is mutable and not reproducible |
 | Preview features | disabled | ADR-IAM-001 §5.8 requires a separate decision to enable any |
+| User session cache (`spi-user-sessions--infinispan--use-caches`) | `false`, set in the image | A removed session stays removed (§Session Store) |
+| Persistent user sessions | on, Keycloak's default | Sessions survive a restart; the database is the one store |
 | Extension packaging | built from owned source, signed | SAD-001 §7.6 |
 | Realm application | pipeline only, above local development | ADR-IAM-001 §5.7 |
 | Promotion | same image digest across environments | EAD-005 §6.5 |
@@ -390,6 +451,16 @@ bill of materials for one commit agree.
   deployment.
 - Applying the definition twice produces no change on the second run.
 
+### Session Removal (1.7.0)
+
+- `TestTheKernelReadsSessionsFromTheDatabase` reads the user session provider's `useCaches` from the
+  server info and requires `false`, so an image built without the setting fails the `contract` job.
+- `TestARemovedSessionIsNotRefreshed` removes online and offline sessions by identifier, and online
+  sessions by user logout, each while the user's sessions are listed, UserInfo is called, or a refresh
+  is sent with the removal, and with nothing else reading. Every iteration waits 1 to 1.5 s after
+  sign-in. No refresh may be granted once the removal has answered. The job summary carries the counts
+  per variant.
+
 ### Promotion
 
 - The digest promoted to production equals the digest evaluated by the suite.
@@ -406,6 +477,11 @@ Preview features stay disabled. A preview feature in the authentication path is 
 dependency on behavior the vendor has not committed to, in the one system where a
 behavior change is a security event.
 
+The session cache is off because a removal has to hold (§Session Store). A session ended by its
+owner, by identity-control's containment, or by an operator is otherwise refreshed for as long as
+something keeps refreshing it, while the Admin API reports it gone. The setting is a provider option,
+not a feature flag, and the vendor recommends it for this defect [R10].
+
 Deferring theme assertions on a security release is a deliberate trade: a delayed
 security patch is a larger risk than a temporarily unstyled recovery page. Deferring
 the realm contract assertions would not be a trade, because it would ship an identity
@@ -418,6 +494,10 @@ candidate release rather than per commit. Its cost is dominated by container sta
 and database migration, both of which are inherent to what it verifies.
 
 Image build time does not affect any runtime path.
+
+The session store setting does (§Session Store): every sign-in, refresh, UserInfo call and Admin API
+session read goes to the database instead of memory. Access tokens are verified locally by consumers,
+so API traffic does not reach it.
 
 ## Operational Notes
 
@@ -454,6 +534,7 @@ release.
 | Publishes to | `identity-control`, `identity-experience`, and every protected resource — the declared realm contract |
 | Related design | `TDD-identity-kernel-001` — realm content this suite asserts |
 | Related design | `TDD-identity-kernel-002` — key invariants this suite asserts |
+| Consumed by | `TDD-identity-control-002`, `TDD-identity-control-005` — a session removed through the Admin API stays removed (§Session Store) |
 
 ### Open Questions
 
@@ -471,3 +552,11 @@ release.
 | R4 | ByteBuddy, `Implementation.Context.Default.Factory`, accessed 2026-10-07. <https://github.com/raphw/byte-buddy/blob/master/byte-buddy-dep/src/main/java/net/bytebuddy/implementation/Implementation.java>. "A factory for creating a `Default` that uses a random suffix for accessors"; the cached field is named `FIELD_CACHE_PREFIX + "$" + suffix + "$" + RandomString.hashOf(hashCode)`. |
 | R5 | GitHub Docs, *Removing workflow artifacts*, accessed 2026-10-07. <https://docs.github.com/en/actions/how-tos/manage-workflow-runs/remove-workflow-artifacts>. "By default, GitHub stores build logs and artifacts for 90 days, and this retention period can be customized." |
 | R6 | Ecma International, *ECMA-424, CycloneDX Bill of materials specification*, 2nd edition, December 2025. <https://ecma-international.org/publications-and-standards/standards/ecma-424/>. "This Standard defines the CycloneDX v1.7 Bill of materials specification". |
+| R7 | Keycloak 26.7.5, `model/infinispan/src/main/java/org/keycloak/models/sessions/infinispan/transaction/DefaultInfinispanTransactionProvider.java`, `commitImpl`: "// sends all the cache requests and queues any pending database writes. transactionList.forEach(transaction -> transaction.asyncCommit(stage, databaseWrites)); // all the cache requests has been sent // apply the database changes in a blocking fashion, and in a single transaction. commitDatabaseUpdates(databaseWrites);". `prepareStep` does the same inside the request's own transaction. |
+| R8 | Keycloak 26.7.5, `model/infinispan/.../changes/UserSessionPersistentChangelogBasedTransaction.java`, `get`: "if (wrappedEntity == null) { LOG.debugf("user-session not found in cache for sessionId=%s offline=%s, loading from persister", key, offline); wrappedEntity = getSessionEntityFromPersister(realm, key, userSession, offline);"; `PersistentSessionsChangelogBasedTransaction.importSession`: "existing = getCache(offline).putIfAbsent(key, session, …)". `PersistentUserSessionProvider.getUserSessionsStream` lists a user's sessions with "persister.loadUserSessionsStream(realm, user, offline, 0, null)". |
+| R9 | Keycloak 26.7.5, `model/infinispan/.../changes/JpaChangesPerformer.java`, `processUserSessionUpdate`: "case REPLACE -> { … if (userSessionModel != null) { mergeUserSession(…); } else { LOG.debugf("No user session found for %s", entry.getKey()); } }". |
+| R10 | keycloak/keycloak#51127, *Persistent User Sessions: cache-miss unconditionally re-hydrates cache from DB, resurrecting deleted sessions*, opened 2026-07-24, closed 2026-09-30, labelled `release/26.8.0`, <https://github.com/keycloak/keycloak/issues/51127>, accessed 2026-10-09: "the Admin UI/Admin REST API's "list sessions" queries the database directly and correctly shows zero sessions"; Alexander Schwartz (`ahus1`, listed in the repository's `MAINTAINERS.md`), 2026-09-22: "As a workaround, I recommend to disable the cache, but keep persistent sessions enabled. Use the option `spi-user-sessions--infinispan--use-caches` for that." |
+| R11 | keycloak/keycloak#53250, *Minimal tombstone implementation for user sessions*, merged 2026-09-30 as `a84a001`, <https://github.com/keycloak/keycloak/pull/53250>, accessed 2026-10-09: "On removal, `InfinispanChangesUtils` writes a short-lived tombstone marker"; "Only the user session caches are protected (not client session caches, which are out of scope for this minimal fix)". Tag 26.8.0 (published 2026-10-01) contains the commit; no 26.7 release carries it. |
+| R12 | Keycloak 26.7.5, `model/infinispan/.../InfinispanUserSessionProviderFactory.java`, `init`: "useCaches = config.getBoolean(CONFIG_USE_CACHES, !Profile.isFeatureEnabled(Profile.Feature.STATELESS)) && InfinispanUtils.isEmbeddedInfinispan();"; its configuration metadata: "Enable or disable caches"; `getOperationalInfo` reports `useCaches`, which the Admin API's server info shows. With it false, every cache holder is created "WithoutCache". |
+| R13 | Keycloak 26.8.0, *Upgrading Guide*, "Disabling caching of persistent user sessions", <https://github.com/keycloak/keycloak/blob/26.8.0/docs/documentation/upgrading/topics/changes/changes-26_8_0.adoc>: "To disable caching, set `--spi-user-sessions--infinispan--use-caches=false`"; *Configuring distributed caches*, "Disabling session caching", <https://github.com/keycloak/keycloak/blob/26.8.0/docs/guides/server/caching.adoc>: "When session caching is disabled, every session read goes directly to the database. This may increase database connection usage and CPU load, especially for workloads that rely heavily on token introspection or token exchange." Accessed 2026-10-09. |
+| R14 | Keycloak 26.7.5, `services/.../resources/admin/UserResource.java`, `logout`: "session.users().setNotBeforeForUser(realm, user, Time.currentTime());"; `services/.../protocol/oidc/refresh/AbstractRefreshTokenProvider.java`: "TokenVerifier.createWithoutSignature(oldRefreshToken).withChecks(…, TokenManager.NotBeforeCheck.forModel(session, realm, user)).verify(); } catch (VerificationException e) { throw new OAuthErrorException(OAuthErrorException.INVALID_GRANT, "Stale token");". `RealmAdminResource.deleteSession` sets no not-before. |

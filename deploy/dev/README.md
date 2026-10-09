@@ -20,7 +20,7 @@ development server runbook (`docs/runbooks/dev-server.md`). This stack comes fir
 | Service | Image | Does |
 | :-- | :-- | :-- |
 | `postgres` | `postgres:17.11-alpine`, pinned by digest | Keycloak's database `keycloak`, owned by the role `keycloak`, in the volume `postgres` |
-| `keycloak` | `scnehaux/identity-kernel:dev`, built from `image/Dockerfile`: the digest in `image/keycloak.ref` plus this repository's login theme | The kernel, in production mode (`start --optimized`) |
+| `keycloak` | `scnehaux/identity-kernel:dev`, built from `image/Dockerfile`: the digest in `image/keycloak.ref` plus this repository's login theme | The kernel, in production mode (`start --optimized`), reading sessions from the database with no session cache (TDD-identity-kernel-005 §Session Store) |
 | `caddy` | `caddy:2.11.7-alpine`, pinned by digest | The TLS proxy, which keeps administration off the public internet |
 | `realm-apply` | built from `realm-apply.Dockerfile` | A one-shot job on every `up`: brings the realm to `realm/` and exits |
 

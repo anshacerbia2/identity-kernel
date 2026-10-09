@@ -653,6 +653,56 @@ item can close. Its proof can then require the switch instead of recording it, a
 separate browser it uses because of this defect. Those are organization-experience's changes to
 make.
 
+### A removed session refreshed, found by Organization Experience
+
+Organization Experience's stack proof ends a person's session from their other device: identity-control
+calls `DELETE /admin/realms/{realm}/sessions/{id}`, and the kernel stops listing it. In two runs
+(organization-experience 37843816015 and 37846007225, the kernel at `start --optimized` on Postgres) the
+BFF's next refresh on that session, four minutes later, was granted, and Keycloak logged no
+`REFRESH_TOKEN_ERROR`. Other runs of the same code passed.
+
+**Reproduced.** `compat/removed_session_test.go` signs in, waits 1 to 1.5 s, removes the session, and
+refreshes once the removal has answered, 50 times per variant, 8 in parallel. A variant is what else
+reads the session during the removal. Two runs on the pinned 26.7.5 image (37924555973, 37924648964,
+2026-10-09), each under `start-dev` on its file database and `start --optimized` on PostgreSQL;
+refreshes granted after the removal answered:
+
+| Variant | Cache on | Cache off |
+| :-- | --: | --: |
+| Online, nothing else reading | 0 of 200 | 0 of 200 |
+| Online, the user's sessions listed during the delete | **183 of 200** | 0 of 200 |
+| Online, UserInfo called during the delete | **184 of 200** | 0 of 200 |
+| Online, a refresh sent with the delete | **48 of 200** | 0 of 200 |
+| Offline, nothing else reading | 0 of 200 | 0 of 200 |
+| Offline, the user's offline sessions listed during the delete | **181 of 200** | 0 of 200 |
+| Offline, UserInfo called during the delete | **171 of 200** | 0 of 200 |
+| Offline, a refresh sent with the delete | **34 of 200** | 0 of 200 |
+| Online, user logout, sessions listed during it | 0 of 100 | 0 of 100 |
+| Online, user logout, UserInfo called during it | 0 of 100 | 0 of 100 |
+| **Total** | **801 of 1,800** | **0 of 1,800** |
+
+Every granted refresh was on a session the Admin API no longer listed. The session's age is not the
+cause: with nothing else reading, no removal failed. A concurrent read is. In the stack proof the reads
+were the account page's session list and the proof's own polling of it, both through identity-control.
+
+**The cause** is keycloak#51127. A delete empties the session's cache entry before its database delete
+commits. A read in between misses the cache, loads the still-committed row and puts it back. The
+database has no session, so nothing lists it; a refresh reads the cache first and is granted.
+TDD-identity-kernel-005 1.7.0 §Session Store quotes the source and the issue. Disabling persistent
+user sessions instead left offline sessions exposed: 36 of 100 were refreshed after removal.
+A user logout is not affected, because it sets the user's not-before, which the refresh checks.
+
+✅ **Fixed in the image.** `image/Dockerfile` sets `KC_SPI_USER_SESSIONS__INFINISPAN__USE_CACHES=false`,
+the workaround the issue's maintainer gives: sessions stay persistent and are read from the database.
+The vendor's fix (a tombstone, user sessions only) is in 26.8.0 and not in 26.7.x. The `contract` job
+now runs both tests: `TestTheKernelReadsSessionsFromTheDatabase` requires the setting, and
+`TestARemovedSessionIsNotRefreshed` requires no refresh after a removal, 30 iterations per variant.
+The cost is a database read for every session lookup.
+
+**Nothing changes in identity-control.** It keeps ending one session by its identifier, and containment
+by user logout. Organization Experience's stack proof can require no refresh after the removal once this
+is merged.
+
 ## Week 3 · Event listener
 
 - Minimal listener capturing user, admin, and security events
@@ -825,7 +875,7 @@ Recorded so scope creep is visible rather than convenient:
 against the pinned release and their outcomes recorded in the designs that depend on
 them.
 
-✅ **Met.** All five designs are approved, at 1.18.0, 1.1.0, 1.1.0, 1.6.0 and 1.6.0. Questions 1 to 4
+✅ **Met.** All five designs are approved, at 1.18.0, 1.1.0, 1.1.0, 1.6.0 and 1.7.0. Questions 1 to 4
 are answered against the pinned release and recorded in TDD-identity-kernel-001 §Open
 Proof-of-Concept Questions, and questions 2 and 3 also in TDD-identity-control-001.
 
