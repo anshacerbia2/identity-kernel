@@ -17,3 +17,8 @@ RUN /opt/keycloak/bin/kc.sh build
 
 FROM ${KEYCLOAK_IMAGE}
 COPY --from=builder /opt/keycloak/ /opt/keycloak/
+# Sessions are read from the database, never from a cache in front of it (TDD-identity-kernel-005
+# §Session Store). With the cache on, a request that reads a session while it is being deleted puts it
+# back into the cache after the database lost it, and the removed session keeps refreshing
+# (keycloak#51127). A runtime option, set here so every environment that runs the image has it.
+ENV KC_SPI_USER_SESSIONS__INFINISPAN__USE_CACHES=false
