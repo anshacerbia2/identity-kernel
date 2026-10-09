@@ -36,6 +36,29 @@ func TestApplyingTwiceChangesNothing(t *testing.T) {
 	}
 }
 
+// A realm built from the definition holds no retired user-profile attribute. The apply deletes nothing,
+// so this is what retiring one rests on: the realm is built from zero, and the definition may not
+// declare it again (realmdef.RetiredAttributes).
+func TestTheRealmHoldsNoRetiredProfileAttribute(t *testing.T) {
+	a := requireKeycloak(t)
+	var profile struct {
+		Attributes []struct {
+			Name string `json:"name"`
+		} `json:"attributes"`
+	}
+	if err := a.getJSON("/admin/realms/"+realmName+"/users/profile", &profile); err != nil {
+		t.Fatalf("reading the user profile: %v", err)
+	}
+	if len(profile.Attributes) == 0 {
+		t.Fatal("the user profile lists no attribute; the read proves nothing")
+	}
+	for _, attribute := range profile.Attributes {
+		if reason, retired := realmdef.RetiredAttributes[attribute.Name]; retired {
+			t.Errorf("the realm's user profile declares the retired %s (%s)", attribute.Name, reason)
+		}
+	}
+}
+
 func TestTheAppliedRevisionIsRecorded(t *testing.T) {
 	a := requireKeycloak(t)
 	definition := loadDefinition(t)

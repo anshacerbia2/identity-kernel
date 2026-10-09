@@ -290,9 +290,23 @@ func (d Definition) validateStructure() error {
 			return fmt.Errorf("user-profile.json declares an attribute with an empty or repeated name %q",
 				attributeName)
 		}
+		if reason, retired := RetiredAttributes[attributeName]; retired {
+			return fmt.Errorf("user-profile.json declares %s, which is retired: %s", attributeName, reason)
+		}
 		attributes[attributeName] = true
 	}
 	return nil
+}
+
+// RetiredAttributes are user-profile attributes the realm once declared and no longer may, each with
+// the decision that retired it. The apply deletes nothing, so a realm is rid of one by being built
+// from zero without it (deploy/dev/README.md), and this list keeps the definition from bringing it
+// back. compat/ asserts that the applied realm's profile holds none of them.
+var RetiredAttributes = map[string]string{
+	// provider_scope is not issued (TDD-identity-kernel-001 1.9.0): STD-IAM-002 §3.1.1 forbids a
+	// resource to read a provider grant from a claim, and identity-control decides provider authority
+	// from its projection of Organization's grants (TDD-identity-control-006).
+	"scnehaux_provider_scope": "provider_scope is not issued; STD-IAM-002 §3.1.1, TDD-identity-kernel-001 1.9.0",
 }
 
 func name(object map[string]any) string {

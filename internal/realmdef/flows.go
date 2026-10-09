@@ -98,6 +98,12 @@ func validateFlows(flows []Flow) error {
 		if err := claim(f.Alias); err != nil {
 			return err
 		}
+		// Keycloak stores a flow's description in a 255-character column, as it does a client scope's,
+		// and a longer one fails the flow's creation with a 500 at apply.
+		if length := len([]rune(f.Description)); length > maxScopeDescription {
+			return fmt.Errorf("flow %s has a %d-character description; Keycloak stores at most %d", f.Alias, length,
+				maxScopeDescription)
+		}
 		if f.Binding != "" {
 			if !flowBindings[f.Binding] {
 				return fmt.Errorf("flow %s names the binding %q; only %v are managed", f.Alias, f.Binding, sortedKeys(flowBindings))
