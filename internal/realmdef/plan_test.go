@@ -200,6 +200,23 @@ func TestParseRefusesWhatOnlyTheApplyStepMayWrite(t *testing.T) {
 	}
 }
 
+// A retired attribute cannot come back through the definition (TDD-identity-kernel-001 1.18.0
+// §Declarative User Profile).
+func TestParseRefusesARetiredProfileAttribute(t *testing.T) {
+	for retired := range RetiredAttributes {
+		files := files(t)
+		files["user-profile.json"] = []byte(`{"attributes":[{"name":"` + retired + `","multivalued":false}]}`)
+		if _, err := Parse(files); err == nil || !strings.Contains(err.Error(), retired) {
+			t.Errorf("a definition declaring the retired %s parsed: %v", retired, err)
+		}
+	}
+	for _, attribute := range definition(t).Profile {
+		if _, retired := RetiredAttributes[name(attribute)]; retired {
+			t.Errorf("realm/user-profile.json declares the retired %s", name(attribute))
+		}
+	}
+}
+
 // Admin-event retention has no top-level key; Keycloak keeps it as a realm attribute.
 func TestParseAcceptsAnyOtherRealmAttributeAsAString(t *testing.T) {
 	files := files(t)
