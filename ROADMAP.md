@@ -43,19 +43,19 @@ and context switch mechanism — are exercised here but decided in `identity-con
 
 ## Week 1 · Pinned instance and the realm contract
 
-- ⏳ Digest-pinned Keycloak running from a reproducible image build — **the upstream image is
-  pinned by digest** (`image/keycloak.ref`, 26.7.5 since 2026-10-01; 26.7.4 before). The kernel image
-  is built from that digest plus the login theme (TDD-005 1.4.0), and every CI job and the development
-  server run it. The `image-build` workflow builds it twice from nothing and compares the two
-  (TDD-005 1.6.0 §Build Reproducibility, first run 37686287003):
+- ✅ Digest-pinned Keycloak running from the image build — **the upstream image is pinned by digest**
+  (`image/keycloak.ref`, 26.7.5 since 2026-10-01; 26.7.4 before). The kernel image is built from that
+  digest plus the login theme (TDD-005 1.4.0), and every CI job and the development server run it. The
+  `image-build` workflow builds it twice from nothing and compares the two (TDD-005 1.6.0 §Build
+  Reproducibility, first run 37686287003):
   - ✅ the image holds no secret, no realm export and no development keystore: its own layers hold
     only Keycloak's build output and the theme as git holds it;
   - ✅ a CycloneDX 1.7 bill of materials lists every extension with its version (none yet), the theme
     by its git tree id, and Keycloak's own packages. The run keeps it until the image is published;
-  - **not met: the same digest.** Keycloak's `kc.sh build` writes about 130 classes with random
-    names (ByteBuddy's accessor suffix) and dated jar entries. Every other layer and file is the same,
-    and a difference anywhere else fails. Recorded on every run; it closes when Keycloak's build is
-    deterministic
+  - ⏳ **the same digest, the one part of this item not met.** Keycloak's `kc.sh build` writes about
+    130 classes with random names (ByteBuddy's accessor suffix) and dated jar entries. Every other
+    layer and file is the same, and a difference anywhere else fails. Recorded on every run; it closes
+    when Keycloak's build is deterministic. It is not part of Week 1's exit, which is met (below)
 - ✅ Every shipped image scanned for vulnerabilities (STD-GLB-009 1.4.0 §Container Images) — the
   `image-scan` workflow builds the kernel image and realm-apply's, and scans them and every
   digest-pinned image `deploy/dev/compose.yaml` names, on every change and daily, with Grype pinned
@@ -80,7 +80,13 @@ and context switch mechanism — are exercised here but decided in `identity-con
   provider authority from its projection of Organization's grants (TDD-identity-control-006), and
   STD-IAM-002 §3.1.1 forbids reading a grant from a claim, so the mapper and the
   `scnehaux_provider_scope` attribute leave the definition. `realm-apply` deletes the mapper from a
-  live realm; the attribute stays there unread, because removing one is a migration.
+  live realm.
+  - ✅ **The attribute is retired** (TDD-identity-kernel-001 1.18.0 §Declarative User Profile). The
+    apply deletes nothing, so no realm-apply step removes it from a live realm; every environment is
+    built from zero (`deploy/dev/README.md`), so none holds it. `realmdef.RetiredAttributes` refuses a
+    definition that declares it again, and `compat/apply_test.go`
+    (`TestTheRealmHoldsNoRetiredProfileAttribute`) asserts the applied realm's user profile holds
+    none
 
 - ✅ The workload profile — `scnehaux-workload`, carrying `principal_id`, `subject_type` and
   `workload_owner` (STD-IAM-002 §3.2.1). A workload's token comes from the client credentials grant
@@ -602,6 +608,40 @@ as a baseline, and with it every later apply. `TestABaselineIsHeldToStructureNot
 pins the fix.
 Organization Experience signs in this way.
 
+### A Tenant sign-in on a provider sign-in's session, found by Organization Experience
+
+Organization Experience's stack proof signs an operator in as a provider (`scnehaux-provider`,
+`aal2`, `max_age=0`) and then asks the same kernel session for `scnehaux-privileged
+organization:<tenant_id>` at `aal2`. The kernel answered its own error page, and a new browser
+succeeded (organization-experience ROADMAP, production gate). `ADR-IAM-008` §6 expects the opposite:
+"Within the SSO session a Tenant switch needs no credential".
+
+**Reproduced.** `compat/session_tenant_test.go` asks it of the pinned 26.7.5 image as a browser does.
+Compat run 37913958776, on 2026-10-09, before the fix:
+- On the provider sign-in's session, the Tenant sign-in gets a `400` page, "Invalid username or
+  password".
+- **`max_age=0` and the level are not the cause.** An `aal1` session made without `max_age` fails
+  the same way.
+- **The organization scope is.** The same session's sign-in without it is answered without a page.
+- A Tenant sign-in with `max_age=0` asks for the password and the code, and succeeds.
+
+**The cause.** The kernel's *Cookie* step leaves a sign-in that names an Organization to a later
+*Organization Identity-First Login* step. Keycloak adds that step only to the flow it creates for a
+realm, and a custom flow must add it itself. `scnehaux-browser-v3` had none, so the flow ended
+without success, which Keycloak reports as invalid credentials. TDD-identity-kernel-001 1.18.0
+§Authentication Levels quotes the source and the Server Administration Guide.
+
+✅ **Fixed in the realm.** `scnehaux-browser-v4` adds the organization step between the cookie and the
+forms. It runs only for a Tenant sign-in on a session that has already identified a person, so a sign-in
+in a new browser keeps its pages, with no identity-first page. A step-up, `max_age` or `prompt=login`
+still asks again. The test stays in the suite.
+
+**Nothing changes in a consumer.** Organization Experience's BFF already sends what ADR-IAM-008 §5.2
+says, and needs no `prompt=login`. Once this is merged, its stack proof should record "signed in to
+the Tenant on the provider sign-in's kernel session" (`provider-mode.json`). Its ROADMAP item can then
+close, and the proof can drop the separate browser it uses because of this defect. That is
+organization-experience's change to make.
+
 ## Week 3 · Event listener
 
 - Minimal listener capturing user, admin, and security events
@@ -774,7 +814,7 @@ Recorded so scope creep is visible rather than convenient:
 against the pinned release and their outcomes recorded in the designs that depend on
 them.
 
-✅ **Met.** All five designs are approved, at 1.17.0, 1.1.0, 1.1.0, 1.6.0 and 1.6.0. Questions 1 to 4
+✅ **Met.** All five designs are approved, at 1.18.0, 1.1.0, 1.1.0, 1.6.0 and 1.6.0. Questions 1 to 4
 are answered against the pinned release and recorded in TDD-identity-kernel-001 §Open
 Proof-of-Concept Questions, and questions 2 and 3 also in TDD-identity-control-001.
 
