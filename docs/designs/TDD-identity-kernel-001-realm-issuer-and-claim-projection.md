@@ -3,12 +3,12 @@ doc_meta:
   id: TDD-identity-kernel-001
   title: Realm Topology, Issuer Identity, and Token Claim Projection
   owner: Identity Platform Team
-  version: 1.17.0
+  version: 1.18.0
   status: approved
   classification: restricted
   review_cycle_days: 90
   created_date: 2026-08-11
-  last_reviewed: 2026-10-07
+  last_reviewed: 2026-10-09
   parent_sad: SAD-001
 ---
 
@@ -179,9 +179,11 @@ and the `scnehaux_provider_scope` attribute are therefore not in the definition.
 *Tradeoff.* A client still configured for the old profile stops working, because identity-control
 refuses a token that carries the claim, rather than being read silently as an owner. On a realm
 applied before this revision, `realm-apply` deletes the mapper, because a managed scope's mapper
-set is the definition's. It leaves the attribute in the live user profile, because Apply deletes
-nothing whose removal is a migration (§Configuration as Code). No mapper reads it, so a value a
-user still holds reaches no token.
+set is the definition's. Apply deletes nothing whose removal is a migration (§Configuration as
+Code), so it leaves the attribute in a realm applied before this revision. No mapper reads it, so a
+value a user still holds reaches no token. **Retired (1.18.0):** every realm is built from zero
+(`deploy/dev/README.md`), so none holds it, and the definition may not declare it again
+(§Declarative User Profile).
 **`scnehaux-privileged` is the tenant-scoped form of the privileged profile (1.14.0).** A privileged
 operation inside one Tenant, such as administering it at Organization Control (`ADR-ORG-003 §5.3`),
 needs the same four claims as a provider token and the Tenant it acts in. The scope carries
@@ -417,6 +419,16 @@ control. Until the sweep runs, a rewritten identifier is carried into tokens:
 
 Both are disabled on the next sweep.
 
+**Retired attributes (1.18.0).** An attribute the realm no longer declares is retired, not
+deleted: Apply deletes nothing (§Configuration as Code). Two rules take its place:
+- **A realm is rid of it by being built from zero** without it, which is how every environment is
+  deployed (`deploy/dev/README.md`).
+- **The definition may not declare it again.** `realmdef.RetiredAttributes` names each one with the
+  decision that retired it, and parsing refuses a definition that declares one.
+  `compat/apply_test.go` asserts that the applied realm's user profile holds none.
+
+`scnehaux_provider_scope` is the one retired attribute (§Claim Projection, 1.9.0).
+
 A disable sent as the partial representation `{"enabled": false}` keeps the
 identifier and the profile fields. Quarantine may therefore send only what it
 changes, and `compat/` fails any release that starts erasing attributes on a partial
@@ -537,14 +549,20 @@ as Keycloak advises: "a best practice is to stick to realm mappings" [R1]. `phr`
 ADR and is left out of the map until a flow can satisfy it, because asking for a level no flow
 reaches is a failed sign-in.
 
-**The flow.** The browser binding is a flow of this realm's own, `scnehaux-browser-v3`. It follows
+**The flow.** The browser binding is a flow of this realm's own, `scnehaux-browser-v4`. It follows
 the step-up flow Keycloak documents [R1]. The second factor is offered as WebAuthn or TOTP, as
 Keycloak documents for a second factor [R3], and a recovery code is offered beside them
-(`ADR-IAM-005 §5.2`) [R7]:
+(`ADR-IAM-005 §5.2`) [R7]. A Tenant sign-in on an existing session is answered by the organization
+step (1.18.0, below):
 
 ```text
-scnehaux-browser-v3
+scnehaux-browser-v4
 ├─ Cookie                                     ALTERNATIVE
+├─ organization                               ALTERNATIVE
+│  └─ organization session                    CONDITIONAL
+│     ├─ Condition - client scope             REQUIRED   organization
+│     ├─ Condition - user role                REQUIRED   default-roles-scnehaux
+│     └─ Organization Identity-First Login    ALTERNATIVE
 └─ forms                                      ALTERNATIVE
    ├─ level 1                                 CONDITIONAL
    │  ├─ Condition - Level Of Authentication  REQUIRED   LoA 1, max age 36000 s (the SSO session maximum)
@@ -558,7 +576,50 @@ scnehaux-browser-v3
          └─ Recovery Authentication Code Form ALTERNATIVE
 ```
 
-v3 adds the last step to v2, which stays declared and unbound, as v1 does.
+v3 added the recovery code to v2. v4 adds the organization step to v3. v1, v2 and v3 stay declared
+and unbound.
+
+**A Tenant sign-in on an existing session (1.18.0).** `ADR-IAM-008` §6 has one confidential client
+move between the privileged forms by new sign-ins: "Within the SSO session a Tenant switch needs no
+credential, but entering the provider form always asks for one". Organization Experience's stack
+proof found v3 refusing that switch: a Tenant sign-in on the session of a provider sign-in failed at
+the kernel's own error page ("Invalid username or password", event `invalid_user_credentials`, no
+user), while the same sign-in in a new browser succeeded.
+
+- **The cause is the organization scope on a session, not `max_age=0` or the level.** The pinned
+  kernel's *Cookie* step answers a sign-in from the session cookie, unless the request asks for an
+  Organization. Then it identifies the user, attaches the session and returns *attempted*, leaving
+  the Organization to a later step [R14]. Keycloak adds that step, *Organization Identity-First
+  Login*, to the browser flow it creates for a realm. A custom flow must add it itself: "you also
+  need to manually update your existing (custom) authenticating flows" [R15]. v3 had none. Its forms
+  had nothing left to ask, because the session met both levels, so the flow ended without success,
+  and Keycloak reports an unsuccessful flow as invalid credentials [R16]. `compat/session_tenant_test.go`
+  found the same on an `aal1` session made without `max_age`, and found that the same session's sign-in
+  without the organization scope succeeds.
+- **The step answers a session, and nothing else.** On a session, *Organization Identity-First
+  Login* resolves the Organization the request names and completes the sign-in, as the cookie would
+  have ("if re-authenticating in the scope of an organization", [R17]). Its sub-flow runs only when
+  both conditions hold:
+  - **Condition - client scope `organization`:** the request asks for a Tenant;
+  - **Condition - user role `default-roles-scnehaux`:** a person is already identified, by the
+    session. Keycloak grants the realm's default role to every user it creates, identity-control's
+    Principals included. With no person identified, the condition is false [R18].
+- **Why not Keycloak's own condition.** Keycloak's procedure guards the step with *Condition - user
+  configured* [R15]. That condition is true for this step with no user, because the step needs none,
+  so every sign-in in a new browser would meet the identity-first page: a username first, the password
+  after it [R15]. The realm has no identity provider and no domain-based routing to use that page
+  for, and it would change every sign-in the theme and the consumers' proofs know. The role condition
+  keeps the step to a session.
+- **A step-up still asks.** When the session's level is too old for the request, or `max_age` or
+  `prompt=login` asks for a fresh authentication, the *Cookie* step identifies the person without
+  marking the sign-in as answered by the session. The organization step then returns *attempted* as
+  well [R17], and the forms ask for what the level needs. OpenID Connect requires this: past
+  `max_age`, "the OP MUST attempt to actively re-authenticate the End-User", and with
+  `prompt=login` it "MUST reauthenticate the End-User even if the End-User is already authenticated"
+  [R19].
+- **A non-member is refused, as in a new browser.** The scope condition resolves `organization:<alias>`
+  for the identified person, and a non-member's request resolves to nothing, so the step does not
+  run and the sign-in is refused (R13).
 
 - **WebAuthn or TOTP at level 2.** Either is a second factor beside the password, and the pair meets
   AAL2 [R2]. `ADR-IAM-004` §5.1 names both.
@@ -716,7 +777,7 @@ persisted against, so they are asserted rather than observed.
 | Audience client scopes | exactly one of internal, privileged, provider, workload, external | Applies the STD-IAM-002 claim allowlist |
 | Signing algorithm | `PS256` | STD-IAM-002 §3.2.2 initial baseline |
 | `acr.loa.map` | `{"aal1":1,"aal2":2}` | ADR-IAM-004 §5.1; realm-level, as Keycloak advises |
-| Browser flow | `scnehaux-browser-v3` | Password at LoA 1, plus WebAuthn, TOTP or a recovery code at LoA 2 (§Authentication Levels) |
+| Browser flow | `scnehaux-browser-v4` | Password at LoA 1, plus WebAuthn, TOTP or a recovery code at LoA 2; a Tenant sign-in on a session answered by the organization step (§Authentication Levels) |
 | Recovery codes | issued with the first TOTP (`add-recovery-codes`) | ADR-IAM-005 §5.3 |
 | Brute-force detection | permanent lockout after 90 temporary ones, at the 100th failure | ADR-IAM-005 §5.6; §Guessing Limits |
 | OTP policy | TOTP, 6 digits, 30 s, `HmacSHA1` | The realm default, accepted by common authenticator apps |
@@ -813,6 +874,16 @@ compatibility suite rather than left to operational discipline.
   - the failure after the last temporary lockout disables the user;
   - enabling the user lets the right password in.
 - realm-apply refuses a hand-edited required action as drift.
+- **A Tenant sign-in on a session (1.18.0).** `compat/session_tenant_test.go` signs a person in as
+  Organization Experience's BFF does:
+  - a provider sign-in at `aal2` with `max_age=0`, then, on the same session, a Tenant sign-in at
+    `aal2`. It is answered without a page and carries the Tenant, the `principal_id` and `aal2`;
+  - a provider sign-in on that session after it, answered without a page and carrying no Tenant;
+  - on an `aal1` session made without `max_age`, a sign-in without the organization scope and a
+    Tenant sign-in, each answered without a page;
+  - a Tenant sign-in with `max_age=0` asks for the password and the code again;
+  - a Tenant the person is not a member of gets no token on the session.
+- The unit tests hold the organization step's two conditions to their declaration.
 
 ### Upgrade
 
@@ -880,6 +951,7 @@ rollback, signing-key incident, and issuer change assessment.
 | Governed by | ADR-IAM-004 — authentication assurance levels `aal1`/`aal2` and step-up |
 | Conforms to | STD-IAM-001 §3.1 2.2.0 — privileged access is multi-factor |
 | Consumed by | `TDD-identity-control-005` §Step-Up — the levels its challenge asks for |
+| Governed by | ADR-IAM-008 §5.4, §6 — switching the privileged form is a new sign-in; within the SSO session a Tenant switch needs no credential |
 
 ### Open Proof-of-Concept Questions
 
@@ -924,3 +996,9 @@ standard amendment.
 | R11 | Keycloak 26.7.5, `services/src/main/java/org/keycloak/protocol/oidc/OIDCLoginProtocolFactory.java`, realm creation: "ClientScopeModel organizationScope = newRealm.addClientScope(OAuth2Constants.ORGANIZATION); … organizationScope.addProtocolMapper(OrganizationMembershipMapper.create(ORGANIZATION, true, true, true)); newRealm.addDefaultClientScope(organizationScope, false);" |
 | R12 | Keycloak 26.7.5 source. `OrganizationMembershipMapper.java`: a single-valued mapper returns "organizations.get(0).getAlias()". `TokenManager.java`, `validateSelectedOrganization`: "if (organization == null \|\| !organization.isEnabled() \|\| !organization.isMember(user)) { throw new ErrorResponseException(OAuthErrorException.INVALID_GRANT, "Invalid organization" …". |
 | R13 | Keycloak 26.7.5, *Server Administration Guide*, Mapping organization claims, source `docs/documentation/server_admin/topics/organizations/mapping-organization-claims.adoc`: `organization:<alias>` "Maps to a specific organization with the given alias … If any of the aliases does not match an existing organization or the user is not a member, the request will be rejected." |
+| R14 | Keycloak 26.7.5, `services/src/main/java/org/keycloak/authentication/authenticators/browser/CookieAuthenticator.java`, `authenticate`, the cookie-only branch: "context.attachUserSession(authResult.session()); if (isOrganizationContext(context)) { // if re-authenticating in the scope of an organization, an organization must be resolved prior to authenticating the user context.attempted(); } else { context.success(); }"; `isOrganizationContext` is true when Organizations are enabled and present and "OrganizationScope.valueOfScope(session) != null". |
+| R15 | Keycloak 26.7.5, *Server Administration Guide*, Authenticating members, source `docs/documentation/server_admin/topics/organizations/authenticating-members.adoc` at tag 26.7.5, accessed 2026-10-09: "When a realm is created, the authentication flows are automatically updated to enable specific steps to authenticate and onboard organization members"; "For existing realms, in addition to enabling organizations to the realm, you also need to manually update your existing (custom) authenticating flows"; the procedure adds a sub-flow "right after the *Identity Provider Redirector*", *Condition - user configured* and the *Organization Identity-First Login* step; "The main change to the *browser* flow is that it defaults to an identity-first login so that users are identified before prompting for their credentials." |
+| R16 | Keycloak 26.7.5, `services/src/main/java/org/keycloak/authentication/AuthenticationProcessor.java`: an unsuccessful flow throws "new AuthenticationFlowException(authenticationFlow.getFlowExceptions())", and `handleBrowserException` answers an exception with no listed error by "event.error(Errors.INVALID_USER_CREDENTIALS); … ErrorPage.error(session, authenticationSession, Response.Status.BAD_REQUEST, Messages.INVALID_USER)". `DefaultAuthenticationFlow.processFlow`: a conditional sub-flow whose condition is false is removed, and a flow left with no required or alternative step returns without success. |
+| R17 | Keycloak 26.7.5, `services/src/main/java/org/keycloak/organization/authentication/authenticators/browser/OrganizationAuthenticator.java`, `action`: for an enabled user, "if (isSSOAuthentication(authSession)) { // if re-authenticating in the scope of an organization context.success(); } else { attempted(context, username); }". |
+| R18 | Keycloak 26.7.5, `services/src/main/java/org/keycloak/authentication/authenticators/conditional/ConditionalRoleAuthenticator.java`, `matchCondition`: "if (user != null && authConfig!=null && authConfig.getConfig()!=null) { … return negateOutput != user.hasRole(role); } return false;". `ConditionalUserConfiguredAuthenticator.isConfiguredFor`: "if (authenticator.requiresUser() && context.getUser() == null) { return false; } return authenticator.configuredFor(…)", and `IdentityProviderAuthenticator.requiresUser` returns false. `ConditionalClientScopeAuthenticator` matches a scope from "TokenManager.getRequestedClientScopes(… authSession.getAuthenticatedUser())". |
+| R19 | OpenID Foundation, *OpenID Connect Core 1.0 incorporating errata set 2*, <https://openid.net/specs/openid-connect-core-1_0.html>, accessed 2026-10-09: §3.1.2.1 `max_age`: "If the elapsed time is greater than this value, the OP MUST attempt to actively re-authenticate the End-User"; `prompt=login`: "The Authorization Server SHOULD prompt the End-User for reauthentication"; §3.1.2.3: "the Authorization Server attempts to Authenticate the End-User or determines whether the End-User is Authenticated, depending upon the request parameter values used. The methods used by the Authorization Server to Authenticate the End-User (e.g., username and password, session cookies, etc.) are beyond the scope of this specification"; "The Authentication Request contains the prompt parameter with the value login. In this case, the Authorization Server MUST reauthenticate the End-User even if the End-User is already authenticated." |
