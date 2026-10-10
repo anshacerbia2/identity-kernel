@@ -72,8 +72,18 @@ services:
     networks: [internal, api]
 
   caddy:
-    # caddy:2.11.7-alpine, resolved 2026-10-07
-    image: caddy@sha256:d8542f48d34a9cf4e4c11a478865229840e87e4c96ea3f439101f31a5d35f75f
+    # Caddy 2.11.7 built from source with golang.org/x/net v0.60.0, on the pinned caddy:2.11.7-alpine
+    # (caddy.Dockerfile, TDD-identity-kernel-005 §Images the Stack Runs). Built rather than pulled until
+    # a Caddy release carries the fix; `docker compose up -d --build` rebuilds it.
+    build:
+      context: .
+      dockerfile: caddy.Dockerfile
+      # From .env: GOPROXY=direct where the network intercepts TLS to the module proxy
+      # (STD-GLB-009 §Development Server Deployment). go.sum and the checksum database still verify
+      # every module either way.
+      args:
+        GOPROXY: ${GOPROXY:-https://proxy.golang.org,direct}
+    image: scnehaux/identity-kernel-caddy:dev
     restart: unless-stopped
     ports:
       - "80:80"
