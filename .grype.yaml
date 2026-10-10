@@ -1,22 +1,39 @@
-# Grype configuration for scripts/image-scan.sh (STD-GLB-009 1.4.0 §Container Images).
+# Grype configuration for scripts/image-scan.sh (STD-GLB-009 1.8.0 §Container Images, which lands with
+# scnehaux-architecture #86; TDD-identity-kernel-005 §Images the Stack Runs).
 #
-# An ignore rule names the vulnerability and the package. Its reason begins "review-by YYYY-MM-DD:",
-# at most 90 days ahead, and says why the finding does not apply or what it waits for. The scan
-# fails once a rule's date has passed.
+# An ignore rule is a VEX statement about one artifact (rule 5). It matches on vulnerability, package
+# name, version and type, and, for a package found inside a file, the file's full path in the image
+# (package.location, no wildcard), so it stops matching when the version changes or the file moves.
+# Its reason reads
+#
+#   review-by YYYY-MM-DD: <affected | not_affected/<justification>>: detected YYYY-MM-DD: <images>: <statement>
+#
+# `affected` carries the action statement: the CISA BOD 26-04 inputs and time it used (rule 8), what the
+# finding waits for, and where that was asked. `not_affected` carries the evidence rule 7 asks for.
+# scripts/image-scan-rules.py checks the form and the dates before every scan, and the scan fails once
+# a review date has passed.
+#
+# One file serves every image scanned here, and Alpine's package database is the same path in each, so
+# a rule for an apk package matches that package in every Alpine image. The version is what keeps it to
+# the image it is written for: the proxy and realm-apply carry zlib 1.3.2-r1, which the rule below does
+# not match.
 check-for-app-update: false
 ignore:
   - vulnerability: CVE-2026-85091
     package:
       name: zlib
+      version: 1.3.2-r0
+      type: apk
     reason: >-
-      review-by 2026-10-21: in postgres:17.11-alpine, the kernel's database image.
-      Alpine ships the fix as zlib 1.3.2-r1, and the official image has not been rebuilt with it: on
-      2026-10-07 the tag still resolves to the pinned digest. Waits for that rebuild, then the pin moves.
-  - vulnerability: CVE-2026-103111
-    package:
-      name: pcre2
-    reason: >-
-      review-by 2026-10-21: in alpine/git:2.54.0, realm-apply's base, whose newest build (2026-10-04)
-      still carries pcre2 10.48. The flaw needs an attacker-controlled regular expression and JIT use;
-      realm-apply runs git over this repository's own definition with no pattern from outside. Waits
-      for an alpine/git build with pcre2 10.49, then the pin moves.
+      review-by 2026-10-21: affected: detected 2026-10-07:
+      postgres:17.11-alpine (postgres@sha256:b0f9560a2de083e2cc7382e75f808c7381a32852a7ec49117deedb300e552b24): Rule 8
+      inputs: not publicly exposed (the database is on the stack's internal network only, no published
+      port); not in the KEV (catalog 2026.10.08); Vulnrichment (CISA ADP, 2026-09-03) Automatable no,
+      Technical Impact total, Exploitation poc. Table 1 gives fix on system upgrade, for an image run
+      without building the next pin move, within 90 days of detection: by 2027-01-05. Waits for the
+      official image to be rebuilt on an Alpine base with zlib 1.3.2-r1, which Alpine already ships;
+      on 2026-10-10 postgres:17.11-alpine still resolves to the pinned digest and alpine:3.24 (3.24.2,
+      built 2026-09-17) still carries 1.3.2-r0, and no rebuild date is announced. Not yet asked of the
+      upstream: no docker-library/postgres issue names it on 2026-10-10. Reviewed on this date to move
+      the pin as soon as the rebuild lands; when the rule 8 date would pass first, the stack builds its
+      own image from the pinned one with the upgrade line (rule 10).

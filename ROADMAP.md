@@ -62,6 +62,26 @@ and context switch mechanism — are exercised here but decided in `identity-con
   by digest (`scripts/image-scan.sh`). It fails on a High or Critical vulnerability with a fix. The
   pinned Keycloak 26.7.5 had none; the first scan moved the Caddy and alpine/git pins. A finding in
   Keycloak is fixed by moving `image/keycloak.ref`, through the compatibility suite
+- ✅ Images remediated to STD-GLB-009 1.8.0 §Container Images (lands with scnehaux-architecture #86;
+  TDD-005 1.8.0 §Images the Stack Runs). The daily scan of 2026-10-10 (run 38047364279) failed on
+  GO-2026-6603 to GO-2026-6613 in two third-party Go binaries, `/usr/bin/caddy` and alpine/git's
+  `/usr/bin/git-lfs`:
+  - ✅ **the proxy is built from source**, the one publicly exposed image: Caddy 2.11.7 with
+    `golang.org/x/net` v0.60.0 on Go 1.27.2 (`deploy/dev/caddy.Dockerfile`), overlaid on the pinned
+    `caddy:2.11.7-alpine`; GO-2026-6612's BOD 26-04 time ran to 2026-10-13. Compose builds it;
+  - ✅ **realm-apply runs on `alpine:3.24` with git only**: no git-lfs, no perl; git 2.54.0, pcre2
+    10.49-r0, zlib 1.3.2-r1. The pcre2 exception is gone;
+  - ✅ `zlib>=1.3.2-r1` upgrade lines (CVE-2026-85091) in both images this repository builds;
+  - ✅ `.grype.yaml` holds one rule in rule 5's form: `zlib` 1.3.2-r0 in Postgres, `affected`, review
+    by 2026-10-21 (Table 1 limit 2027-01-05). `scripts/image-scan-rules.py` checks every rule's form
+    and dates before each scan
+- ⏳ **Caddy's source build ends with a release.** caddyserver/caddy#8179 moved x/net to v0.60.0 on
+  2026-10-09; no release carries it yet (v2.11.7 is the latest). When one does, built with Go 1.26.9 or
+  later, compose pulls it by digest again and `caddy.Dockerfile` goes, through `deploy-dev`'s `stack`
+  and `tunnel` jobs
+- ⏳ **Postgres's `zlib`** waits for the official `postgres:17.11-alpine` rebuild on an Alpine base with
+  zlib 1.3.2-r1. The pin moves and the rule goes when it lands; by 2027-01-05 at the latest, or the
+  stack builds its own Postgres image with the upgrade line
 - ✅ Realm definition applied and diffed by the pipeline — `cmd/realm-apply`, which the development
   server runs as a one-shot job on every `docker compose up`, so a pulled change reaches the realm without
   a remembered command, and console drift fails the next up instead of being overwritten. CI applies the realm
@@ -875,7 +895,7 @@ Recorded so scope creep is visible rather than convenient:
 against the pinned release and their outcomes recorded in the designs that depend on
 them.
 
-✅ **Met.** All five designs are approved, at 1.18.0, 1.1.0, 1.1.0, 1.6.0 and 1.7.0. Questions 1 to 4
+✅ **Met.** All five designs are approved, at 1.18.0, 1.1.0, 1.1.0, 1.6.0 and 1.8.0. Questions 1 to 4
 are answered against the pinned release and recorded in TDD-identity-kernel-001 §Open
 Proof-of-Concept Questions, and questions 2 and 3 also in TDD-identity-control-001.
 

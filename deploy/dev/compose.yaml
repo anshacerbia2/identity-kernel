@@ -33,6 +33,9 @@ services:
       args:
         KEYCLOAK_IMAGE: quay.io/keycloak/keycloak@sha256:37dbaf6f0722c9ec246335f36e1ef8b2e6cb960f7c27e0d8c615121a3d475a85
     image: scnehaux/identity-kernel:dev
+    # Built, never pulled: without this compose tries scnehaux/identity-kernel:dev on Docker Hub first,
+    # a name this project does not own (TDD-identity-kernel-005 §Images the Stack Runs).
+    pull_policy: build
     restart: unless-stopped
     # start, not start-dev: production mode, with its hostname, proxy and cache behaviour. A
     # development server that runs start-dev tests a Keycloak nobody deploys. --optimized: the image
@@ -72,8 +75,19 @@ services:
     networks: [internal, api]
 
   caddy:
-    # caddy:2.11.7-alpine, resolved 2026-10-07
-    image: caddy@sha256:d8542f48d34a9cf4e4c11a478865229840e87e4c96ea3f439101f31a5d35f75f
+    # Caddy 2.11.7 built from source with golang.org/x/net v0.60.0, on the pinned caddy:2.11.7-alpine
+    # (caddy.Dockerfile, TDD-identity-kernel-005 §Images the Stack Runs). Built rather than pulled until
+    # a Caddy release carries the fix; `docker compose up -d --build` rebuilds it.
+    build:
+      context: .
+      dockerfile: caddy.Dockerfile
+      # From .env: GOPROXY=direct where the network intercepts TLS to the module proxy
+      # (STD-GLB-009 §Development Server Deployment). go.sum and the checksum database still verify
+      # every module either way.
+      args:
+        GOPROXY: ${GOPROXY:-https://proxy.golang.org,direct}
+    # No image name, as realm-apply: a named image is pulled from a registry before it is built, and
+    # nothing here may come from a repository someone else could publish under that name.
     restart: unless-stopped
     ports:
       - "80:80"

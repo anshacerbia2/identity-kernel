@@ -3,7 +3,7 @@
 # realm-apply as a one-shot container, so `docker compose up` brings the realm to the definition
 # instead of leaving that to a remembered command. It needs git at run time: it reads the definition
 # at the revision it last applied with `git show`, which is how it tells console drift from a
-# changed definition. So the runtime image is git's, and the repository is mounted read-only.
+# changed definition. So the runtime image is Alpine with git, and the repository is mounted read-only.
 #
 # Bases pinned by digest, with the tag each was resolved from beside it.
 
@@ -18,8 +18,16 @@ COPY internal ./internal
 RUN CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" -o /out/realm-apply ./cmd/realm-apply && \
     CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" -o /out/client-key ./cmd/client-key
 
-# alpine/git:2.54.0, the rebuild of 2026-10-04, resolved 2026-10-07
-FROM alpine/git@sha256:a4bb51f1a3553df194ce679fc1db721d8bfba2046fa1a88fe9d4ac551ffbce25
+# alpine:3.24, resolved 2026-10-10
+FROM alpine@sha256:294b683cb724975bec92580e1e685676bd4b50bda910ddb8c51d4cabeaec77e6
+# git and nothing else (STD-GLB-009 1.8.0 §Container Images rule 10, TDD-identity-kernel-005 §Images
+# the Stack Runs). The image used to be alpine/git, which also brings git-lfs, a Go binary realm-apply
+# never runs, and perl. apk resolves git at build time from Alpine's index, so the package versions
+# float within the pinned release while the base stays named by digest; the constraint below is the
+# floor. CVE-2026-85091: alpine:3.24 carries zlib 1.3.2-r0, and Alpine ships the fix as 1.3.2-r1. The
+# build fails when no repository has it, and the constraint goes when the pin moves to an image that
+# carries the fix.
+RUN apk add --no-cache git 'zlib>=1.3.2-r1'
 COPY --from=build /out/realm-apply /usr/local/bin/realm-apply
 # client-key rides in the same image, so a server makes and installs client keys with the Docker
 # it already has: no Go and no openssl on the host (new-client-key.sh, set-client-key.sh).
