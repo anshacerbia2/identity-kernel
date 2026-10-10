@@ -292,6 +292,19 @@ Its review date, 2026-10-21, is earlier than that limit so the pin moves as soon
 If 2027-01-05 would come first, the stack builds its own Postgres image from the pinned one with the
 upgrade line.
 
+**A built image is never pulled under its name.** A service with both `build:` and an `image:` name is
+pulled first: "If `pull_policy` is missing in the service definition, Compose attempts to pull the image
+first and then builds from source if the image isn't found in the registry or platform cache" [R27].
+`deploy-dev` run 38067696612 shows it: `keycloak Warning pull access denied for scnehaux/identity-kernel`,
+and the same for the proxy's name at that commit. The `scnehaux` namespace on Docker Hub is not this
+project's, so anyone who publishes `scnehaux/identity-kernel:dev` would have the server run their image
+instead of the one built from `image/keycloak.ref`. Every such service therefore sets
+`pull_policy: build`: "Compose builds the image. Compose rebuilds the image if it's already present"
+[R27]. `keycloak` is the one service with both; the proxy and realm-apply carry no name, and compose
+does not pull them. The cost is a build on every `up`, which BuildKit's cache answers when nothing
+changed. The kernel keeps its name, which `docker image ls` shows; the policy, not the absence of a
+name, is what keeps the registry out.
+
 **How exceptions are checked.** `scripts/image-scan-rules.py` runs before every scan (§5 Enforcement
 item 4). It fails on a rule without vulnerability, package name, version or type; on a package found
 inside a file (any type but `apk`, `deb`, `rpm`) without a full `package.location`, or on any location
@@ -466,6 +479,7 @@ defer yet. Its release record is the `upgrade` job's summary, which every run wr
 | Promotion | same image digest across environments | EAD-005 §6.5 |
 | Reverse proxy (1.8.0) | Caddy 2.11.7 built from source, x/net v0.60.0, Go 1.27.2 | §Images the Stack Runs; until a Caddy release carries the fix |
 | realm-apply base (1.8.0) | `alpine:3.24` by digest, with `git` | Only what the job runs (§Images the Stack Runs) |
+| Built images and the registry (1.8.0) | `pull_policy: build` on every service with `build:` and an `image:` name | A built image is never pulled under its name (§Images the Stack Runs) |
 | Upgrade lines (1.8.0) | `apk add --no-cache 'zlib>=1.3.2-r1'` in the proxy and realm-apply | CVE-2026-85091; goes when the pin moves |
 
 The database credential, the administration client's credential, and the signing keystore
@@ -577,7 +591,8 @@ bill of materials for one commit agree.
   review date, before any scan.
 - The Caddy build fails unless the binary reads x/net v0.60.0 and Go 1.26.9 or later. A `zlib` upgrade
   line fails the build when no repository offers 1.3.2-r1.
-- `deploy-dev`'s `stack` and `tunnel` jobs bring the stack up with the built proxy, in both modes.
+- `deploy-dev`'s `stack` and `tunnel` jobs bring the stack up with the built proxy, in both modes, and
+  their logs carry no pull attempt for an image this repository builds (`pull_policy: build`).
 
 ### Promotion
 
@@ -696,3 +711,4 @@ release.
 | R24 | CISA, *Vulnerability Exploitability eXchange (VEX) – Status Justifications*, June 2022, §3.3.1, accessed 2026-10-10. <https://www.cisa.gov/sites/default/files/publications/VEX_Status_Justification_Jun22.pdf>. "Base layer container images often contain unused packages. A later layer could remove one or more of these packages." |
 | R25 | Docker Official Images, *FAQ*, "Why does my security scanner show that an image has CVEs?", accessed 2026-10-10. <https://github.com/docker-library/faq#why-does-my-security-scanner-show-that-an-image-has-cves>. "Many Official Images are maintained by the community or their respective upstream projects, like Ubuntu, Alpine, and Oracle Linux, and are subject to their own maintenance schedule." |
 | R26 | Anchore, *Grype: Filter scan results*, accessed 2026-10-10. <https://oss.anchore.com/docs/guides/vulnerability/filter-results/>. "# Ignore by package location (supports glob patterns)". Grype v0.120.1, `grype/match/ignore.go`, <https://github.com/anchore/grype/blob/v0.120.1/grype/match/ignore.go>: "all specified criteria must be met by the vulnerability match in order for the rule to apply". |
+| R27 | Compose Specification, commit `914ec15`, accessed 2026-10-10. `build.md`, "Using `build` and `image`", <https://github.com/compose-spec/compose-spec/blob/914ec15d1fa498969c0df5c1d672306db3256089/build.md#using-build-and-image>: "When Compose is confronted with both a `build` subsection for a service and an `image` attribute. It follows the rules defined by the [`pull_policy`](05-services.md#pull_policy) attribute"; "If `pull_policy` is missing in the service definition, Compose attempts to pull the image first and then builds from source if the image isn't found in the registry or platform cache." `05-services.md`, `pull_policy`, <https://github.com/compose-spec/compose-spec/blob/914ec15d1fa498969c0df5c1d672306db3256089/05-services.md#pull_policy>: "`build`: Compose builds the image. Compose rebuilds the image if it's already present." |
