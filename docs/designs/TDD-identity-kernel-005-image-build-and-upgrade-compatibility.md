@@ -305,6 +305,15 @@ does not pull them. The cost is a build on every `up`, which BuildKit's cache an
 changed. The kernel keeps its name, which `docker image ls` shows; the policy, not the absence of a
 name, is what keeps the registry out.
 
+STD-GLB-009 1.8.0 rule 11 makes it a check: a service that runs a name it does not build sets
+`pull_policy: never`, because then "Compose doesn't pull the image from a registry and relies on the
+platform cached image. If there is no cached image, a failure is reported" [R27], and `deploy-dev`
+fails on any image name without a digest whose service is neither. Both jobs run
+`.github/scripts/pull-policy.py` on the configuration compose resolves for each file set this stack
+runs (`compose.yaml` alone, with `compose.tunnel.yaml`, and with `compose.ci.yaml`) before anything
+is pulled, and after `up` require `scnehaux/identity-kernel:dev` to carry no registry digest: it was
+built on the runner, not pulled.
+
 **How exceptions are checked.** `scripts/image-scan-rules.py` runs before every scan (§5 Enforcement
 item 4). It fails on a rule without vulnerability, package name, version or type; on a package found
 inside a file (any type but `apk`, `deb`, `rpm`) without a full `package.location`, or on any location
@@ -592,7 +601,9 @@ bill of materials for one commit agree.
 - The Caddy build fails unless the binary reads x/net v0.60.0 and Go 1.26.9 or later. A `zlib` upgrade
   line fails the build when no repository offers 1.3.2-r1.
 - `deploy-dev`'s `stack` and `tunnel` jobs bring the stack up with the built proxy, in both modes, and
-  their logs carry no pull attempt for an image this repository builds (`pull_policy: build`).
+  their logs carry no pull attempt for an image this repository builds (`pull_policy: build`). Both
+  fail first when any compose file set names an image without a digest and its service is not
+  `pull_policy: build` or `never` (STD-GLB-009 1.8.0 rule 11).
 
 ### Promotion
 
@@ -672,7 +683,7 @@ release.
 | Publishes to | `identity-control`, `identity-experience`, and every protected resource — the declared realm contract |
 | Related design | `TDD-identity-kernel-001` — realm content this suite asserts |
 | Related design | `TDD-identity-kernel-002` — key invariants this suite asserts |
-| Conforms to | STD-GLB-009 1.8.0 §Container Images, rules 4, 5, 7, 8, 9 and 10 (lands with scnehaux-architecture #86) — §Images the Stack Runs |
+| Conforms to | STD-GLB-009 1.8.0 §Container Images, rules 4, 5, 7, 8, 9, 10 and 11 (lands with scnehaux-architecture #86) — §Images the Stack Runs |
 | Consumed by | `TDD-identity-control-002`, `TDD-identity-control-005` — a session removed through the Admin API stays removed (§Session Store) |
 
 ### Open Questions
@@ -711,4 +722,4 @@ release.
 | R24 | CISA, *Vulnerability Exploitability eXchange (VEX) – Status Justifications*, June 2022, §3.3.1, accessed 2026-10-10. <https://www.cisa.gov/sites/default/files/publications/VEX_Status_Justification_Jun22.pdf>. "Base layer container images often contain unused packages. A later layer could remove one or more of these packages." |
 | R25 | Docker Official Images, *FAQ*, "Why does my security scanner show that an image has CVEs?", accessed 2026-10-10. <https://github.com/docker-library/faq#why-does-my-security-scanner-show-that-an-image-has-cves>. "Many Official Images are maintained by the community or their respective upstream projects, like Ubuntu, Alpine, and Oracle Linux, and are subject to their own maintenance schedule." |
 | R26 | Anchore, *Grype: Filter scan results*, accessed 2026-10-10. <https://oss.anchore.com/docs/guides/vulnerability/filter-results/>. "# Ignore by package location (supports glob patterns)". Grype v0.120.1, `grype/match/ignore.go`, <https://github.com/anchore/grype/blob/v0.120.1/grype/match/ignore.go>: "all specified criteria must be met by the vulnerability match in order for the rule to apply". |
-| R27 | Compose Specification, commit `914ec15`, accessed 2026-10-10. `build.md`, "Using `build` and `image`", <https://github.com/compose-spec/compose-spec/blob/914ec15d1fa498969c0df5c1d672306db3256089/build.md#using-build-and-image>: "When Compose is confronted with both a `build` subsection for a service and an `image` attribute. It follows the rules defined by the `pull_policy` attribute" (the source links `pull_policy` to `05-services.md`); "If `pull_policy` is missing in the service definition, Compose attempts to pull the image first and then builds from source if the image isn't found in the registry or platform cache." `05-services.md`, `pull_policy`, <https://github.com/compose-spec/compose-spec/blob/914ec15d1fa498969c0df5c1d672306db3256089/05-services.md#pull_policy>: "`build`: Compose builds the image. Compose rebuilds the image if it's already present." |
+| R27 | Compose Specification, commit `914ec15`, accessed 2026-10-10. `build.md`, "Using `build` and `image`", <https://github.com/compose-spec/compose-spec/blob/914ec15d1fa498969c0df5c1d672306db3256089/build.md#using-build-and-image>: "When Compose is confronted with both a `build` subsection for a service and an `image` attribute. It follows the rules defined by the `pull_policy` attribute" (the source links `pull_policy` to `05-services.md`); "If `pull_policy` is missing in the service definition, Compose attempts to pull the image first and then builds from source if the image isn't found in the registry or platform cache." `05-services.md`, `pull_policy`, <https://github.com/compose-spec/compose-spec/blob/914ec15d1fa498969c0df5c1d672306db3256089/05-services.md#pull_policy>: "`build`: Compose builds the image. Compose rebuilds the image if it's already present"; "`never`: Compose doesn't pull the image from a registry and relies on the platform cached image. If there is no cached image, a failure is reported." |
