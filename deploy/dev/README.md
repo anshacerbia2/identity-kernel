@@ -21,7 +21,7 @@ development server runbook (`docs/runbooks/dev-server.md`). This stack comes fir
 | :-- | :-- | :-- |
 | `postgres` | `postgres:17.11-alpine`, pinned by digest | Keycloak's database `keycloak`, owned by the role `keycloak`, in the volume `postgres` |
 | `keycloak` | `scnehaux/identity-kernel:dev`, built from `image/Dockerfile`: the digest in `image/keycloak.ref` plus this repository's login theme | The kernel, in production mode (`start --optimized`), reading sessions from the database with no session cache (TDD-identity-kernel-005 §Session Store) |
-| `caddy` | `scnehaux/identity-kernel-caddy:dev`, built from `caddy.Dockerfile`: Caddy 2.11.7 compiled from source with `golang.org/x/net` v0.60.0 on Go 1.27.2, overlaid on `caddy:2.11.7-alpine`, both bases pinned by digest | The TLS proxy, which keeps administration off the public internet. Built rather than pulled until a Caddy release carries the fixes for GO-2026-6603 to GO-2026-6613 (TDD-identity-kernel-005 §Images the Stack Runs) |
+| `caddy` | built from `caddy.Dockerfile`: Caddy 2.11.7 compiled from source with `golang.org/x/net` v0.60.0 on Go 1.27.2, overlaid on `caddy:2.11.7-alpine`, both bases pinned by digest | The TLS proxy, which keeps administration off the public internet. Built rather than pulled until a Caddy release carries the fixes for GO-2026-6603 to GO-2026-6613 (TDD-identity-kernel-005 §Images the Stack Runs) |
 | `realm-apply` | built from `realm-apply.Dockerfile`: `alpine:3.24` pinned by digest, with `git` | A one-shot job on every `up`: brings the realm to `realm/` and exits |
 
 ### What is exposed

@@ -83,7 +83,8 @@ services:
       # every module either way.
       args:
         GOPROXY: ${GOPROXY:-https://proxy.golang.org,direct}
-    image: scnehaux/identity-kernel-caddy:dev
+    # No image name, as realm-apply: a named image is pulled from a registry before it is built, and
+    # nothing here may come from a repository someone else could publish under that name.
     restart: unless-stopped
     ports:
       - "80:80"
