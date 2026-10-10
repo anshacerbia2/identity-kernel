@@ -21,8 +21,8 @@ development server runbook (`docs/runbooks/dev-server.md`). This stack comes fir
 | :-- | :-- | :-- |
 | `postgres` | `postgres:17.11-alpine`, pinned by digest | Keycloak's database `keycloak`, owned by the role `keycloak`, in the volume `postgres` |
 | `keycloak` | `scnehaux/identity-kernel:dev`, built from `image/Dockerfile`: the digest in `image/keycloak.ref` plus this repository's login theme | The kernel, in production mode (`start --optimized`), reading sessions from the database with no session cache (TDD-identity-kernel-005 §Session Store) |
-| `caddy` | `caddy:2.11.7-alpine`, pinned by digest | The TLS proxy, which keeps administration off the public internet |
-| `realm-apply` | built from `realm-apply.Dockerfile` | A one-shot job on every `up`: brings the realm to `realm/` and exits |
+| `caddy` | `scnehaux/identity-kernel-caddy:dev`, built from `caddy.Dockerfile`: Caddy 2.11.7 compiled from source with `golang.org/x/net` v0.60.0 on Go 1.27.2, overlaid on `caddy:2.11.7-alpine`, both bases pinned by digest | The TLS proxy, which keeps administration off the public internet. Built rather than pulled until a Caddy release carries the fixes for GO-2026-6603 to GO-2026-6613 (TDD-identity-kernel-005 §Images the Stack Runs) |
+| `realm-apply` | built from `realm-apply.Dockerfile`: `alpine:3.24` pinned by digest, with `git` | A one-shot job on every `up`: brings the realm to `realm/` and exits |
 
 ### What is exposed
 
@@ -91,6 +91,12 @@ Every `docker compose up` runs the one-shot `realm-apply` job once Keycloak is h
 the realm to `realm/` and exits. It runs as the service account once `KEYCLOAK_ADMIN_CLIENT_ID` is
 in `.env`, signing with `./keys/<that id>.pem`. Until then, on the first start only, it runs as
 the bootstrap administrator. The keys and the scripts that make them are under [Keys](#keys).
+
+The first `up` builds three images: the kernel, realm-apply, and Caddy. The Caddy build compiles Caddy
+from source, about two minutes, and downloads its Go modules through `GOPROXY`. Where the server's
+network intercepts TLS to `proxy.golang.org`, set `GOPROXY=direct` in `.env` before the first `up`;
+`go.sum` and the checksum database verify every module either way. The kernel and realm-apply builds
+download nothing but their pinned bases and, for realm-apply, `git` from Alpine's index.
 
 The issuer is then `https://<KEYCLOAK_HOSTNAME>/realms/scnehaux`. The service is ready when its
 discovery document answers:
@@ -220,7 +226,7 @@ git pull && docker compose up -d --build --wait
 docker compose logs realm-apply   # ends in "applied revision ..."
 ```
 
-`--build` rebuilds the kernel image and the realm-apply image from the checkout. The `realm-apply`
+`--build` rebuilds the kernel image, the realm-apply image and the Caddy image from the checkout. The `realm-apply`
 job then applies the realm at the new revision. Behind a tunnel without `COMPOSE_FILE` in `.env`,
 give both files: `docker compose -f compose.yaml -f compose.tunnel.yaml up -d --build --wait`.
 
@@ -429,6 +435,8 @@ Five mistakes to avoid in tunnel mode:
 | The public issuer stops answering while `devtunnel host` still runs | The host lost its relay and failed its token refresh without exiting, so systemd sees it active | Restart the host service. A timer that requests the public discovery URL and restarts it catches this (runbook, step 1) |
 | `realm-apply` exits 2 and lists differences | Console drift | Revert it, or commit it and adopt it once ([Changing the realm](#changing-the-realm)) |
 | Every apply is refused with "scnehaux.json must set eventsEnabled true", on a realm applied at an older revision | realm-apply parsed the recorded baseline by today's policy | Fixed in identity-kernel#58: `git pull && docker compose up -d --build` |
+| `docker compose up` fails building `caddy`, at `xcaddy build`, with a TLS or `proxy.golang.org` error | The network intercepts TLS to the Go module proxy | `GOPROXY=direct` in `.env`, then `docker compose up -d --build` again |
+| A build fails at `apk add` with "unable to select packages" for `zlib>=1.3.2-r1` | Alpine's index was unreachable, or no longer offers the fixed package | Retry once the mirror answers. The constraint is the floor CVE-2026-85091 needs, so it is never removed to make a build pass |
 | A setting in `.env` has no effect | Compose passes a container only the variables `compose.yaml` lists | Check `compose.yaml` for it. Behind a tunnel, check the command used the tunnel file (`COMPOSE_FILE`, or `-f compose.yaml -f compose.tunnel.yaml`) |
 | Containers cannot reach a host network, or a VPN drops, after `up` | A Docker network took a range the host uses | Pin the subnets ([A local override](#a-local-override)) |
 | An account cannot sign in after failed passwords | Brute-force detection locked it; see below | Below |
