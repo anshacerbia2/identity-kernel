@@ -3,7 +3,7 @@ doc_meta:
   id: TDD-identity-kernel-004
   title: Hosted Login Theme, Accessibility, and Disclosure Discipline
   owner: Identity Platform Team
-  version: 1.7.0
+  version: 1.8.0
   status: approved
   classification: restricted
   review_cycle_days: 90
@@ -129,10 +129,10 @@ panel, and its button, field and notice styles. It takes them by copying, not by
 repository. Identity Experience holds them under a pending exception until the UI Platform publishes
 `@scnx/system`. The kernel image is built from this repository alone, and the theme has no build step.
 
-**Source.** The source is identity-experience at commit `b87b0998bbbc2c636642115ed48cc5b0a16f816f`, the
-head of its pull request #54 (`light-theme-contrast`). That pull request gave Identity Experience the
-accessible values this page first carried as departures (below). It is cited by its branch commit
-until it merges; the citation then moves to the merge commit, with no value changing:
+**Source.** The source is identity-experience at commit `c723e417c0eee97db6b1d5b6dab608fe6a406ac2`, the
+merge of its pull request #54 (1.8.0; 1.7.0 cited that pull request's branch commit `b87b099`, and
+`packages/ui` is the same at both). That pull request gave Identity Experience the accessible values
+this page first carried as departures (below):
 
 | Copied from | What |
 | :-- | :-- |
@@ -162,7 +162,7 @@ No template changed for it.
 | Field | White / `#36373a`; an underline that thickens on focus | sunken `oklch(0.95 0.008 262 / 0.8)` / `oklch(0.12 0.018 262 / 0.7)`, radius 0.625rem, a whole opaque edge, border-strong `oklch(0.62 0.02 262)` / `oklch(0.55 0.02 262)` |
 | Error message | Red helper text, a red top border on the alert | The danger scheme: `oklch(0.42 0.171 24)` / `oklch(0.86 0.171 24)` text on its 10% tint, a 45% edge |
 | Focus | PatternFly's per-component focus | A 2px outline in border-default-focus (the primary solid), 2px off the element; in dark, `--ds-shadow-focus` adds a glow |
-| Brand | The realm name, uppercase, 29px | The shield mark in a 2.5rem tinted square, beside the realm name in 1.25rem semibold |
+| Brand | The realm name, uppercase, 29px | The shield mark in a 2.5rem tinted square, beside the realm's display name, `Scnehaux`, in 1.25rem semibold |
 
 **No departures.** Every `--ds-*` value in `scnehaux.css` equals Identity Experience's at the source
 commit, in both schemes, and the page reads no colour of its own. Version 1.7.0 first carried four
@@ -194,8 +194,11 @@ PatternFly's, and no rule needs `!important`.
   cannot read that storage, and a toggle here would be a script and a template change.
 - **JetBrains Mono is not bundled.** The monospace stack falls back to `ui-monospace`, as Identity
   Experience's does before its font loads. It shows only the one-time-code key and the recovery codes.
-- **The brand name is the realm's display name.** The realm sets none, so the page shows `scnehaux`,
-  capitalized by the stylesheet. The applications show their own names.
+- **The brand name is the realm's display name (1.8.0).** The realm declares `displayName` `Scnehaux`
+  (TDD-identity-kernel-001 §Configuration), approved by the owner. It leaves `displayNameHtml` unset,
+  so Keycloak renders the plain name, escaped, in the header and in the page title ("Sign in to
+  Scnehaux"). The stylesheet changes no letter of it. The applications name themselves after it:
+  "Scnehaux Account" and the rest.
 
 **The accessibility fixes are kept.** The three copied templates (§Override Surface) and
 `themes/overrides.json` are unchanged. They are `template.ftl`'s label for the attempted username,
@@ -447,6 +450,8 @@ audit, never counted as passed. Each scan is photographed in both schemes. The p
 browser job's `login-pages-screenshots` artifact, the record of §Visual Language. No page may raise a
 Content Security Policy violation; that is the proof that the realm's policy allows what the stock
 templates and the theme's stylesheet run.
+
+On every scanned page the header must read `Scnehaux`, the realm's display name, as rendered.
 
 The account under lockout is a second person, refused ten times (the realm's `failureFactor`). The
 right password must then read exactly as the wrong one did (§Enumeration Resistance).
