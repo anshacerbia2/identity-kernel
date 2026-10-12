@@ -816,7 +816,8 @@ schemes. It also carries the aurora canvas, the translucent panel, the buttons, 
 the shield mark, with Inter served from the kernel. No template changed, and the policy needs nothing
 new. The values the page needed for WCAG 2.2 AA are Identity Experience's own since #54: the light
 primary, a field's opaque edge, focus drawn as an outline (STD-GLB-FE-005 §3.9) and underlined links.
-So the page has no departures. `internal/themecontrast` holds every colour pair to AA
+So the page has no departures. The realm's display name is `Scnehaux` (TDD-001 1.19.0), the brand
+the header shows. `internal/themecontrast` holds every colour pair to AA
 after alpha composition. The `browser` job also scans an account under lockout, the logout
 confirmation and the signed-out page. It photographs every scan in both schemes as the
 `login-pages-screenshots` artifact and lists what axe-core leaves for review. **Not yet:** the manual
