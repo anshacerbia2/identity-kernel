@@ -3,13 +3,14 @@
  * (TDD-identity-kernel-004 §Visual Language).
  *
  * The tokens are copied, by name and by value, from identity-experience
- * packages/ui/src/styles/tokens/_ds-temporary.scss and foundations/_base.scss at commit 2e65651. They
- * are written out here because the theme depends on no other repository and has no build step. The
- * names are the UI Platform's (ADR-UIP-TKN-003), so the day the platform publishes its theme this
- * block is what changes.
+ * packages/ui/src/styles/tokens/_ds-temporary.scss and foundations/_base.scss at commit b87b099
+ * (identity-experience #54, branch light-theme-contrast). They are written out here because the theme
+ * depends on no other repository and has no build step. The names are the UI Platform's
+ * (ADR-UIP-TKN-003), so the day the platform publishes its theme this block is what changes.
  *
- * Where this file departs from Identity Experience it says so, with the reason. Each departure is a
- * --scnx-login-* name, never a changed --ds-* value, so the two can be compared token by token.
+ * Every --ds-* value equals Identity Experience's, and the page reads no colour of its own: the light
+ * action colour, a field's opaque edge and focus as an outline, which the login page needed for WCAG
+ * 2.2 AA, are Identity Experience's own values since #54.
  *
  * No cascade layers: PatternFly's stylesheet is unlayered, and an unlayered rule beats every layered
  * one. Selectors start at html.login-pf (the class keycloak.v2 puts on the document) so they outrank
@@ -87,7 +88,11 @@
   --ds-color-neutral-surface-default-hover: oklch(0.9 0.015 262 / 0.7);
   --ds-color-neutral-border-subtle-default: oklch(0.3 0.03 262 / 0.1);
   --ds-color-neutral-border-default-default: oklch(0.3 0.03 262 / 0.16);
-  --ds-color-neutral-border-strong-default: oklch(0.3 0.03 262 / 0.3);
+  /* A strong border identifies a component by its edge (a field), so it is opaque and meets 3:1
+     against every surface it meets (WCAG 2.2 SC 1.4.11). */
+  --ds-color-neutral-border-strong-default: oklch(0.62 0.02 262);
+  --ds-color-neutral-border-strong-hover: oklch(0.48 0.02 262);
+  --ds-color-neutral-border-default-focus: var(--ds-color-primary-solid-default-default);
   --ds-color-neutral-text-strong-default: oklch(0.18 0.02 262);
   --ds-color-neutral-text-default-default: oklch(0.3 0.02 262);
   --ds-color-neutral-text-subtle-default: oklch(0.48 0.02 262);
@@ -95,16 +100,20 @@
   --ds-color-neutral-shadow-default-default: oklch(0.3 0.04 262 / 0.18);
   --ds-shadow-low: 0 1px 2px 0 var(--ds-color-neutral-shadow-default-default);
   --ds-shadow-medium: 0 16px 40px -20px var(--ds-color-neutral-shadow-default-default);
+  /* Focus is an outline; this is only the glow added to it, and light has none (STD-GLB-FE-005 §3.9). */
+  --ds-shadow-focus: none;
 
-  --ds-color-primary-solid-default-default: oklch(0.55 0.14 212);
-  --ds-color-primary-solid-default-hover: oklch(0.6 0.14 212);
-  --ds-color-primary-solid-default-pressed: oklch(0.49 0.14 212);
+  /* The light primary sits at L 0.5 and hover darkens, away from its near-white label: 5.06:1 at
+     rest, 5.96:1 on hover, 6.47:1 pressed (WCAG 2.2 SC 1.4.3). */
+  --ds-color-primary-solid-default-default: oklch(0.5 0.14 212);
+  --ds-color-primary-solid-default-hover: oklch(0.46 0.14 212);
+  --ds-color-primary-solid-default-pressed: oklch(0.44 0.14 212);
   --ds-color-primary-text-default-default: oklch(0.42 0.126 212);
   --ds-color-primary-text-contrast-default: oklch(0.99 0.03 212);
   --ds-color-primary-icon-default-default: oklch(0.42 0.14 212);
-  --ds-color-primary-surface-subtle-default: oklch(0.55 0.14 212 / 0.1);
-  --ds-color-primary-border-default-default: oklch(0.55 0.14 212 / 0.45);
-  --ds-color-primary-shadow-default-default: oklch(0.55 0.14 212 / 0.22);
+  --ds-color-primary-surface-subtle-default: oklch(0.5 0.14 212 / 0.1);
+  --ds-color-primary-border-default-default: oklch(0.5 0.14 212 / 0.45);
+  --ds-color-primary-shadow-default-default: oklch(0.5 0.14 212 / 0.22);
   --ds-color-info-text-default-default: oklch(0.42 0.126 252);
   --ds-color-info-icon-default-default: oklch(0.42 0.14 252);
   --ds-color-info-surface-subtle-default: oklch(0.52 0.14 252 / 0.1);
@@ -122,27 +131,6 @@
   --ds-color-danger-icon-default-default: oklch(0.42 0.19 24);
   --ds-color-danger-surface-subtle-default: oklch(0.55 0.19 24 / 0.1);
   --ds-color-danger-border-default-default: oklch(0.55 0.19 24 / 0.45);
-
-  /* Departure: the action colour. Identity Experience's light primary, L 0.55, carries its
-     near-white label at 4.15:1 and its hover, L 0.6, at 3.42:1, under the 4.5:1 WCAG 2.2 SC 1.4.3
-     asks of a 14px label. Here the solid is L 0.5 (5.06:1) and hover darkens rather than lightens
-     (L 0.46, 5.96:1), so no state of the button falls under it. */
-  --scnx-login-action-solid: oklch(0.5 0.14 212);
-  --scnx-login-action-hover: oklch(0.46 0.14 212);
-  --scnx-login-action-pressed: oklch(0.44 0.14 212);
-
-  /* Departure: a text field's edge. Identity Experience draws it with border-default, 1.35:1 against
-     the panel. A field on this page is identified by its edge, and SC 1.4.11 asks 3:1 of "visual
-     information required to identify user interface components"; L 0.62 is 3.33:1 against the
-     panel at its darkest. */
-  --scnx-login-control-border: oklch(0.62 0.02 262);
-
-  /* Departure: focus is an outline. Identity Experience's Button and Field draw it as a box shadow
-     with the outline removed; STD-GLB-FE-005 §3.9 has the outline carry it, "because forced-colors
-     mode computes box-shadow as none", and lets a shadow only add emphasis. The ring is the same
-     shape: 2px of the action colour, 2px off the element. */
-  --scnx-login-focus: var(--scnx-login-action-solid);
-  --scnx-login-focus-glow: none;
 }
 
 /* ---- Tokens: dark ------------------------------------------------------------------------------- */
@@ -161,7 +149,9 @@
   --ds-color-neutral-surface-default-hover: oklch(0.35 0.03 262 / 0.35);
   --ds-color-neutral-border-subtle-default: oklch(0.72 0.03 262 / 0.12);
   --ds-color-neutral-border-default-default: oklch(0.72 0.03 262 / 0.2);
-  --ds-color-neutral-border-strong-default: oklch(0.78 0.03 262 / 0.36);
+  --ds-color-neutral-border-strong-default: oklch(0.55 0.02 262);
+  --ds-color-neutral-border-strong-hover: oklch(0.72 0.02 262);
+  --ds-color-neutral-border-default-focus: var(--ds-color-primary-solid-default-default);
   --ds-color-neutral-text-strong-default: oklch(0.97 0.008 262);
   --ds-color-neutral-text-default-default: oklch(0.88 0.014 262);
   --ds-color-neutral-text-subtle-default: oklch(0.72 0.02 262);
@@ -201,15 +191,8 @@
   --ds-color-danger-surface-subtle-default: oklch(0.7 0.19 24 / 0.1);
   --ds-color-danger-border-default-default: oklch(0.7 0.19 24 / 0.45);
 
-  /* Identity Experience's own dark primary already carries its label at 10.7:1. */
-  --scnx-login-action-solid: var(--ds-color-primary-solid-default-default);
-  --scnx-login-action-hover: var(--ds-color-primary-solid-default-hover);
-  --scnx-login-action-pressed: var(--ds-color-primary-solid-default-pressed);
-  /* The light scheme's reason: L 0.55 is 3.54:1 against the panel at its lightest. */
-  --scnx-login-control-border: oklch(0.55 0.02 262);
-
-  /* Identity Experience's dark focus ring glows; here the glow is the shadow that adds emphasis. */
-  --scnx-login-focus-glow: 0 0 18px 2px var(--ds-color-primary-shadow-default-default);
+  /* Focus is an outline; in dark a glow is added to it, never in its place. */
+  --ds-shadow-focus: 0 0 18px 2px var(--ds-color-primary-shadow-default-default);
 }
 
 /* High contrast, as Identity Experience: opaque surfaces, stronger borders. */
@@ -238,8 +221,8 @@ html.login-pf {
   --pf-v5-global--link--Color: var(--ds-color-primary-text-default-default);
   --pf-v5-global--link--Color--hover: var(--ds-color-primary-text-default-default);
   --pf-v5-global--link--Color--visited: var(--ds-color-primary-text-default-default);
-  --pf-v5-global--primary-color--100: var(--scnx-login-action-solid);
-  --pf-v5-global--active-color--100: var(--scnx-login-action-solid);
+  --pf-v5-global--primary-color--100: var(--ds-color-primary-solid-default-default);
+  --pf-v5-global--active-color--100: var(--ds-color-primary-solid-default-default);
   --pf-v5-global--danger-color--100: var(--ds-color-danger-icon-default-default);
   --pf-v5-global--danger-color--200: var(--ds-color-danger-text-default-default);
   --pf-v5-global--success-color--100: var(--ds-color-success-icon-default-default);
@@ -277,12 +260,12 @@ html.login-pf body {
 
 html.login-pf ::selection {
   color: var(--ds-color-primary-text-contrast-default);
-  background: var(--scnx-login-action-solid);
+  background: var(--ds-color-primary-solid-default-default);
 }
 
 /* Focus is always visible, and always an outline (STD-GLB-FE-005 §3.9). */
 html.login-pf :focus-visible {
-  outline: var(--ds-stroke-default) solid var(--scnx-login-focus);
+  outline: var(--ds-stroke-default) solid var(--ds-color-neutral-border-default-focus);
   outline-offset: 2px;
 }
 
@@ -475,10 +458,10 @@ html.login-pf .pf-v5-c-form-control {
   --pf-v5-c-form-control--before--BorderRightWidth: var(--ds-stroke-thin);
   --pf-v5-c-form-control--before--BorderBottomWidth: var(--ds-stroke-thin);
   --pf-v5-c-form-control--before--BorderLeftWidth: var(--ds-stroke-thin);
-  --pf-v5-c-form-control--before--BorderTopColor: var(--scnx-login-control-border);
-  --pf-v5-c-form-control--before--BorderRightColor: var(--scnx-login-control-border);
-  --pf-v5-c-form-control--before--BorderBottomColor: var(--scnx-login-control-border);
-  --pf-v5-c-form-control--before--BorderLeftColor: var(--scnx-login-control-border);
+  --pf-v5-c-form-control--before--BorderTopColor: var(--ds-color-neutral-border-strong-default);
+  --pf-v5-c-form-control--before--BorderRightColor: var(--ds-color-neutral-border-strong-default);
+  --pf-v5-c-form-control--before--BorderBottomColor: var(--ds-color-neutral-border-strong-default);
+  --pf-v5-c-form-control--before--BorderLeftColor: var(--ds-color-neutral-border-strong-default);
   --pf-v5-c-form-control--after--BorderBottomColor: transparent;
   --pf-v5-c-form-control--after--BorderBottomWidth: 0;
 
@@ -498,10 +481,10 @@ html.login-pf .pf-v5-c-form-control::after {
 }
 
 html.login-pf .pf-v5-c-form-control:hover {
-  --pf-v5-c-form-control--before--BorderTopColor: var(--ds-color-neutral-text-subtle-default);
-  --pf-v5-c-form-control--before--BorderRightColor: var(--ds-color-neutral-text-subtle-default);
-  --pf-v5-c-form-control--before--BorderBottomColor: var(--ds-color-neutral-text-subtle-default);
-  --pf-v5-c-form-control--before--BorderLeftColor: var(--ds-color-neutral-text-subtle-default);
+  --pf-v5-c-form-control--before--BorderTopColor: var(--ds-color-neutral-border-strong-hover);
+  --pf-v5-c-form-control--before--BorderRightColor: var(--ds-color-neutral-border-strong-hover);
+  --pf-v5-c-form-control--before--BorderBottomColor: var(--ds-color-neutral-border-strong-hover);
+  --pf-v5-c-form-control--before--BorderLeftColor: var(--ds-color-neutral-border-strong-hover);
   --pf-v5-c-form-control--after--BorderBottomColor: transparent;
 }
 
@@ -516,15 +499,15 @@ html.login-pf .pf-v5-c-form-control > :is(input, select, textarea):focus-visible
 }
 
 html.login-pf .pf-v5-c-form-control:focus-within {
-  --pf-v5-c-form-control--before--BorderTopColor: var(--scnx-login-focus);
-  --pf-v5-c-form-control--before--BorderRightColor: var(--scnx-login-focus);
-  --pf-v5-c-form-control--before--BorderBottomColor: var(--scnx-login-focus);
-  --pf-v5-c-form-control--before--BorderLeftColor: var(--scnx-login-focus);
+  --pf-v5-c-form-control--before--BorderTopColor: var(--ds-color-neutral-border-default-focus);
+  --pf-v5-c-form-control--before--BorderRightColor: var(--ds-color-neutral-border-default-focus);
+  --pf-v5-c-form-control--before--BorderBottomColor: var(--ds-color-neutral-border-default-focus);
+  --pf-v5-c-form-control--before--BorderLeftColor: var(--ds-color-neutral-border-default-focus);
   --pf-v5-c-form-control--after--BorderBottomColor: transparent;
 
-  outline: var(--ds-stroke-default) solid var(--scnx-login-focus);
+  outline: var(--ds-stroke-default) solid var(--ds-color-neutral-border-default-focus);
   outline-offset: 2px;
-  box-shadow: var(--scnx-login-focus-glow);
+  box-shadow: var(--ds-shadow-focus);
 }
 
 /* An invalid field: its edge in the danger colour, and the message beneath it in words. */
@@ -572,7 +555,7 @@ html.login-pf .pf-v5-c-button.pf-m-control {
 }
 
 html.login-pf .pf-v5-c-button.pf-m-control::after {
-  border: var(--ds-stroke-thin) solid var(--scnx-login-control-border);
+  border: var(--ds-stroke-thin) solid var(--ds-color-neutral-border-strong-default);
   border-radius: inherit;
 }
 
@@ -581,7 +564,7 @@ html.login-pf .pf-v5-c-check__input,
 html.login-pf input[type="checkbox"] {
   inline-size: 1rem;
   block-size: 1rem;
-  accent-color: var(--scnx-login-action-solid);
+  accent-color: var(--ds-color-primary-solid-default-default);
 }
 
 html.login-pf .pf-v5-c-check__label,
@@ -620,15 +603,15 @@ html.login-pf .pf-v5-c-button:is(.pf-m-primary, .pf-m-secondary, .pf-m-tertiary)
 }
 
 html.login-pf .pf-v5-c-button:is(.pf-m-primary, .pf-m-secondary, .pf-m-tertiary, .pf-m-control, .pf-m-link):focus-visible {
-  outline: var(--ds-stroke-default) solid var(--scnx-login-focus);
+  outline: var(--ds-stroke-default) solid var(--ds-color-neutral-border-default-focus);
   outline-offset: 2px;
-  box-shadow: var(--scnx-login-focus-glow);
+  box-shadow: var(--ds-shadow-focus);
 }
 
 /* Primary: a luminous solid that glows faintly on hover. */
 html.login-pf .pf-v5-c-button.pf-m-primary {
   color: var(--ds-color-primary-text-contrast-default);
-  background-color: var(--scnx-login-action-solid);
+  background-color: var(--ds-color-primary-solid-default-default);
 }
 
 html.login-pf .pf-v5-c-button.pf-m-primary::after {
@@ -637,12 +620,12 @@ html.login-pf .pf-v5-c-button.pf-m-primary::after {
 
 html.login-pf .pf-v5-c-button.pf-m-primary:hover:not(:disabled) {
   color: var(--ds-color-primary-text-contrast-default);
-  background-color: var(--scnx-login-action-hover);
+  background-color: var(--ds-color-primary-solid-default-hover);
   box-shadow: 0 0 22px 0 var(--ds-color-primary-shadow-default-default);
 }
 
 html.login-pf .pf-v5-c-button.pf-m-primary:active:not(:disabled) {
-  background-color: var(--scnx-login-action-pressed);
+  background-color: var(--ds-color-primary-solid-default-pressed);
 }
 
 /* Secondary: Identity Experience's default button, a subtle surface with a hairline edge. */
@@ -681,59 +664,60 @@ html.login-pf .pf-v5-c-form__actions {
 
 /* ---- Messages (SignInNotice.module.scss, MutationError.module.scss) ------------------------------ */
 
-/* A message is stated with a glyph and words, never by colour alone. */
+/* A message is stated with a glyph and words, never by colour alone. --kc-alert-* are the
+   component's own, as Button.module.scss's --btn-*: each scheme sets them from its --ds-* tokens. */
 html.login-pf .pf-v5-c-alert {
   --pf-v5-c-alert--BoxShadow: none;
   --pf-v5-c-alert--BorderTopWidth: var(--ds-stroke-thin);
   --pf-v5-c-alert__FontSize: var(--ds-font-size-sm);
   --pf-v5-c-alert__title--FontWeight: var(--ds-font-weight-medium);
-  --scnx-login-alert-text: var(--ds-color-neutral-text-default-default);
-  --scnx-login-alert-icon: var(--ds-color-neutral-icon-default-default);
-  --scnx-login-alert-border: var(--ds-color-neutral-border-default-default);
-  --scnx-login-alert-surface: var(--ds-color-neutral-surface-subtle-default);
+  --kc-alert-text: var(--ds-color-neutral-text-default-default);
+  --kc-alert-icon: var(--ds-color-neutral-icon-default-default);
+  --kc-alert-border: var(--ds-color-neutral-border-default-default);
+  --kc-alert-surface: var(--ds-color-neutral-surface-subtle-default);
 
   column-gap: var(--ds-spacing-sm);
   padding: var(--ds-spacing-sm) var(--ds-spacing-md);
-  border: var(--ds-stroke-thin) solid var(--scnx-login-alert-border);
+  border: var(--ds-stroke-thin) solid var(--kc-alert-border);
   border-radius: var(--ds-radius-md);
-  color: var(--scnx-login-alert-text);
-  background: var(--scnx-login-alert-surface);
+  color: var(--kc-alert-text);
+  background: var(--kc-alert-surface);
 }
 
 html.login-pf .pf-v5-c-alert.pf-m-danger {
-  --scnx-login-alert-text: var(--ds-color-danger-text-default-default);
-  --scnx-login-alert-icon: var(--ds-color-danger-icon-default-default);
-  --scnx-login-alert-border: var(--ds-color-danger-border-default-default);
-  --scnx-login-alert-surface: var(--ds-color-danger-surface-subtle-default);
+  --kc-alert-text: var(--ds-color-danger-text-default-default);
+  --kc-alert-icon: var(--ds-color-danger-icon-default-default);
+  --kc-alert-border: var(--ds-color-danger-border-default-default);
+  --kc-alert-surface: var(--ds-color-danger-surface-subtle-default);
 }
 
 html.login-pf .pf-v5-c-alert.pf-m-warning {
-  --scnx-login-alert-text: var(--ds-color-warning-text-default-default);
-  --scnx-login-alert-icon: var(--ds-color-warning-icon-default-default);
-  --scnx-login-alert-border: var(--ds-color-warning-border-default-default);
-  --scnx-login-alert-surface: var(--ds-color-warning-surface-subtle-default);
+  --kc-alert-text: var(--ds-color-warning-text-default-default);
+  --kc-alert-icon: var(--ds-color-warning-icon-default-default);
+  --kc-alert-border: var(--ds-color-warning-border-default-default);
+  --kc-alert-surface: var(--ds-color-warning-surface-subtle-default);
 }
 
 html.login-pf .pf-v5-c-alert.pf-m-success {
-  --scnx-login-alert-text: var(--ds-color-success-text-default-default);
-  --scnx-login-alert-icon: var(--ds-color-success-icon-default-default);
-  --scnx-login-alert-border: var(--ds-color-success-border-default-default);
-  --scnx-login-alert-surface: var(--ds-color-success-surface-subtle-default);
+  --kc-alert-text: var(--ds-color-success-text-default-default);
+  --kc-alert-icon: var(--ds-color-success-icon-default-default);
+  --kc-alert-border: var(--ds-color-success-border-default-default);
+  --kc-alert-surface: var(--ds-color-success-surface-subtle-default);
 }
 
 html.login-pf .pf-v5-c-alert.pf-m-info {
-  --scnx-login-alert-text: var(--ds-color-info-text-default-default);
-  --scnx-login-alert-icon: var(--ds-color-info-icon-default-default);
-  --scnx-login-alert-border: var(--ds-color-info-border-default-default);
-  --scnx-login-alert-surface: var(--ds-color-info-surface-subtle-default);
+  --kc-alert-text: var(--ds-color-info-text-default-default);
+  --kc-alert-icon: var(--ds-color-info-icon-default-default);
+  --kc-alert-border: var(--ds-color-info-border-default-default);
+  --kc-alert-surface: var(--ds-color-info-surface-subtle-default);
 }
 
 html.login-pf .pf-v5-c-alert :is(.pf-v5-c-alert__title, .pf-v5-c-alert__description) {
-  color: var(--scnx-login-alert-text);
+  color: var(--kc-alert-text);
 }
 
 html.login-pf .pf-v5-c-alert .pf-v5-c-alert__icon {
-  color: var(--scnx-login-alert-icon);
+  color: var(--kc-alert-icon);
 }
 
 /* ---- Choosing a way to sign in ------------------------------------------------------------------- */
@@ -774,9 +758,9 @@ html.login-pf .select-auth-box-parent:hover {
 }
 
 html.login-pf .select-auth-box-parent:focus-visible {
-  outline: var(--ds-stroke-default) solid var(--scnx-login-focus);
+  outline: var(--ds-stroke-default) solid var(--ds-color-neutral-border-default-focus);
   outline-offset: 2px;
-  box-shadow: var(--scnx-login-focus-glow);
+  box-shadow: var(--ds-shadow-focus);
 }
 
 html.login-pf .select-auth-box-parent .select-auth-box-headline {
@@ -800,7 +784,7 @@ html.login-pf .pf-v5-c-tile {
   --pf-v5-c-tile--BackgroundColor: var(--ds-color-neutral-surface-subtle-default);
   --pf-v5-c-tile--before--BorderColor: var(--ds-color-neutral-border-default-default);
   --pf-v5-c-tile--hover--before--BorderColor: var(--ds-color-neutral-border-strong-default);
-  --pf-v5-c-tile--m-selected--before--BorderColor: var(--scnx-login-action-solid);
+  --pf-v5-c-tile--m-selected--before--BorderColor: var(--ds-color-primary-solid-default-default);
   --pf-v5-c-tile__title--Color: var(--ds-color-neutral-text-strong-default);
   --pf-v5-c-tile__icon--Color: var(--ds-color-primary-icon-default-default);
 

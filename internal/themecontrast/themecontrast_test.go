@@ -33,9 +33,9 @@ var pairs = []pair{
 	{"link", "--ds-color-primary-text-default-default", "panel", text},
 	{"field error message", "--ds-color-danger-text-default-default", "panel", text},
 	{"typed text", "--ds-color-neutral-text-strong-default", "field", text},
-	{"primary button label", "--ds-color-primary-text-contrast-default", "--scnx-login-action-solid", text},
-	{"primary button label, hover", "--ds-color-primary-text-contrast-default", "--scnx-login-action-hover", text},
-	{"primary button label, pressed", "--ds-color-primary-text-contrast-default", "--scnx-login-action-pressed", text},
+	{"primary button label", "--ds-color-primary-text-contrast-default", "--ds-color-primary-solid-default-default", text},
+	{"primary button label, hover", "--ds-color-primary-text-contrast-default", "--ds-color-primary-solid-default-hover", text},
+	{"primary button label, pressed", "--ds-color-primary-text-contrast-default", "--ds-color-primary-solid-default-pressed", text},
 	{"secondary button label", "--ds-color-neutral-text-strong-default", "--ds-color-neutral-surface-subtle-default", text},
 	{"secondary button label, hover", "--ds-color-neutral-text-strong-default", "--ds-color-neutral-surface-default-hover", text},
 	{"authenticator choice description", "--ds-color-neutral-text-subtle-default", "--ds-color-neutral-surface-subtle-default", text},
@@ -43,10 +43,11 @@ var pairs = []pair{
 	{"warning message", "--ds-color-warning-text-default-default", "--ds-color-warning-surface-subtle-default", text},
 	{"success message", "--ds-color-success-text-default-default", "--ds-color-success-surface-subtle-default", text},
 	{"info message", "--ds-color-info-text-default-default", "--ds-color-info-surface-subtle-default", text},
-	{"field edge against the panel", "--scnx-login-control-border", "panel", ui},
-	{"field edge against its fill", "--scnx-login-control-border", "field", ui},
+	{"field edge against the panel", "--ds-color-neutral-border-strong-default", "panel", ui},
+	{"field edge against its fill", "--ds-color-neutral-border-strong-default", "field", ui},
+	{"field edge on hover, against the panel", "--ds-color-neutral-border-strong-hover", "panel", ui},
 	{"invalid field edge", "--ds-color-danger-solid-default-default", "panel", ui},
-	{"focus indicator", "--scnx-login-focus", "panel", ui},
+	{"focus indicator", "--ds-color-neutral-border-default-focus", "panel", ui},
 }
 
 // The canvas a panel can sit over: the plain canvas, and the canvas under each aurora at full
