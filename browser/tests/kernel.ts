@@ -250,8 +250,10 @@ export async function scan(page: Page, locale: string, surface: string): Promise
   await page.emulateMedia({ colorScheme: "light" });
 }
 
-// summarize adds a row to the job summary, when there is one.
+// summarize adds a row to the job summary, when there is one, and to the log.
 function summarize(row: string): void {
+  // Printed as well: a run's log is what its id retrieves later.
+  console.log(row);
   const file = process.env.GITHUB_STEP_SUMMARY;
   if (file) appendFileSync(file, `${row}\n`);
 }

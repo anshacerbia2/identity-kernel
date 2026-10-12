@@ -370,6 +370,13 @@ html.login-pf .pf-v5-c-login__main-header {
   border-block-start: 0;
 }
 
+/* keycloak.v2 splits the header 70/30 when the language menu is present, which pushes the menu past
+   the panel's padding; the title takes what the menu leaves. */
+html.login-pf div.pf-v5-c-login__main-header:has(.pf-v5-c-login__main-header-utilities) {
+  grid-template-columns: minmax(0, 1fr) auto;
+  column-gap: var(--ds-spacing-md);
+}
+
 html.login-pf .pf-v5-c-login__main-body {
   padding: var(--ds-spacing-lg) var(--ds-spacing-xl) var(--ds-spacing-xl);
 }
@@ -419,6 +426,11 @@ html.login-pf .instruction {
 
 html.login-pf .pf-v5-c-login__main-body p + p {
   margin-block-start: var(--ds-spacing-sm);
+}
+
+/* The logout confirmation's question and its button. */
+html.login-pf #kc-logout-confirm .instruction {
+  margin-block-end: var(--ds-spacing-md);
 }
 
 /* A link outside a button keeps its underline: it is told from the text around it by more than its
@@ -564,14 +576,16 @@ html.login-pf .pf-v5-c-button.pf-m-control::after {
   border-radius: inherit;
 }
 
-/* The checkbox takes the action colour. */
-html.login-pf .pf-v5-c-check__input {
+/* The checkbox takes the action colour, PatternFly's and the recovery codes' bare one alike. */
+html.login-pf .pf-v5-c-check__input,
+html.login-pf input[type="checkbox"] {
   inline-size: 1rem;
   block-size: 1rem;
   accent-color: var(--scnx-login-action-solid);
 }
 
-html.login-pf .pf-v5-c-check__label {
+html.login-pf .pf-v5-c-check__label,
+html.login-pf label[for="kcRecoveryCodesConfirmationCheck"] {
   font-size: var(--ds-font-size-sm);
   color: var(--ds-color-neutral-text-default-default);
 }
@@ -651,6 +665,7 @@ html.login-pf .pf-v5-c-button.pf-m-link {
   --pf-v5-c-button--m-link--hover--Color: var(--ds-color-primary-text-default-default);
 
   border-radius: var(--ds-radius-md);
+  font-size: var(--ds-font-size-sm);
   font-weight: var(--ds-font-weight-medium);
 }
 
@@ -834,6 +849,23 @@ html.login-pf #kc-recovery-codes-list {
   font-size: var(--ds-font-size-sm);
   color: var(--ds-color-neutral-text-strong-default);
   background: var(--ds-color-neutral-surface-sunken-default);
+}
+
+/* The recovery codes sit in a PatternFly panel; the list carries the surface, so the panel is bare. */
+html.login-pf .pf-v5-c-login__main-body .pf-v5-c-panel {
+  --pf-v5-c-panel--BackgroundColor: transparent;
+  --pf-v5-c-panel--m-raised--BoxShadow: none;
+
+  background: transparent;
+  box-shadow: none;
+}
+
+html.login-pf .pf-v5-c-login__main-body .pf-v5-c-panel__main-body {
+  padding: 0;
+}
+
+html.login-pf label[for="kcRecoveryCodesConfirmationCheck"] {
+  margin-inline-start: var(--ds-spacing-xs);
 }
 
 html.login-pf .pf-v5-c-clipboard-copy {
