@@ -1,0 +1,926 @@
+/*
+ * The Scnehaux login theme's look: Identity Experience's visual language over keycloak.v2's markup
+ * (TDD-identity-kernel-004 §Visual Language).
+ *
+ * The tokens are copied, by name and by value, from identity-experience
+ * packages/ui/src/styles/tokens/_ds-temporary.scss and foundations/_base.scss at commit b87b099
+ * (identity-experience #54, branch light-theme-contrast). They are written out here because the theme
+ * depends on no other repository and has no build step. The names are the UI Platform's
+ * (ADR-UIP-TKN-003), so the day the platform publishes its theme this block is what changes.
+ *
+ * Every --ds-* value equals Identity Experience's, and the page reads no colour of its own: the light
+ * action colour, a field's opaque edge and focus as an outline, which the login page needed for WCAG
+ * 2.2 AA, are Identity Experience's own values since #54.
+ *
+ * No cascade layers: PatternFly's stylesheet is unlayered, and an unlayered rule beats every layered
+ * one. Selectors start at html.login-pf (the class keycloak.v2 puts on the document) so they outrank
+ * PatternFly's single-class rules, and no rule needs !important.
+ *
+ * keycloak.v2 follows the operating system's colour scheme by putting pf-v5-theme-dark on <html>; the
+ * light tokens sit on :root and the dark ones on that class.
+ */
+
+/* Inter, the face Identity Experience bundles (@fontsource-variable/inter 5.3.0, latin, the weight
+   axis), served from the kernel's own origin: the login page loads nothing from another one. SIL
+   Open Font License 1.1, in ../fonts/OFL.txt. */
+@font-face {
+  font-family: "Inter Variable";
+  font-style: normal;
+  font-display: swap;
+  font-weight: 100 900;
+  src: url("../fonts/inter-latin-wght-normal.woff2") format("woff2-variations");
+  unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308,
+    U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
+}
+
+/* ---- Tokens: scales, the same in both schemes ------------------------------------------------- */
+
+:root {
+  --ds-font-family-sans: "Inter Variable", ui-sans-serif, system-ui, sans-serif;
+  --ds-font-family-mono: "JetBrains Mono Variable", ui-monospace, "SFMono-Regular", monospace;
+  --ds-spacing-3xs: 0.125rem;
+  --ds-spacing-2xs: 0.25rem;
+  --ds-spacing-xs: 0.5rem;
+  --ds-spacing-sm: 0.75rem;
+  --ds-spacing-md: 1rem;
+  --ds-spacing-lg: 1.5rem;
+  --ds-spacing-xl: 2rem;
+  --ds-spacing-2xl: 3rem;
+  --ds-size-control-sm: 2rem;
+  --ds-size-control-md: 2.5rem;
+  --ds-size-icon-sm: 1rem;
+  --ds-size-icon-md: 1.25rem;
+  --ds-radius-sm: 0.375rem;
+  --ds-radius-md: 0.625rem;
+  --ds-radius-lg: 0.875rem;
+  --ds-radius-full: 999rem;
+  --ds-stroke-thin: 1px;
+  --ds-stroke-default: 2px;
+  --ds-font-size-xs: 0.75rem;
+  --ds-font-size-sm: 0.875rem;
+  --ds-font-size-md: 1rem;
+  --ds-font-size-lg: 1.25rem;
+  --ds-font-size-xl: 1.75rem;
+  --ds-font-weight-regular: 400;
+  --ds-font-weight-medium: 500;
+  --ds-font-weight-semibold: 600;
+  --ds-line-height-tight: 1.15;
+  --ds-line-height-normal: 1.5;
+  --ds-letter-spacing-tight: -0.02em;
+  --ds-duration-fast: 120ms;
+  --ds-duration-normal: 200ms;
+  --ds-easing-standard: cubic-bezier(0.2, 0, 0, 1);
+}
+
+/* ---- Tokens: light ------------------------------------------------------------------------------ */
+
+:root {
+  color-scheme: light;
+
+  --ds-color-neutral-canvas-default: oklch(0.975 0.006 262);
+  --ds-color-neutral-canvas-glow-a: oklch(0.8 0.1 225 / 0.35);
+  --ds-color-neutral-canvas-glow-b: oklch(0.82 0.1 300 / 0.25);
+  --ds-color-neutral-canvas-grid: oklch(0.4 0.03 262 / 0.05);
+  --ds-color-neutral-surface-sunken-default: oklch(0.95 0.008 262 / 0.8);
+  --ds-color-neutral-surface-raised-default: oklch(1 0 0 / 0.72);
+  --ds-color-neutral-surface-floating-default: oklch(1 0 0 / 0.94);
+  --ds-color-neutral-surface-subtle-default: oklch(0.93 0.01 262 / 0.6);
+  --ds-color-neutral-surface-default-hover: oklch(0.9 0.015 262 / 0.7);
+  --ds-color-neutral-border-subtle-default: oklch(0.3 0.03 262 / 0.1);
+  --ds-color-neutral-border-default-default: oklch(0.3 0.03 262 / 0.16);
+  /* A strong border identifies a component by its edge (a field), so it is opaque and meets 3:1
+     against every surface it meets (WCAG 2.2 SC 1.4.11). */
+  --ds-color-neutral-border-strong-default: oklch(0.62 0.02 262);
+  --ds-color-neutral-border-strong-hover: oklch(0.48 0.02 262);
+  --ds-color-neutral-border-default-focus: var(--ds-color-primary-solid-default-default);
+  --ds-color-neutral-text-strong-default: oklch(0.18 0.02 262);
+  --ds-color-neutral-text-default-default: oklch(0.3 0.02 262);
+  --ds-color-neutral-text-subtle-default: oklch(0.48 0.02 262);
+  --ds-color-neutral-icon-default-default: oklch(0.42 0.02 262);
+  --ds-color-neutral-shadow-default-default: oklch(0.3 0.04 262 / 0.18);
+  --ds-shadow-low: 0 1px 2px 0 var(--ds-color-neutral-shadow-default-default);
+  --ds-shadow-medium: 0 16px 40px -20px var(--ds-color-neutral-shadow-default-default);
+  /* Focus is an outline; this is only the glow added to it, and light has none (STD-GLB-FE-005 §3.9). */
+  --ds-shadow-focus: none;
+
+  /* The light primary sits at L 0.5 and hover darkens, away from its near-white label: 5.06:1 at
+     rest, 5.96:1 on hover, 6.47:1 pressed (WCAG 2.2 SC 1.4.3). */
+  --ds-color-primary-solid-default-default: oklch(0.5 0.14 212);
+  --ds-color-primary-solid-default-hover: oklch(0.46 0.14 212);
+  --ds-color-primary-solid-default-pressed: oklch(0.44 0.14 212);
+  --ds-color-primary-text-default-default: oklch(0.42 0.126 212);
+  --ds-color-primary-text-contrast-default: oklch(0.99 0.03 212);
+  --ds-color-primary-icon-default-default: oklch(0.42 0.14 212);
+  --ds-color-primary-surface-subtle-default: oklch(0.5 0.14 212 / 0.1);
+  --ds-color-primary-border-default-default: oklch(0.5 0.14 212 / 0.45);
+  --ds-color-primary-shadow-default-default: oklch(0.5 0.14 212 / 0.22);
+  --ds-color-info-text-default-default: oklch(0.42 0.126 252);
+  --ds-color-info-icon-default-default: oklch(0.42 0.14 252);
+  --ds-color-info-surface-subtle-default: oklch(0.52 0.14 252 / 0.1);
+  --ds-color-info-border-default-default: oklch(0.52 0.14 252 / 0.45);
+  --ds-color-success-text-default-default: oklch(0.42 0.135 158);
+  --ds-color-success-icon-default-default: oklch(0.42 0.15 158);
+  --ds-color-success-surface-subtle-default: oklch(0.52 0.15 158 / 0.1);
+  --ds-color-success-border-default-default: oklch(0.52 0.15 158 / 0.45);
+  --ds-color-warning-text-default-default: oklch(0.42 0.135 78);
+  --ds-color-warning-icon-default-default: oklch(0.42 0.15 78);
+  --ds-color-warning-surface-subtle-default: oklch(0.62 0.15 78 / 0.1);
+  --ds-color-warning-border-default-default: oklch(0.62 0.15 78 / 0.45);
+  --ds-color-danger-solid-default-default: oklch(0.55 0.19 24);
+  --ds-color-danger-text-default-default: oklch(0.42 0.171 24);
+  --ds-color-danger-icon-default-default: oklch(0.42 0.19 24);
+  --ds-color-danger-surface-subtle-default: oklch(0.55 0.19 24 / 0.1);
+  --ds-color-danger-border-default-default: oklch(0.55 0.19 24 / 0.45);
+}
+
+/* ---- Tokens: dark ------------------------------------------------------------------------------- */
+
+:root.pf-v5-theme-dark {
+  color-scheme: dark;
+
+  --ds-color-neutral-canvas-default: oklch(0.145 0.02 262);
+  --ds-color-neutral-canvas-glow-a: oklch(0.55 0.16 225 / 0.22);
+  --ds-color-neutral-canvas-glow-b: oklch(0.5 0.2 300 / 0.16);
+  --ds-color-neutral-canvas-grid: oklch(0.7 0.03 262 / 0.05);
+  --ds-color-neutral-surface-sunken-default: oklch(0.12 0.018 262 / 0.7);
+  --ds-color-neutral-surface-raised-default: oklch(0.19 0.024 262 / 0.62);
+  --ds-color-neutral-surface-floating-default: oklch(0.22 0.028 262 / 0.9);
+  --ds-color-neutral-surface-subtle-default: oklch(0.3 0.025 262 / 0.28);
+  --ds-color-neutral-surface-default-hover: oklch(0.35 0.03 262 / 0.35);
+  --ds-color-neutral-border-subtle-default: oklch(0.72 0.03 262 / 0.12);
+  --ds-color-neutral-border-default-default: oklch(0.72 0.03 262 / 0.2);
+  --ds-color-neutral-border-strong-default: oklch(0.55 0.02 262);
+  --ds-color-neutral-border-strong-hover: oklch(0.72 0.02 262);
+  --ds-color-neutral-border-default-focus: var(--ds-color-primary-solid-default-default);
+  --ds-color-neutral-text-strong-default: oklch(0.97 0.008 262);
+  --ds-color-neutral-text-default-default: oklch(0.88 0.014 262);
+  --ds-color-neutral-text-subtle-default: oklch(0.72 0.02 262);
+  --ds-color-neutral-icon-default-default: oklch(0.78 0.02 262);
+  --ds-color-neutral-shadow-default-default: oklch(0.05 0.02 262 / 0.55);
+  --ds-shadow-low:
+    0 1px 0 0 oklch(1 0 0 / 0.04) inset,
+    0 8px 24px -12px var(--ds-color-neutral-shadow-default-default);
+  --ds-shadow-medium:
+    0 1px 0 0 oklch(1 0 0 / 0.06) inset,
+    0 24px 48px -24px var(--ds-color-neutral-shadow-default-default);
+
+  --ds-color-primary-solid-default-default: oklch(0.8 0.14 212);
+  --ds-color-primary-solid-default-hover: oklch(0.85 0.14 212);
+  --ds-color-primary-solid-default-pressed: oklch(0.74 0.14 212);
+  --ds-color-primary-text-default-default: oklch(0.86 0.126 212);
+  --ds-color-primary-text-contrast-default: oklch(0.17 0.03 212);
+  --ds-color-primary-icon-default-default: oklch(0.86 0.14 212);
+  --ds-color-primary-surface-subtle-default: oklch(0.8 0.14 212 / 0.1);
+  --ds-color-primary-border-default-default: oklch(0.8 0.14 212 / 0.45);
+  --ds-color-primary-shadow-default-default: oklch(0.8 0.14 212 / 0.35);
+  --ds-color-info-text-default-default: oklch(0.86 0.126 252);
+  --ds-color-info-icon-default-default: oklch(0.86 0.14 252);
+  --ds-color-info-surface-subtle-default: oklch(0.74 0.14 252 / 0.1);
+  --ds-color-info-border-default-default: oklch(0.74 0.14 252 / 0.45);
+  --ds-color-success-text-default-default: oklch(0.86 0.135 158);
+  --ds-color-success-icon-default-default: oklch(0.86 0.15 158);
+  --ds-color-success-surface-subtle-default: oklch(0.78 0.15 158 / 0.1);
+  --ds-color-success-border-default-default: oklch(0.78 0.15 158 / 0.45);
+  --ds-color-warning-text-default-default: oklch(0.86 0.135 78);
+  --ds-color-warning-icon-default-default: oklch(0.86 0.15 78);
+  --ds-color-warning-surface-subtle-default: oklch(0.84 0.15 78 / 0.1);
+  --ds-color-warning-border-default-default: oklch(0.84 0.15 78 / 0.45);
+  --ds-color-danger-solid-default-default: oklch(0.7 0.19 24);
+  --ds-color-danger-text-default-default: oklch(0.86 0.171 24);
+  --ds-color-danger-icon-default-default: oklch(0.86 0.19 24);
+  --ds-color-danger-surface-subtle-default: oklch(0.7 0.19 24 / 0.1);
+  --ds-color-danger-border-default-default: oklch(0.7 0.19 24 / 0.45);
+
+  /* Focus is an outline; in dark a glow is added to it, never in its place. */
+  --ds-shadow-focus: 0 0 18px 2px var(--ds-color-primary-shadow-default-default);
+}
+
+/* High contrast, as Identity Experience: opaque surfaces, stronger borders. */
+@media (prefers-contrast: more) {
+  :root.pf-v5-theme-dark {
+    --ds-color-neutral-surface-raised-default: oklch(0.16 0.02 262);
+    --ds-color-neutral-border-default-default: oklch(0.85 0.02 262 / 0.6);
+    --ds-color-neutral-text-subtle-default: oklch(0.85 0.02 262);
+  }
+}
+
+/* ---- PatternFly, steered by the tokens --------------------------------------------------------- */
+
+/* PatternFly's components read these globals; pointing them at the tokens carries the palette into
+   every component this file does not style by name. */
+html.login-pf {
+  --pf-v5-global--FontFamily--text: var(--ds-font-family-sans);
+  --pf-v5-global--FontFamily--heading: var(--ds-font-family-sans);
+  --pf-v5-global--FontFamily--text--vf: var(--ds-font-family-sans);
+  --pf-v5-global--FontFamily--heading--vf: var(--ds-font-family-sans);
+  --pf-v5-global--FontFamily--monospace: var(--ds-font-family-mono);
+  --pf-v5-global--FontFamily--monospace--vf: var(--ds-font-family-mono);
+  --pf-v5-global--Color--100: var(--ds-color-neutral-text-default-default);
+  --pf-v5-global--Color--200: var(--ds-color-neutral-text-subtle-default);
+  --pf-v5-global--BorderColor--100: var(--ds-color-neutral-border-default-default);
+  --pf-v5-global--link--Color: var(--ds-color-primary-text-default-default);
+  --pf-v5-global--link--Color--hover: var(--ds-color-primary-text-default-default);
+  --pf-v5-global--link--Color--visited: var(--ds-color-primary-text-default-default);
+  --pf-v5-global--primary-color--100: var(--ds-color-primary-solid-default-default);
+  --pf-v5-global--active-color--100: var(--ds-color-primary-solid-default-default);
+  --pf-v5-global--danger-color--100: var(--ds-color-danger-icon-default-default);
+  --pf-v5-global--danger-color--200: var(--ds-color-danger-text-default-default);
+  --pf-v5-global--success-color--100: var(--ds-color-success-icon-default-default);
+  --pf-v5-global--warning-color--100: var(--ds-color-warning-icon-default-default);
+  --pf-v5-global--info-color--100: var(--ds-color-info-icon-default-default);
+  --keycloak-bg-logo-url: none;
+  --keycloak-card-top-color: transparent;
+
+  font-family: var(--ds-font-family-sans);
+  color: var(--ds-color-neutral-text-default-default);
+  background-color: var(--ds-color-neutral-canvas-default);
+}
+
+/* The canvas: two soft auroras and a faint grid, painted once behind everything, as Identity
+   Experience's _base.scss. Gradients, not images, so nothing is fetched. */
+html.login-pf body {
+  min-block-size: 100dvh;
+  font-family: var(--ds-font-family-sans);
+  line-height: var(--ds-line-height-normal);
+  -webkit-font-smoothing: antialiased;
+  background-color: var(--ds-color-neutral-canvas-default);
+  background-image:
+    radial-gradient(60rem 40rem at 12% -10%, var(--ds-color-neutral-canvas-glow-a), transparent 70%),
+    radial-gradient(50rem 36rem at 100% 0%, var(--ds-color-neutral-canvas-glow-b), transparent 70%),
+    linear-gradient(var(--ds-color-neutral-canvas-grid) 1px, transparent 1px),
+    linear-gradient(90deg, var(--ds-color-neutral-canvas-grid) 1px, transparent 1px);
+  background-size:
+    auto,
+    auto,
+    2.5rem 2.5rem,
+    2.5rem 2.5rem;
+  background-repeat: no-repeat, no-repeat, repeat, repeat;
+  background-attachment: fixed;
+}
+
+html.login-pf ::selection {
+  color: var(--ds-color-primary-text-contrast-default);
+  background: var(--ds-color-primary-solid-default-default);
+}
+
+/* Focus is always visible, and always an outline (STD-GLB-FE-005 §3.9). */
+html.login-pf :focus-visible {
+  outline: var(--ds-stroke-default) solid var(--ds-color-neutral-border-default-focus);
+  outline-offset: 2px;
+}
+
+/* ---- The frame ---------------------------------------------------------------------------------- */
+
+html.login-pf .pf-v5-c-login {
+  --pf-v5-c-login--PaddingTop: var(--ds-spacing-2xl);
+  --pf-v5-c-login--PaddingBottom: var(--ds-spacing-2xl);
+
+  min-block-size: 100dvh;
+  background: transparent;
+}
+
+html.login-pf .pf-v5-c-login__container {
+  grid-template-columns: minmax(0, 30rem);
+  grid-template-areas: "header" "main";
+  justify-content: center;
+  row-gap: var(--ds-spacing-lg);
+  inline-size: 100%;
+  max-inline-size: none;
+  padding-inline: var(--ds-spacing-md);
+}
+
+/* The brand: Identity Experience's mark in its tinted square, and the realm's name beside it. */
+html.login-pf .pf-v5-c-login__header {
+  margin-block-start: 0;
+  padding-inline: 0;
+}
+
+html.login-pf #kc-header-wrapper {
+  /* keycloak.v2 colours this with !important through this variable; the variable is what changes. */
+  --pf-v5-global--Color--light-100: var(--ds-color-neutral-text-strong-default);
+
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--ds-spacing-sm);
+  inline-size: auto;
+  block-size: auto;
+  margin: 0;
+  font-size: var(--ds-font-size-lg);
+  font-weight: var(--ds-font-weight-semibold);
+  letter-spacing: var(--ds-letter-spacing-tight);
+  line-height: var(--ds-line-height-tight);
+  text-transform: capitalize;
+}
+
+html.login-pf #kc-header-wrapper::before {
+  flex: none;
+  inline-size: var(--ds-size-control-md);
+  block-size: var(--ds-size-control-md);
+  content: "";
+  border: var(--ds-stroke-thin) solid var(--ds-color-primary-border-default-default);
+  border-radius: var(--ds-radius-md);
+  background: url("../img/scnehaux-mark.svg") center / 1.5rem no-repeat,
+    var(--ds-color-primary-surface-subtle-default);
+  box-shadow: 0 0 18px -4px var(--ds-color-primary-shadow-default-default);
+}
+
+/* The panel: translucent over the canvas, a hairline of light along its top edge (Panel.module.scss). */
+html.login-pf .pf-v5-c-login__main {
+  position: relative;
+  padding: 0;
+  border: var(--ds-stroke-thin) solid var(--ds-color-neutral-border-subtle-default);
+  border-radius: var(--ds-radius-lg);
+  color: var(--ds-color-neutral-text-default-default);
+  background: var(--ds-color-neutral-surface-raised-default);
+  box-shadow: var(--ds-shadow-medium);
+  backdrop-filter: blur(18px) saturate(140%);
+}
+
+html.login-pf .pf-v5-c-login__main::before {
+  position: absolute;
+  inset-block-start: 0;
+  inset-inline: var(--ds-spacing-lg);
+  block-size: 1px;
+  content: "";
+  background: linear-gradient(90deg, transparent, var(--ds-color-primary-border-default-default), transparent);
+}
+
+html.login-pf .pf-v5-c-login__main-header {
+  align-items: center;
+  row-gap: var(--ds-spacing-sm);
+  padding: var(--ds-spacing-xl) var(--ds-spacing-xl) 0;
+  border-block-start: 0;
+}
+
+/* keycloak.v2 splits the header 70/30 when the language menu is present, which pushes the menu past
+   the panel's padding; the title takes what the menu leaves. */
+html.login-pf div.pf-v5-c-login__main-header:has(.pf-v5-c-login__main-header-utilities) {
+  grid-template-columns: minmax(0, 1fr) auto;
+  column-gap: var(--ds-spacing-md);
+}
+
+html.login-pf .pf-v5-c-login__main-body {
+  padding: var(--ds-spacing-lg) var(--ds-spacing-xl) var(--ds-spacing-xl);
+}
+
+html.login-pf .pf-v5-c-login__main-footer {
+  padding-inline: var(--ds-spacing-xl);
+}
+
+html.login-pf .pf-v5-c-login__main-body .pf-v5-c-login__main-footer {
+  padding-inline: 0;
+}
+
+html.login-pf .pf-v5-c-login__main-footer:empty {
+  display: none;
+}
+
+html.login-pf .pf-v5-c-login__main-footer-band {
+  padding-block: var(--ds-spacing-md) 0;
+  border-block-start: var(--ds-stroke-thin) solid var(--ds-color-neutral-border-subtle-default);
+  font-size: var(--ds-font-size-sm);
+  color: var(--ds-color-neutral-text-subtle-default);
+  background: transparent;
+}
+
+html.login-pf #kc-page-title {
+  font-family: var(--ds-font-family-sans);
+  font-size: var(--ds-font-size-xl);
+  font-weight: var(--ds-font-weight-semibold);
+  letter-spacing: var(--ds-letter-spacing-tight);
+  line-height: var(--ds-line-height-tight);
+  color: var(--ds-color-neutral-text-strong-default);
+}
+
+html.login-pf .pf-v5-c-login__main-body h2 {
+  font-size: var(--ds-font-size-md);
+  font-weight: var(--ds-font-weight-semibold);
+  letter-spacing: var(--ds-letter-spacing-tight);
+  color: var(--ds-color-neutral-text-strong-default);
+}
+
+html.login-pf .pf-v5-c-login__main-body p,
+html.login-pf .pf-v5-c-login__main-body li,
+html.login-pf .instruction {
+  font-size: var(--ds-font-size-sm);
+  color: var(--ds-color-neutral-text-default-default);
+}
+
+html.login-pf .pf-v5-c-login__main-body p + p {
+  margin-block-start: var(--ds-spacing-sm);
+}
+
+/* The logout confirmation's question and its button. */
+html.login-pf #kc-logout-confirm .instruction {
+  margin-block-end: var(--ds-spacing-md);
+}
+
+/* A link outside a button keeps its underline: it is told from the text around it by more than its
+   colour (SC 1.4.1). */
+html.login-pf .pf-v5-c-login__main a:not(.pf-v5-c-button) {
+  color: var(--ds-color-primary-text-default-default);
+  text-decoration: underline;
+  text-underline-offset: 0.2em;
+}
+
+html.login-pf .pf-v5-c-login__main a:not(.pf-v5-c-button):hover {
+  text-decoration-thickness: 2px;
+}
+
+/* ---- Fields ------------------------------------------------------------------------------------- */
+
+html.login-pf .pf-v5-c-form {
+  --pf-v5-c-form--GridGap: var(--ds-spacing-md);
+}
+
+html.login-pf .pf-v5-c-form__label,
+html.login-pf .pf-v5-c-form__label-text {
+  font-size: var(--ds-font-size-sm);
+  font-weight: var(--ds-font-weight-medium);
+  color: var(--ds-color-neutral-text-strong-default);
+}
+
+html.login-pf .pf-v5-c-form__label-required {
+  color: var(--ds-color-danger-text-default-default);
+}
+
+/* A field: sunken, rounded, its edge drawn whole by ::before. PatternFly's ::after, an underline that
+   thickens on focus, is not drawn; focus is the ring the field's wrapper takes. */
+html.login-pf .pf-v5-c-form-control {
+  --pf-v5-c-form-control--BackgroundColor: var(--ds-color-neutral-surface-sunken-default);
+  --pf-v5-c-form-control--Color: var(--ds-color-neutral-text-strong-default);
+  --pf-v5-c-form-control--FontSize: var(--ds-font-size-sm);
+  --pf-v5-c-form-control--m-placeholder--Color: var(--ds-color-neutral-text-subtle-default);
+  --pf-v5-c-form-control--m-readonly--BackgroundColor: var(--ds-color-neutral-surface-subtle-default);
+  --pf-v5-c-form-control--before--BorderStyle: solid;
+  --pf-v5-c-form-control--before--BorderTopWidth: var(--ds-stroke-thin);
+  --pf-v5-c-form-control--before--BorderRightWidth: var(--ds-stroke-thin);
+  --pf-v5-c-form-control--before--BorderBottomWidth: var(--ds-stroke-thin);
+  --pf-v5-c-form-control--before--BorderLeftWidth: var(--ds-stroke-thin);
+  --pf-v5-c-form-control--before--BorderTopColor: var(--ds-color-neutral-border-strong-default);
+  --pf-v5-c-form-control--before--BorderRightColor: var(--ds-color-neutral-border-strong-default);
+  --pf-v5-c-form-control--before--BorderBottomColor: var(--ds-color-neutral-border-strong-default);
+  --pf-v5-c-form-control--before--BorderLeftColor: var(--ds-color-neutral-border-strong-default);
+  --pf-v5-c-form-control--after--BorderBottomColor: transparent;
+  --pf-v5-c-form-control--after--BorderBottomWidth: 0;
+
+  min-block-size: var(--ds-size-control-md);
+  border-radius: var(--ds-radius-md);
+  transition:
+    border-color var(--ds-duration-fast) var(--ds-easing-standard),
+    box-shadow var(--ds-duration-fast) var(--ds-easing-standard);
+}
+
+html.login-pf .pf-v5-c-form-control::before {
+  border-radius: inherit;
+}
+
+html.login-pf .pf-v5-c-form-control::after {
+  display: none;
+}
+
+html.login-pf .pf-v5-c-form-control:hover {
+  --pf-v5-c-form-control--before--BorderTopColor: var(--ds-color-neutral-border-strong-hover);
+  --pf-v5-c-form-control--before--BorderRightColor: var(--ds-color-neutral-border-strong-hover);
+  --pf-v5-c-form-control--before--BorderBottomColor: var(--ds-color-neutral-border-strong-hover);
+  --pf-v5-c-form-control--before--BorderLeftColor: var(--ds-color-neutral-border-strong-hover);
+  --pf-v5-c-form-control--after--BorderBottomColor: transparent;
+}
+
+html.login-pf .pf-v5-c-form-control > :is(input, select, textarea) {
+  border-radius: inherit;
+  font-family: var(--ds-font-family-sans);
+}
+
+/* The wrapper shows the focus of the field inside it, as Field.module.scss's control does. */
+html.login-pf .pf-v5-c-form-control > :is(input, select, textarea):focus-visible {
+  outline: none;
+}
+
+html.login-pf .pf-v5-c-form-control:focus-within {
+  --pf-v5-c-form-control--before--BorderTopColor: var(--ds-color-neutral-border-default-focus);
+  --pf-v5-c-form-control--before--BorderRightColor: var(--ds-color-neutral-border-default-focus);
+  --pf-v5-c-form-control--before--BorderBottomColor: var(--ds-color-neutral-border-default-focus);
+  --pf-v5-c-form-control--before--BorderLeftColor: var(--ds-color-neutral-border-default-focus);
+  --pf-v5-c-form-control--after--BorderBottomColor: transparent;
+
+  outline: var(--ds-stroke-default) solid var(--ds-color-neutral-border-default-focus);
+  outline-offset: 2px;
+  box-shadow: var(--ds-shadow-focus);
+}
+
+/* An invalid field: its edge in the danger colour, and the message beneath it in words. */
+html.login-pf .pf-v5-c-form-control.pf-m-error {
+  --pf-v5-c-form-control--before--BorderTopColor: var(--ds-color-danger-solid-default-default);
+  --pf-v5-c-form-control--before--BorderRightColor: var(--ds-color-danger-solid-default-default);
+  --pf-v5-c-form-control--before--BorderBottomColor: var(--ds-color-danger-solid-default-default);
+  --pf-v5-c-form-control--before--BorderLeftColor: var(--ds-color-danger-solid-default-default);
+  --pf-v5-c-form-control--after--BorderBottomColor: transparent;
+  --pf-v5-c-form-control__icon--m-status--Color: var(--ds-color-danger-icon-default-default);
+}
+
+html.login-pf .pf-v5-c-helper-text {
+  --pf-v5-c-helper-text--FontSize: var(--ds-font-size-xs);
+  --pf-v5-c-helper-text__item-text--Color: var(--ds-color-neutral-text-subtle-default);
+  --pf-v5-c-helper-text__item-text--m-error--Color: var(--ds-color-danger-text-default-default);
+  --pf-v5-c-helper-text__item-icon--m-error--Color: var(--ds-color-danger-icon-default-default);
+}
+
+html.login-pf .pf-v5-c-helper-text__item-text.pf-m-error,
+html.login-pf .pf-m-error .pf-v5-c-helper-text__item-text,
+html.login-pf #input-error-otp-code,
+html.login-pf #input-error-otp-label {
+  font-size: var(--ds-font-size-xs);
+  font-weight: var(--ds-font-weight-medium);
+  color: var(--ds-color-danger-text-default-default);
+}
+
+/* A field and its buttons (show password, restart, copy) sit apart, each with its own edge. */
+html.login-pf .pf-v5-c-input-group {
+  gap: var(--ds-spacing-xs);
+}
+
+html.login-pf .pf-v5-c-button.pf-m-control {
+  --pf-v5-c-button--m-control--BackgroundColor: var(--ds-color-neutral-surface-sunken-default);
+  --pf-v5-c-button--m-control--hover--BackgroundColor: var(--ds-color-neutral-surface-default-hover);
+  --pf-v5-c-button--m-control--active--BackgroundColor: var(--ds-color-neutral-surface-default-hover);
+  --pf-v5-c-button--m-control--focus--BackgroundColor: var(--ds-color-neutral-surface-sunken-default);
+  --pf-v5-c-button--m-control--Color: var(--ds-color-neutral-icon-default-default);
+  --pf-v5-c-button--m-control--hover--Color: var(--ds-color-neutral-text-strong-default);
+
+  min-inline-size: var(--ds-size-control-md);
+  min-block-size: var(--ds-size-control-md);
+  border-radius: var(--ds-radius-md);
+}
+
+html.login-pf .pf-v5-c-button.pf-m-control::after {
+  border: var(--ds-stroke-thin) solid var(--ds-color-neutral-border-strong-default);
+  border-radius: inherit;
+}
+
+/* The checkbox takes the action colour, PatternFly's and the recovery codes' bare one alike. */
+html.login-pf .pf-v5-c-check__input,
+html.login-pf input[type="checkbox"] {
+  inline-size: 1rem;
+  block-size: 1rem;
+  accent-color: var(--ds-color-primary-solid-default-default);
+}
+
+html.login-pf .pf-v5-c-check__label,
+html.login-pf label[for="kcRecoveryCodesConfirmationCheck"] {
+  font-size: var(--ds-font-size-sm);
+  color: var(--ds-color-neutral-text-default-default);
+}
+
+/* ---- Buttons (Button.module.scss) ---------------------------------------------------------------- */
+
+html.login-pf .pf-v5-c-button:is(.pf-m-primary, .pf-m-secondary, .pf-m-tertiary) {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--ds-spacing-xs);
+  min-block-size: var(--ds-size-control-md);
+  padding-inline: var(--ds-spacing-md);
+  border-radius: var(--ds-radius-md);
+  font-family: var(--ds-font-family-sans);
+  font-size: var(--ds-font-size-sm);
+  font-weight: var(--ds-font-weight-semibold);
+  letter-spacing: 0.01em;
+  transition:
+    background-color var(--ds-duration-fast) var(--ds-easing-standard),
+    border-color var(--ds-duration-fast) var(--ds-easing-standard),
+    box-shadow var(--ds-duration-normal) var(--ds-easing-standard),
+    transform var(--ds-duration-fast) var(--ds-easing-standard);
+}
+
+html.login-pf .pf-v5-c-button:is(.pf-m-primary, .pf-m-secondary, .pf-m-tertiary)::after {
+  border-radius: inherit;
+}
+
+html.login-pf .pf-v5-c-button:is(.pf-m-primary, .pf-m-secondary, .pf-m-tertiary):active:not(:disabled) {
+  transform: translateY(1px);
+}
+
+html.login-pf .pf-v5-c-button:is(.pf-m-primary, .pf-m-secondary, .pf-m-tertiary, .pf-m-control, .pf-m-link):focus-visible {
+  outline: var(--ds-stroke-default) solid var(--ds-color-neutral-border-default-focus);
+  outline-offset: 2px;
+  box-shadow: var(--ds-shadow-focus);
+}
+
+/* Primary: a luminous solid that glows faintly on hover. */
+html.login-pf .pf-v5-c-button.pf-m-primary {
+  color: var(--ds-color-primary-text-contrast-default);
+  background-color: var(--ds-color-primary-solid-default-default);
+}
+
+html.login-pf .pf-v5-c-button.pf-m-primary::after {
+  border-color: transparent;
+}
+
+html.login-pf .pf-v5-c-button.pf-m-primary:hover:not(:disabled) {
+  color: var(--ds-color-primary-text-contrast-default);
+  background-color: var(--ds-color-primary-solid-default-hover);
+  box-shadow: 0 0 22px 0 var(--ds-color-primary-shadow-default-default);
+}
+
+html.login-pf .pf-v5-c-button.pf-m-primary:active:not(:disabled) {
+  background-color: var(--ds-color-primary-solid-default-pressed);
+}
+
+/* Secondary: Identity Experience's default button, a subtle surface with a hairline edge. */
+html.login-pf .pf-v5-c-button:is(.pf-m-secondary, .pf-m-tertiary) {
+  color: var(--ds-color-neutral-text-strong-default);
+  background-color: var(--ds-color-neutral-surface-subtle-default);
+}
+
+html.login-pf .pf-v5-c-button:is(.pf-m-secondary, .pf-m-tertiary)::after {
+  border: var(--ds-stroke-thin) solid var(--ds-color-neutral-border-default-default);
+}
+
+html.login-pf .pf-v5-c-button:is(.pf-m-secondary, .pf-m-tertiary):hover:not(:disabled) {
+  color: var(--ds-color-neutral-text-strong-default);
+  background-color: var(--ds-color-neutral-surface-default-hover);
+}
+
+html.login-pf .pf-v5-c-button.pf-m-link {
+  --pf-v5-c-button--m-link--Color: var(--ds-color-primary-text-default-default);
+  --pf-v5-c-button--m-link--hover--Color: var(--ds-color-primary-text-default-default);
+
+  border-radius: var(--ds-radius-md);
+  font-size: var(--ds-font-size-sm);
+  font-weight: var(--ds-font-weight-medium);
+}
+
+html.login-pf .pf-v5-c-button:disabled,
+html.login-pf .pf-v5-c-button.pf-m-disabled {
+  cursor: not-allowed;
+  opacity: 0.45;
+}
+
+html.login-pf .pf-v5-c-form__actions {
+  gap: var(--ds-spacing-sm);
+}
+
+/* ---- Messages (SignInNotice.module.scss, MutationError.module.scss) ------------------------------ */
+
+/* A message is stated with a glyph and words, never by colour alone. --kc-alert-* are the
+   component's own, as Button.module.scss's --btn-*: each scheme sets them from its --ds-* tokens. */
+html.login-pf .pf-v5-c-alert {
+  --pf-v5-c-alert--BoxShadow: none;
+  --pf-v5-c-alert--BorderTopWidth: var(--ds-stroke-thin);
+  --pf-v5-c-alert__FontSize: var(--ds-font-size-sm);
+  --pf-v5-c-alert__title--FontWeight: var(--ds-font-weight-medium);
+  --kc-alert-text: var(--ds-color-neutral-text-default-default);
+  --kc-alert-icon: var(--ds-color-neutral-icon-default-default);
+  --kc-alert-border: var(--ds-color-neutral-border-default-default);
+  --kc-alert-surface: var(--ds-color-neutral-surface-subtle-default);
+
+  column-gap: var(--ds-spacing-sm);
+  padding: var(--ds-spacing-sm) var(--ds-spacing-md);
+  border: var(--ds-stroke-thin) solid var(--kc-alert-border);
+  border-radius: var(--ds-radius-md);
+  color: var(--kc-alert-text);
+  background: var(--kc-alert-surface);
+}
+
+html.login-pf .pf-v5-c-alert.pf-m-danger {
+  --kc-alert-text: var(--ds-color-danger-text-default-default);
+  --kc-alert-icon: var(--ds-color-danger-icon-default-default);
+  --kc-alert-border: var(--ds-color-danger-border-default-default);
+  --kc-alert-surface: var(--ds-color-danger-surface-subtle-default);
+}
+
+html.login-pf .pf-v5-c-alert.pf-m-warning {
+  --kc-alert-text: var(--ds-color-warning-text-default-default);
+  --kc-alert-icon: var(--ds-color-warning-icon-default-default);
+  --kc-alert-border: var(--ds-color-warning-border-default-default);
+  --kc-alert-surface: var(--ds-color-warning-surface-subtle-default);
+}
+
+html.login-pf .pf-v5-c-alert.pf-m-success {
+  --kc-alert-text: var(--ds-color-success-text-default-default);
+  --kc-alert-icon: var(--ds-color-success-icon-default-default);
+  --kc-alert-border: var(--ds-color-success-border-default-default);
+  --kc-alert-surface: var(--ds-color-success-surface-subtle-default);
+}
+
+html.login-pf .pf-v5-c-alert.pf-m-info {
+  --kc-alert-text: var(--ds-color-info-text-default-default);
+  --kc-alert-icon: var(--ds-color-info-icon-default-default);
+  --kc-alert-border: var(--ds-color-info-border-default-default);
+  --kc-alert-surface: var(--ds-color-info-surface-subtle-default);
+}
+
+html.login-pf .pf-v5-c-alert :is(.pf-v5-c-alert__title, .pf-v5-c-alert__description) {
+  color: var(--kc-alert-text);
+}
+
+html.login-pf .pf-v5-c-alert .pf-v5-c-alert__icon {
+  color: var(--kc-alert-icon);
+}
+
+/* ---- Choosing a way to sign in ------------------------------------------------------------------- */
+
+/* Each choice is a row like Identity Experience's navigation items: a subtle surface that lifts on
+   hover and carries the focus ring. */
+html.login-pf .select-auth-container.pf-v5-c-data-list {
+  --pf-v5-c-data-list--BackgroundColor: transparent;
+  --pf-v5-c-data-list--BorderTopWidth: 0;
+  --pf-v5-c-data-list__item--BackgroundColor: transparent;
+  --pf-v5-c-data-list__item--BorderBottomWidth: 0;
+
+  display: flex;
+  flex-direction: column;
+  gap: var(--ds-spacing-xs);
+  border: 0;
+  background: transparent;
+}
+
+html.login-pf .select-auth-container .pf-v5-c-data-list__item {
+  border: 0;
+  background: transparent;
+}
+
+html.login-pf .select-auth-box-parent {
+  align-items: center;
+  padding: var(--ds-spacing-sm) var(--ds-spacing-md);
+  border: var(--ds-stroke-thin) solid var(--ds-color-neutral-border-default-default);
+  border-radius: var(--ds-radius-md);
+  color: var(--ds-color-neutral-text-default-default);
+  background: var(--ds-color-neutral-surface-subtle-default);
+  cursor: pointer;
+  transition: background-color var(--ds-duration-fast) var(--ds-easing-standard);
+}
+
+html.login-pf .select-auth-box-parent:hover {
+  background: var(--ds-color-neutral-surface-default-hover);
+}
+
+html.login-pf .select-auth-box-parent:focus-visible {
+  outline: var(--ds-stroke-default) solid var(--ds-color-neutral-border-default-focus);
+  outline-offset: 2px;
+  box-shadow: var(--ds-shadow-focus);
+}
+
+html.login-pf .select-auth-box-parent .select-auth-box-headline {
+  font-family: var(--ds-font-family-sans);
+  font-size: var(--ds-font-size-sm);
+  font-weight: var(--ds-font-weight-semibold);
+  color: var(--ds-color-neutral-text-strong-default);
+}
+
+html.login-pf .select-auth-box-parent .select-auth-box-desc {
+  font-size: var(--ds-font-size-xs);
+  color: var(--ds-color-neutral-text-subtle-default);
+}
+
+html.login-pf .select-auth-box-parent :is(.fa, .fas) {
+  color: var(--ds-color-primary-icon-default-default);
+}
+
+/* Several one-time-code devices, or several organizations, offered as tiles or buttons. */
+html.login-pf .pf-v5-c-tile {
+  --pf-v5-c-tile--BackgroundColor: var(--ds-color-neutral-surface-subtle-default);
+  --pf-v5-c-tile--before--BorderColor: var(--ds-color-neutral-border-default-default);
+  --pf-v5-c-tile--hover--before--BorderColor: var(--ds-color-neutral-border-strong-default);
+  --pf-v5-c-tile--m-selected--before--BorderColor: var(--ds-color-primary-solid-default-default);
+  --pf-v5-c-tile__title--Color: var(--ds-color-neutral-text-strong-default);
+  --pf-v5-c-tile__icon--Color: var(--ds-color-primary-icon-default-default);
+
+  border-radius: var(--ds-radius-md);
+}
+
+html.login-pf .pf-v5-c-tile::before {
+  border-radius: inherit;
+}
+
+/* ---- One-time code and recovery codes ------------------------------------------------------------ */
+
+html.login-pf #kc-totp-settings {
+  display: flex;
+  flex-direction: column;
+  gap: var(--ds-spacing-sm);
+  padding-inline-start: var(--ds-spacing-lg);
+}
+
+/* The QR code keeps a light quiet zone in the dark scheme too, or a camera cannot read it. */
+html.login-pf #kc-totp-secret-qr-code {
+  display: block;
+  margin-block: var(--ds-spacing-xs);
+  padding: var(--ds-spacing-xs);
+  border: var(--ds-stroke-thin) solid var(--ds-color-neutral-border-default-default);
+  border-radius: var(--ds-radius-md);
+  background: oklch(1 0 0);
+}
+
+html.login-pf :is(#kc-totp-secret-key, #kc-recovery-codes-list, pre, code) {
+  font-family: var(--ds-font-family-mono);
+}
+
+html.login-pf #kc-totp-secret-key {
+  padding: var(--ds-spacing-3xs) var(--ds-spacing-xs);
+  border-radius: var(--ds-radius-sm);
+  color: var(--ds-color-neutral-text-strong-default);
+  background: var(--ds-color-neutral-surface-sunken-default);
+  overflow-wrap: anywhere;
+}
+
+html.login-pf #kc-recovery-codes-list {
+  padding: var(--ds-spacing-md) var(--ds-spacing-md) var(--ds-spacing-md) var(--ds-spacing-xl);
+  border: var(--ds-stroke-thin) solid var(--ds-color-neutral-border-default-default);
+  border-radius: var(--ds-radius-md);
+  font-size: var(--ds-font-size-sm);
+  color: var(--ds-color-neutral-text-strong-default);
+  background: var(--ds-color-neutral-surface-sunken-default);
+}
+
+/* The recovery codes sit in a PatternFly panel; the list carries the surface, so the panel is bare. */
+html.login-pf .pf-v5-c-login__main-body .pf-v5-c-panel {
+  --pf-v5-c-panel--BackgroundColor: transparent;
+  --pf-v5-c-panel--m-raised--BoxShadow: none;
+
+  background: transparent;
+  box-shadow: none;
+}
+
+html.login-pf .pf-v5-c-login__main-body .pf-v5-c-panel__main-body {
+  padding: 0;
+}
+
+html.login-pf label[for="kcRecoveryCodesConfirmationCheck"] {
+  margin-inline-start: var(--ds-spacing-xs);
+}
+
+html.login-pf .pf-v5-c-clipboard-copy {
+  --pf-v5-c-clipboard-copy__expandable-content--BackgroundColor: var(--ds-color-neutral-surface-sunken-default);
+  --pf-v5-c-clipboard-copy__expandable-content--BorderColor: var(--ds-color-neutral-border-default-default);
+}
+
+/* The tooltip of the restart button: Identity Experience's floating surface. */
+html.login-pf .kc-login-tooltip .kc-tooltip-text {
+  border: var(--ds-stroke-thin) solid var(--ds-color-neutral-border-default-default);
+  border-radius: var(--ds-radius-sm);
+  font-size: var(--ds-font-size-xs);
+  color: var(--ds-color-neutral-text-strong-default);
+  background: var(--ds-color-neutral-surface-floating-default);
+  box-shadow: var(--ds-shadow-medium);
+}
+
+html.login-pf .kc-login-tooltip .kc-tooltip-text::after {
+  border-color: transparent var(--ds-color-neutral-surface-floating-default) transparent transparent;
+}
+
+html.login-pf .kc-login-tooltip:hover .kc-tooltip-text {
+  opacity: 1;
+}
+
+/* ---- Small screens, motion, forced colours ------------------------------------------------------ */
+
+@media (width < 36rem) {
+  html.login-pf .pf-v5-c-login {
+    --pf-v5-c-login--PaddingTop: var(--ds-spacing-lg);
+  }
+
+  html.login-pf .pf-v5-c-login__main-header {
+    padding: var(--ds-spacing-lg) var(--ds-spacing-lg) 0;
+  }
+
+  html.login-pf .pf-v5-c-login__main-body {
+    padding: var(--ds-spacing-md) var(--ds-spacing-lg) var(--ds-spacing-lg);
+  }
+
+  html.login-pf .pf-v5-c-login__main-footer {
+    padding-inline: var(--ds-spacing-lg);
+  }
+}
+
+/* Motion is decoration on this page, so a request for less removes it. */
+@media (prefers-reduced-motion: reduce) {
+  html.login-pf *,
+  html.login-pf *::before,
+  html.login-pf *::after {
+    transition-duration: 0.01ms;
+    animation-duration: 0.01ms;
+    animation-iteration-count: 1;
+  }
+}
+
+/* Forced colours: the system palette wins, edges are drawn in it, and the glass is set aside. */
+@media (forced-colors: active) {
+  html.login-pf :focus-visible,
+  html.login-pf .pf-v5-c-form-control:focus-within {
+    outline-color: Highlight;
+  }
+
+  html.login-pf .pf-v5-c-login__main {
+    border-color: CanvasText;
+    backdrop-filter: none;
+  }
+
+  html.login-pf .pf-v5-c-form-control::before,
+  html.login-pf .pf-v5-c-button::after,
+  html.login-pf .select-auth-box-parent {
+    border-color: CanvasText;
+  }
+}

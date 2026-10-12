@@ -127,7 +127,8 @@ jobs:
         run: docker logs keycloak
 
   # The hosted login pages in a real browser (TDD-identity-kernel-004 §Testing Strategy): axe-core
-  # over every surface a sign-in reaches, in both locales and both colour schemes; the password and
+  # over every surface a sign-in reaches, in both locales and both colour schemes, each photographed
+  # and uploaded as the login-pages-screenshots artifact; the password and
   # the one-time code typed from the keyboard; a passkey through Chromium's virtual authenticator;
   # and no Content Security Policy violation on any page (STD-IAM-001 §3.9). The same kernel image
   # and realm as the contract job, on an instance of its own.
@@ -192,10 +193,25 @@ jobs:
           {
             echo "### The login pages under axe-core (WCAG 2.2 A and AA)"
             echo
-            echo "| Surface | Locale | Scheme | Rules passed | Violations |"
-            echo "| :-- | :-- | :-- | --: | --: |"
+            echo "Needs review: what axe-core could not decide, named with its node count. It is left to the"
+            echo "manual audit and not counted as passed; colour contrast over the translucent panel is among it."
+            echo
+            echo "| Surface | Locale | Scheme | Rules passed | Violations | Needs review |"
+            echo "| :-- | :-- | :-- | --: | --: | :-- |"
           } >> "$GITHUB_STEP_SUMMARY"
           pnpm test
+
+      # Every scanned surface in both schemes, the record of how the theme looks
+      # (TDD-identity-kernel-004 §Visual Language). Uploaded whatever the outcome: a failure is when
+      # the pictures are most wanted.
+      - name: the login pages' screenshots
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: login-pages-screenshots
+          path: browser/screenshots/
+          if-no-files-found: warn
+          retention-days: 30
 
       - name: the suite left the realm as the definition describes it
         run: go run ./cmd/realm-apply -environment ci -require-in-sync

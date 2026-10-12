@@ -3,12 +3,12 @@ doc_meta:
   id: TDD-identity-kernel-004
   title: Hosted Login Theme, Accessibility, and Disclosure Discipline
   owner: Identity Platform Team
-  version: 1.6.0
+  version: 1.7.0
   status: approved
   classification: restricted
   review_cycle_days: 90
   created_date: 2026-08-11
-  last_reviewed: 2026-10-06
+  last_reviewed: 2026-10-12
   parent_sad: SAD-001
 ---
 
@@ -40,7 +40,8 @@ the rendering.
   applications in `identity-experience`, reached after authentication.
 - Authentication flow configuration, MFA policy, and recovery policy — realm
   configuration in `TDD-identity-kernel-001`.
-- Design tokens and component semantics, owned by the UI Platform.
+- Design tokens and component semantics, owned by the UI Platform. Until it publishes them, the
+  theme copies Identity Experience's stand-in for them (§Visual Language).
 - The BFF session pattern — owned by `TDD-identity-experience-001`.
 
 ## Technical Context
@@ -118,6 +119,116 @@ cannot meet the requirement it was planned for:
 
 None of the planned overrides is copied. Copying one would freeze it at 26.7.5, and a protection the
 kernel added to it later would not reach this page.
+
+### Visual Language
+
+**As built (1.7.0): the login pages look like Identity Experience's applications.** A person signs in
+here and lands in Account, Administration or the Developer Console. The two should read as one
+product. The theme therefore takes Identity Experience's visual language: its tokens, its canvas, its
+panel, and its button, field and notice styles. It takes them by copying, not by depending on the
+repository. Identity Experience holds them under a pending exception until the UI Platform publishes
+`@scnx/system`. The kernel image is built from this repository alone, and the theme has no build step.
+
+**Source.** The source is identity-experience at commit `b87b0998bbbc2c636642115ed48cc5b0a16f816f`, the
+head of its pull request #54 (`light-theme-contrast`). That pull request gave Identity Experience the
+accessible values this page first carried as departures (below). It is cited by its branch commit
+until it merges; the citation then moves to the merge commit, with no value changing:
+
+| Copied from | What |
+| :-- | :-- |
+| `packages/ui/src/styles/tokens/_ds-temporary.scss` | Every Tier-2 token the pages read, with the same name (ADR-UIP-TKN-003) and value, in both schemes: neutral canvas, surfaces, borders, text, icons and shadows; the primary, info, success, warning and danger schemes; spacing, radius, type scale, weights, motion |
+| `packages/ui/src/styles/foundations/_base.scss` | The canvas: two radial auroras and a 2.5rem grid, drawn as gradients; selection colour; focus as an outline; links underlined; reduced motion; forced colours |
+| `packages/ui/src/system/panel/Panel.module.scss` | The translucent panel, with an 18px backdrop blur and a hairline of light along its top edge |
+| `packages/ui/src/system/button/Button.module.scss` | The primary and default buttons: radius, weight, the glow on hover |
+| `packages/ui/src/system/field/Field.module.scss` | Labels, sunken fields with an opaque edge that darkens on hover, the danger edge of an invalid field, the error message in words beneath it |
+| `packages/app-core/src/session/SignInNotice.module.scss` | Messages: a glyph and words on a tinted surface, never colour alone |
+| `packages/app-core/src/shell/AppFrame.module.scss`, `apps/account/public/favicon.svg` | The brand: the shield mark in a tinted square, beside the name. The mark is the favicon too |
+| `apps/account/package.json` (`@fontsource-variable/inter` 5.3.0) | Inter, the latin subset of its weight axis (48 KB), with its SIL Open Font License |
+
+All of it is in `themes/scnehaux/login/resources/`: `css/scnehaux.css`, `fonts/` and `img/`.
+`theme.properties` names the stylesheet after keycloak.v2's own and names the mark as the favicon.
+No template changed for it.
+
+**Before and after.**
+
+| Element | keycloak.v2 (PatternFly 5), light / dark | Now, light / dark |
+| :-- | :-- | :-- |
+| Page background | Keycloak's background image / the same | Canvas `oklch(0.975 0.006 262)` / `oklch(0.145 0.02 262)`, with the two auroras and the grid |
+| Card | `#fff` / `#1b1d21`, a 4px blue top border, `BoxShadow--xl` | `oklch(1 0 0 / 0.72)` / `oklch(0.19 0.024 262 / 0.62)` over the canvas, blurred; 1px border-subtle, radius 0.875rem, shadow-medium |
+| Typeface | Red Hat Text and Display | Inter Variable, then `ui-sans-serif, system-ui` |
+| Page title | `pf-m-3xl`, Red Hat Display | 1.75rem, weight 600, tracking -0.02em, text-strong |
+| Primary button | `#06c` / `#1fa7f8`, radius 3px | `oklch(0.5 0.14 212)` / `oklch(0.8 0.14 212)`, radius 0.625rem, weight 600, a glow on hover |
+| Secondary button | Transparent, blue text and edge | surface-subtle, text-strong, a border-default edge |
+| Field | White / `#36373a`; an underline that thickens on focus | sunken `oklch(0.95 0.008 262 / 0.8)` / `oklch(0.12 0.018 262 / 0.7)`, radius 0.625rem, a whole opaque edge, border-strong `oklch(0.62 0.02 262)` / `oklch(0.55 0.02 262)` |
+| Error message | Red helper text, a red top border on the alert | The danger scheme: `oklch(0.42 0.171 24)` / `oklch(0.86 0.171 24)` text on its 10% tint, a 45% edge |
+| Focus | PatternFly's per-component focus | A 2px outline in border-default-focus (the primary solid), 2px off the element; in dark, `--ds-shadow-focus` adds a glow |
+| Brand | The realm name, uppercase, 29px | The shield mark in a 2.5rem tinted square, beside the realm name in 1.25rem semibold |
+
+**No departures.** Every `--ds-*` value in `scnehaux.css` equals Identity Experience's at the source
+commit, in both schemes, and the page reads no colour of its own. Version 1.7.0 first carried four
+departures, because Identity Experience's values then fell under WCAG 2.2 AA. An inaccessible login
+page blocks the platform (§Technical Context). Identity Experience #54 adopted all four, so they are
+now its tokens:
+
+| Shared value | It was, in Identity Experience | Why |
+| :-- | :-- | :-- |
+| Light primary solid L 0.5, hover darkening to L 0.46, pressed L 0.44; the primary tints built from L 0.5 | L 0.55; hover lightened to L 0.6. Its label was 4.15:1, and 3.42:1 on hover | WCAG 2.2 SC 1.4.3: "The visual presentation of text and images of text has a contrast ratio of at least 4.5:1". The button label is 14px, not large-scale text. Now 5.06, 5.96 and 6.47:1 |
+| `neutral-border-strong-default`, opaque: `oklch(0.62 0.02 262)` / `oklch(0.55 0.02 262)`. A field's edge, with `-hover` `oklch(0.48 0.02 262)` / `oklch(0.72 0.02 262)` | border-default, 16% alpha, 1.35:1 against the panel | SC 1.4.11 asks 3:1 of "Visual information required to identify user interface components and states". Its Understanding document: "Having a visual boundary indicating the hit area is only required when there is no other visual way to identify the presence of the control". An empty text field has no other way |
+| Focus is an outline; `--ds-shadow-focus` is only the dark glow added to it, `none` in light | Button and Field removed the outline and drew a box-shadow ring | STD-GLB-FE-005 §3.9: "A shadow may add emphasis but never replaces the outline, because forced-colors mode computes `box-shadow` as `none`." |
+| Links underlined | Undecorated | Told from the text around them by more than colour (SC 1.4.1, STD-GLB-FE-009 §3.3) |
+
+STD-GLB-FE-009 §3.3 sets the thresholds: "Normal text meets WCAG 2.2 SC 1.4.3 at 4.5:1" and "User
+interface components and meaningful graphical objects meet SC 1.4.11 at 3:1 against adjacent
+colors." The stylesheet's only other custom properties are its alert's own (`--kc-alert-*`). Each
+scheme sets them from `--ds-*` tokens, as Identity Experience's Button sets `--btn-*`.
+
+**What stays Keycloak's.** The markup, PatternFly 5 and its Font Awesome glyphs are the kernel's, as
+§Override Surface requires. The stylesheet points PatternFly's global variables at the tokens and
+styles its components by class. It uses no cascade layers. PatternFly's stylesheet is unlayered, and an
+unlayered rule beats every layered one. So the selectors start at `html.login-pf` and outrank
+PatternFly's, and no rule needs `!important`.
+
+- **The colour scheme follows the operating system.** keycloak.v2 puts `pf-v5-theme-dark` on the
+  document when `prefers-color-scheme` is dark, and the dark tokens hang on that class. Identity
+  Experience opens dark and offers a toggle that it keeps in its own origin's storage. The login page
+  cannot read that storage, and a toggle here would be a script and a template change.
+- **JetBrains Mono is not bundled.** The monospace stack falls back to `ui-monospace`, as Identity
+  Experience's does before its font loads. It shows only the one-time-code key and the recovery codes.
+- **The brand name is the realm's display name.** The realm sets none, so the page shows `scnehaux`,
+  capitalized by the stylesheet. The applications show their own names.
+
+**The accessibility fixes are kept.** The three copied templates (§Override Surface) and
+`themes/overrides.json` are unchanged. They are `template.ftl`'s label for the attempted username,
+`login-config-totp.ftl`'s two labels (keycloak#51206) and `select-authenticator.ftl`'s keyboard
+handler (keycloak#45227). The labels, the `lang` attribute, the keyboard paths and the uniform failure
+message are what `browser/` and `compat/` already assert.
+
+**The Content Security Policy needs nothing new.** The stylesheet, the font and the mark come from the
+kernel's own origin. `style-src 'self'` covers the first, `default-src 'self'` the font (the policy
+names no `font-src`), and `img-src 'self'` the mark. The canvas is gradients, so no image is fetched.
+No inline style or script was added.
+
+**The QR code keeps a white quiet zone in the dark scheme.** A camera reads dark modules on light, so
+the one-time-code enrolment's code sits on a white tile in both schemes.
+
+**Contrast is computed, not assumed.** The surfaces are translucent over a gradient. No pair can be read
+off the stylesheet, and axe-core reports what it cannot resolve as needing review, not as passing.
+STD-GLB-FE-009 §3.3: "Tests use actual foreground/background pairs after alpha composition in each
+supported theme and state." `internal/themecontrast` reads both schemes' tokens from `scnehaux.css`.
+It composites each pair over the plain canvas and over each aurora at full strength, and requires
+4.5:1 for text and 3:1 for a field's edge, the invalid edge and the focus indicator. The worst cases:
+
+| Pair | Light | Dark |
+| :-- | --: | --: |
+| Helper and footer text on the panel | 5.97:1 | 6.90:1 |
+| Primary button label (default, hover, pressed) | 5.06, 5.96, 6.47:1 | 10.66, 12.52, 8.77:1 |
+| Authenticator choice description | 5.57:1 | 6.52:1 |
+| Danger message on its tint | 7.25:1 | 7.77:1 |
+| A field's edge against the panel, against its fill | 3.32, 3.18:1 | 3.53, 4.02:1 |
+| Focus indicator against the panel | 4.82:1 | 9.58:1 |
+
+The computation clips to sRGB per channel and leaves out the backdrop's 140% saturation and the grid,
+whose lines are 5% opaque. It is evidence for the manual contrast check, not a replacement for it.
 
 ### Accessibility
 
@@ -328,9 +439,25 @@ Every surface the sequence reaches is scanned by axe-core against the WCAG 2.2 A
 the light and the dark scheme. STD-GLB-FE-009 names axe-core for automated scans. The surfaces are
 the login page, the failed sign-in, the one-time-code enrolment, the recovery codes, the one-time
 code, the authenticator selection, the recovery-code sign-in, the passkey binding, the passkey
-sign-in and an error page. Each scan is a row in the job
-summary. No page may raise a Content Security Policy violation; that is the proof that the realm's
-policy allows what the stock templates run.
+sign-in and an error page. Since 1.7.0 they also include an account under lockout, the logout
+confirmation and the page after it. The one-time-code enrolment, the recovery codes and the passkey
+binding are this realm's three required actions. Each scan is a row in the job summary. Each row also
+names what axe-core could not decide, with a node count, as needing review: that is left to the manual
+audit, never counted as passed. Each scan is photographed in both schemes. The pictures are the
+browser job's `login-pages-screenshots` artifact, the record of §Visual Language. No page may raise a
+Content Security Policy violation; that is the proof that the realm's policy allows what the stock
+templates and the theme's stylesheet run.
+
+The account under lockout is a second person, refused ten times (the realm's `failureFactor`). The
+right password must then read exactly as the wrong one did (§Enumeration Resistance).
+
+The realm's flow has no identity-first or organization-selection page to scan. Its organization step
+runs only on a session, and the client names the Tenant in its scope, so the kernel answers it without
+a page (`compat/session_tenant_test.go`). The stylesheet still styles keycloak.v2's
+`login-username.ftl` and the base `select-organization.ftl` by the classes they share.
+
+`internal/themecontrast`, in the `contract` job's unit tests, holds the colour pairs to WCAG 2.2 AA in
+both schemes after alpha composition (§Visual Language).
 
 The timing comparison is `compat/timing_test.go`, and it follows dudect's method:
 
@@ -442,3 +569,5 @@ incompatibility during an upgrade.
 | Conforms to | STD-GLB-FE-009 — accessibility and internationalization |
 | Related design | `TDD-identity-kernel-005` — the upgrade suite that re-verifies every override |
 | Related design | `TDD-identity-experience-001` — the authenticated surfaces reached after this one |
+| Related design | identity-experience `packages/ui` — the tokens and styles §Visual Language copies |
+| Conforms to | STD-GLB-FE-005 §3.9 — focus indicators drawn with `outline` |

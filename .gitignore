@@ -24,6 +24,7 @@ Thumbs.db
 node_modules/
 test-results/
 playwright-report/
+browser/screenshots/
 
 # The image scan's database and archives, when scripts/image-scan.sh runs outside CI.
 .image-scan/

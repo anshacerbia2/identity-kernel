@@ -5,10 +5,22 @@
 // another way", a passkey registered and then used, through Chromium's virtual authenticator, as Keycloak's own WebAuthn tests do. Every
 // surface the sequence reaches is scanned by axe-core in both colour schemes, and no page may raise
 // a Content Security Policy violation: the realm's policy allows what the stock templates run, and
-// this is where that is proven (STD-IAM-001 §3.9).
+// this is where that is proven (STD-IAM-001 §3.9). Beyond the sign-in, the same scan covers an account
+// under lockout, the logout confirmation and the page that follows it, and an error page. Every scan is
+// photographed in both schemes (TDD-identity-kernel-004 §Visual Language).
 import { expect, test, type Locator, type Page } from "@playwright/test";
 
-import { authorizationURL, callbackListener, Codes, Fixtures, recordViolations, scan, type Person } from "./kernel";
+import {
+  authorizationURL,
+  base,
+  callbackListener,
+  Codes,
+  Fixtures,
+  realm,
+  recordViolations,
+  scan,
+  type Person,
+} from "./kernel";
 
 type Surface =
   | "password"
@@ -44,6 +56,11 @@ async function tabTo(page: Page, element: string | Locator): Promise<void> {
     await page.keyboard.press("Tab");
   }
   throw new Error(`${target} is not reachable by Tab`);
+}
+
+// feedback is the message a refused sign-in shows, wherever the page puts it.
+async function feedback(page: Page): Promise<string> {
+  return (await page.locator("#input-error-username, .kc-feedback-text").first().innerText()).trim();
 }
 
 // submits runs an action that ends in a navigation, and waits for the page it loads.
@@ -182,6 +199,23 @@ for (const locale of ["en", "id"]) {
       await page.locator("#password").fill(`Wrong-${person.password}`);
       await submits(page, () => page.locator("#password").press("Enter"));
       await scan(page, locale, "failed sign-in");
+      const refused = await feedback(page);
+
+      // An account under lockout (realm failureFactor 10): the right password then reads exactly as
+      // a wrong one, so the page tells no one the account exists or is locked
+      // (TDD-identity-kernel-004 §Enumeration Resistance).
+      const locked = await fixtures.person();
+      await page.goto(authorizationURL(clientId, callback.redirect, { ui_locales: locale }));
+      for (let attempt = 0; attempt < 10; attempt++) {
+        await page.locator("#username").fill(locked.username);
+        await page.locator("#password").fill(`Wrong-${locked.password}`);
+        await submits(page, () => page.locator("#password").press("Enter"));
+      }
+      await page.locator("#username").fill(locked.username);
+      await page.locator("#password").fill(locked.password);
+      await submits(page, () => page.locator("#password").press("Enter"));
+      await scan(page, locale, "account lockout");
+      expect(await feedback(page), "a locked account reads as a wrong password").toBe(refused);
 
       expect(await sequence.signIn(), "a password sign-in").toEqual(["password"]);
 
@@ -212,6 +246,12 @@ for (const locale of ["en", "id"]) {
       // An error page: an authorization request from a client the realm does not hold.
       await page.goto(authorizationURL("browser-no-such-client", callback.redirect, { ui_locales: locale }));
       await scan(page, locale, "error page");
+
+      // The logout confirmation a logout without an ID token asks for, and the page after it.
+      await page.goto(`${base}/realms/${realm}/protocol/openid-connect/logout?ui_locales=${locale}`);
+      await scan(page, locale, "logout confirmation");
+      await submits(page, () => page.locator("#kc-logout").click());
+      await scan(page, locale, "signed out");
 
       expect(violations, "Content Security Policy violations").toEqual([]);
     } finally {
