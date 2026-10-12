@@ -286,6 +286,26 @@ func TestSelfRegistrationIsClosed(t *testing.T) {
 	}
 }
 
+// The realm's display name is the brand the login pages show (TDD-identity-kernel-001 §Configuration,
+// TDD-identity-kernel-004 §Visual Language). displayNameHtml stays unset, so Keycloak renders the
+// plain name, escaped.
+func TestTheRealmIsDisplayedAsScnehaux(t *testing.T) {
+	a := requireKeycloak(t)
+	var realm struct {
+		DisplayName     string `json:"displayName"`
+		DisplayNameHTML string `json:"displayNameHtml"`
+	}
+	if err := a.getJSON("/admin/realms/"+realmName, &realm); err != nil {
+		t.Fatalf("reading the realm: %v", err)
+	}
+	if realm.DisplayName != "Scnehaux" {
+		t.Errorf("the realm's displayName is %q, want %q", realm.DisplayName, "Scnehaux")
+	}
+	if realm.DisplayNameHTML != "" {
+		t.Errorf("the realm sets displayNameHtml %q; the login pages render the plain displayName", realm.DisplayNameHTML)
+	}
+}
+
 // No enterprise scope is a realm default. Attached as one, every client in the realm -- external
 // relying parties included -- would receive principal_id without asking for it.
 func TestNoEnterpriseScopeIsARealmDefault(t *testing.T) {

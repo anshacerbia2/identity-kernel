@@ -1,5 +1,6 @@
 {
   "realm": "scnehaux",
+  "displayName": "Scnehaux",
   "enabled": true,
   "registrationAllowed": false,
   "registrationEmailAsUsername": false,

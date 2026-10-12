@@ -235,6 +235,9 @@ export async function scan(page: Page, locale: string, surface: string): Promise
       colorScheme === "dark",
     );
     await page.evaluate(() => document.fonts.ready.then(() => undefined));
+    // The brand is the realm's display name as rendered, casing included (TDD-identity-kernel-004
+    // §Visual Language).
+    await expect(page.locator("#kc-header-wrapper")).toHaveText("Scnehaux", { useInnerText: true });
     const results = await new AxeBuilder({ page }).withTags(wcag).analyze();
     const found = results.violations.map(
       (v) => `${v.id} (${v.impact}): ${v.nodes.map((n) => n.target.join(" ")).join(", ")}`,

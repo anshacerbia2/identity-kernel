@@ -3,8 +3,8 @@
  * (TDD-identity-kernel-004 §Visual Language).
  *
  * The tokens are copied, by name and by value, from identity-experience
- * packages/ui/src/styles/tokens/_ds-temporary.scss and foundations/_base.scss at commit b87b099
- * (identity-experience #54, branch light-theme-contrast). They are written out here because the theme
+ * packages/ui/src/styles/tokens/_ds-temporary.scss and foundations/_base.scss at commit c723e41
+ * (the merge of identity-experience #54). They are written out here because the theme
  * depends on no other repository and has no build step. The names are the UI Platform's
  * (ADR-UIP-TKN-003), so the day the platform publishes its theme this block is what changes.
  *
@@ -289,7 +289,7 @@ html.login-pf .pf-v5-c-login__container {
   padding-inline: var(--ds-spacing-md);
 }
 
-/* The brand: Identity Experience's mark in its tinted square, and the realm's name beside it. */
+/* The brand: Identity Experience's mark in its tinted square, and the realm's display name beside it. */
 html.login-pf .pf-v5-c-login__header {
   margin-block-start: 0;
   padding-inline: 0;
@@ -310,7 +310,8 @@ html.login-pf #kc-header-wrapper {
   font-weight: var(--ds-font-weight-semibold);
   letter-spacing: var(--ds-letter-spacing-tight);
   line-height: var(--ds-line-height-tight);
-  text-transform: capitalize;
+  /* keycloak.v2 uppercases the name; the realm's display name is shown as written. */
+  text-transform: none;
 }
 
 html.login-pf #kc-header-wrapper::before {
