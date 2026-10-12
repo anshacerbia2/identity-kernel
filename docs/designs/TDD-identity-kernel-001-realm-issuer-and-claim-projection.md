@@ -3,12 +3,12 @@ doc_meta:
   id: TDD-identity-kernel-001
   title: Realm Topology, Issuer Identity, and Token Claim Projection
   owner: Identity Platform Team
-  version: 1.18.0
+  version: 1.19.0
   status: approved
   classification: restricted
   review_cycle_days: 90
   created_date: 2026-08-11
-  last_reviewed: 2026-10-09
+  last_reviewed: 2026-10-12
   parent_sad: SAD-001
 ---
 
@@ -768,6 +768,7 @@ persisted against, so they are asserted rather than observed.
 | Setting | Value | Reason |
 | :-- | :-- | :-- |
 | Realm | `scnehaux` | Single primary realm; additional realms require an ADR |
+| Display name | `Scnehaux` (`displayName`, 1.19.0); `displayNameHtml` unset, so Keycloak renders the plain name | The brand the login pages show beside the mark, and the name in their title (TDD-identity-kernel-004 §Visual Language); approved by the owner. `compat/contract_test.go` asserts it on the applied realm |
 | User registration | disabled | Removes the unauthorized creation path |
 | Identity provider first-login | no automatic user creation | Removes the federated creation path |
 | `scnehaux_principal_id` | admin-managed, not user-editable, single-valued | Preserves immutability |
