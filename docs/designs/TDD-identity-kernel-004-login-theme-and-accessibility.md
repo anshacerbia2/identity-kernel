@@ -3,7 +3,7 @@ doc_meta:
   id: TDD-identity-kernel-004
   title: Hosted Login Theme, Accessibility, and Disclosure Discipline
   owner: Identity Platform Team
-  version: 1.7.0
+  version: 1.8.0
   status: approved
   classification: restricted
   review_cycle_days: 90
@@ -194,7 +194,7 @@ PatternFly's, and no rule needs `!important`.
   cannot read that storage, and a toggle here would be a script and a template change.
 - **JetBrains Mono is not bundled.** The monospace stack falls back to `ui-monospace`, as Identity
   Experience's does before its font loads. It shows only the one-time-code key and the recovery codes.
-- **The brand name is the realm's display name.** The realm declares `displayName` `Scnehaux`
+- **The brand name is the realm's display name (1.8.0).** The realm declares `displayName` `Scnehaux`
   (TDD-identity-kernel-001 §Configuration), approved by the owner. It leaves `displayNameHtml` unset,
   so Keycloak renders the plain name, escaped, in the header and in the page title ("Sign in to
   Scnehaux"). The stylesheet changes no letter of it. The applications name themselves after it:
