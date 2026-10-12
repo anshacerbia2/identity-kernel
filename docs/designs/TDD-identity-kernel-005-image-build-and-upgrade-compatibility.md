@@ -3,12 +3,12 @@ doc_meta:
   id: TDD-identity-kernel-005
   title: Image Build, Digest Pinning, and Upgrade Compatibility
   owner: Identity Platform Team
-  version: 1.7.0
+  version: 1.8.0
   status: approved
   classification: restricted
   review_cycle_days: 90
   created_date: 2026-08-11
-  last_reviewed: 2026-10-09
+  last_reviewed: 2026-10-10
   parent_sad: SAD-001
 ---
 
@@ -36,6 +36,8 @@ build failure rather than a production discovery.
 - Determining and recording the rollback boundary per candidate release.
 - The accelerated path for security releases.
 - The server options the image fixes for every environment, the session store among them (1.7.0).
+- The other images the stack builds or runs (the reverse proxy, realm-apply, Postgres), how each is
+  built, and how their scan findings are fixed or excepted (1.8.0).
 
 **Out of scope**
 
@@ -195,6 +197,130 @@ Per SAD-001 §7.6:
   and the build tooling.
 - A software bill of materials produced per build and retained with the artifact.
 - Provenance attestation linking the image digest to the commit that produced it.
+
+### Images the Stack Runs (1.8.0)
+
+`deploy/dev/compose.yaml` runs three images beside the kernel's, and each is in scope of STD-GLB-009
+1.8.0 §Container Images, which lands with scnehaux-architecture #86. The `image-scan` workflow builds
+the three this repository builds and scans them, and Postgres from its registry, on every change and
+daily.
+
+| Image | Source | Publicly exposed (rule 8) | Remedy in 1.8.0 |
+| :-- | :-- | :-- | :-- |
+| kernel | `image/Dockerfile` on `image/keycloak.ref` | no: reached only through the proxy | none needed: no fixable High or Critical |
+| `caddy` | `deploy/dev/caddy.Dockerfile`: Caddy 2.11.7 built from source on `caddy:2.11.7-builder-alpine`, overlaid on `caddy:2.11.7-alpine`, both by digest | **yes**: ports 80 and 443, or the tunnel's anonymous port | rebuilt from source (rule 9); `zlib` upgraded (rule 10) |
+| `realm-apply` | `deploy/dev/realm-apply.Dockerfile`: `alpine:3.24` by digest with `git`, binaries from `golang:1.26.9-alpine` by digest | no: a one-shot job on the internal network | base replaced (rule 10); `zlib` upgraded |
+| `postgres` | `postgres:17.11-alpine`, pulled by digest | no: the internal network, no published port | `affected` exception until the upstream rebuild (rules 5, 8, 10) |
+
+**What the scan found.** On 2026-10-10 the Go advisories GO-2026-6603 to GO-2026-6613 were re-rated and
+the daily scan, run 38047364279, failed on two third-party Go binaries: `/usr/bin/caddy` in
+`caddy:2.11.7-alpine` (go1.26.8, `golang.org/x/net` v0.59.0) and `/usr/bin/git-lfs` in `alpine/git`
+(go1.26.8, x/net v0.57.0). The `zlib` rule, written for Postgres, also hid `zlib` 1.3.2-r0 in both
+images, because it named only the package, and the `pcre2` rule rested on
+`vulnerable_code_cannot_be_controlled_by_adversary`, a justification rule 7 no longer accepts.
+
+**The proxy is rebuilt from source (rule 9).** It is the one publicly exposed image, so its time comes
+from the exposed half of BOD 26-04 Table 1 [R18]. CISA's Vulnrichment values [R19], none of them in
+the KEV catalog of 2026-10-08:
+
+| Advisory | CVE | Automatable | Technical impact | Fixed within | By |
+| :-- | :-- | :-- | :-- | :-- | :-- |
+| GO-2026-6612, HTTP/2 flow control [R20] | CVE-2026-78663 | yes | total | 3 days | 2026-10-13 |
+| GO-2026-6608, MIME header parsing [R20] | CVE-2026-94440 | yes | partial | 14 days | 2026-10-24 |
+| GO-2026-6613, HTTP/1 desynchronization after CONNECT [R20] | CVE-2026-94439 | yes | partial | 14 days | 2026-10-24 |
+
+No Caddy release carries the fix: 2.11.7 (2026-10-03) is the latest, and the upstream moved x/net to
+v0.60.0 on its main branch on 2026-10-09 (caddyserver/caddy#8179) [R21]. So the repository builds
+that release itself, by the path Caddy documents: the `:builder` image builds "a new Caddy binary with
+custom modules", and the second `FROM` overlays "the newly-built binary on top of the regular `caddy`
+image" [R15]. `--replace` "only writes a replace directive to `go.mod`" [R16], so the module graph is
+Caddy 2.11.7's with x/net moved and nothing else:
+
+```dockerfile
+# caddy:2.11.7-builder-alpine, resolved 2026-10-10 (go1.27.2, xcaddy v0.4.7)
+FROM caddy@sha256:aa705b1e8e4bce41a7a30de934c1e00f6821667c1d1206424465065c92cb7674 AS build
+RUN xcaddy build v2.11.7 --replace golang.org/x/net=golang.org/x/net@v0.60.0 --output /usr/bin/caddy
+# caddy:2.11.7-alpine, resolved 2026-10-07
+FROM caddy@sha256:d8542f48d34a9cf4e4c11a478865229840e87e4c96ea3f439101f31a5d35f75f
+RUN apk add --no-cache 'zlib>=1.3.2-r1'
+COPY --from=build /usr/bin/caddy /usr/bin/caddy
+```
+
+The builder's Go is 1.27.2, which fixes the standard library half of every advisory above (fixed in
+1.26.9 and 1.27.2) [R20]. The build fails unless `go version -m` on the binary reads x/net v0.60.0 as
+the module compiled in (`=> golang.org/x/net v0.60.0` under `dep golang.org/x/net v0.59.0`) and a Go
+no older than go1.26.9. Measured on 2026-10-10: `go1.27.2`, x/net v0.60.0; `caddy list-modules`
+identical to the official binary's, 135 standard modules; both Caddyfiles validate; the scan finds no
+Go module finding in the image. The binary keeps `cap_net_bind_service`, which the builder sets.
+
+Two remedies were rejected. Turning HTTP/2 off is not a remedy: "enabling HTTP/2 (including H2C)
+necessarily implies enabling HTTP/1.1 because the Go standard library does not let us disable HTTP/1.1
+when using its HTTP server" [R17], and GO-2026-6608 and GO-2026-6613 are reached over HTTP/1. An
+`affected` exception is not one either: rule 9 bounds it by the 3 days above, which a source build
+meets. The build goes, and compose pulls a release by digest again, when a Caddy release carries x/net
+v0.60.0 or later and is built with Go 1.26.9 or later; ROADMAP.md tracks it.
+
+**realm-apply's base carries only git (rule 10).** `alpine/git` brought `git-lfs`, a Go binary
+realm-apply never runs, and perl, which it does not run either. CISA: "Base layer container images
+often contain unused packages" [R24]. The base is now `alpine:3.24` by digest with
+`apk add --no-cache git 'zlib>=1.3.2-r1'`, and no git-lfs. Measured in the built image on 2026-10-10:
+git 2.54.0-r0, pcre2 10.49-r0, zlib 1.3.2-r1, nghttp2-libs 1.70.0-r0; no `git-lfs`, no perl. The `pcre2`
+exception is therefore gone, not decided again. realm-apply and client-key are built on
+`golang:1.26.9-alpine` by digest, and `go version` reads go1.26.9 for both.
+
+**The trade-off of an upgrade line.** apk resolves `git` and the `zlib` constraint against Alpine's
+index on the day of the build, not against the digest. apk keeps the installed version "unless an
+upgrade is requested or a world constraint or package dependency requires an alternate version" [R22],
+so the constraint is what moves `zlib`, and a constraint no repository meets fails the build. The base
+stays named by digest (rule 1); the packages added on top float within the `v3.24` branch, which takes
+fixes, and the constraint sets the floor. Docker states the price of the alternative: pinning by digest
+alone means "you're opting out of automated security fixes" [R23]. Two builds on different days can
+therefore differ in a package version. That is acceptable for these two images, which are built where
+they run and never promoted; the kernel image, which is promoted (§Build Output), has no such line.
+Each line carries a comment naming CVE-2026-85091 and goes when its pin moves to an image that has
+the fix.
+
+**Postgres waits for its upstream (rules 5, 8 and 10).** `postgres:17.11-alpine` carries `zlib`
+1.3.2-r0, and the official image has not been rebuilt: on 2026-10-10 the tag still resolves to the
+pinned digest, and its base `alpine:3.24` (3.24.2, built 2026-09-17) still carries 1.3.2-r0. Official
+images "are subject to their own maintenance schedule" [R25]. The image is run, not built, and not
+exposed; CVE-2026-85091 is not in the KEV, and Vulnrichment gives Automatable no, Technical Impact total
+[R19]. Table 1 gives fix on system upgrade, which for an image run without building is the next pin move
+within 90 days of detection (2026-10-07): by 2027-01-05. `.grype.yaml` holds it as an `affected` rule on
+`zlib` 1.3.2-r0, type `apk`; the version keeps it off the proxy and realm-apply, which carry 1.3.2-r1.
+Its review date, 2026-10-21, is earlier than that limit so the pin moves as soon as the rebuild lands.
+If 2027-01-05 would come first, the stack builds its own Postgres image from the pinned one with the
+upgrade line.
+
+**A built image is never pulled under its name.** A service with both `build:` and an `image:` name is
+pulled first: "If `pull_policy` is missing in the service definition, Compose attempts to pull the image
+first and then builds from source if the image isn't found in the registry or platform cache" [R27].
+`deploy-dev` run 38067696612 shows it: `keycloak Warning pull access denied for scnehaux/identity-kernel`,
+and the same for the proxy's name at that commit. The `scnehaux` namespace on Docker Hub is not this
+project's, so anyone who publishes `scnehaux/identity-kernel:dev` would have the server run their image
+instead of the one built from `image/keycloak.ref`. Every such service therefore sets
+`pull_policy: build`: "Compose builds the image. Compose rebuilds the image if it's already present"
+[R27]. `keycloak` is the one service with both; the proxy and realm-apply carry no name, and compose
+does not pull them. The cost is a build on every `up`, which BuildKit's cache answers when nothing
+changed. The kernel keeps its name, which `docker image ls` shows; the policy, not the absence of a
+name, is what keeps the registry out.
+
+STD-GLB-009 1.8.0 rule 11 makes it a check: a service that runs a name it does not build sets
+`pull_policy: never`, because then "Compose doesn't pull the image from a registry and relies on the
+platform cached image. If there is no cached image, a failure is reported" [R27], and `deploy-dev`
+fails on any image name without a digest whose service is neither. Both jobs run
+`.github/scripts/pull-policy.py` on the configuration compose resolves for each file set this stack
+runs (`compose.yaml` alone, with `compose.tunnel.yaml`, and with `compose.ci.yaml`) before anything
+is pulled, and after `up` require `scnehaux/identity-kernel:dev` to carry no registry digest: it was
+built on the runner, not pulled.
+
+**How exceptions are checked.** `scripts/image-scan-rules.py` runs before every scan (§5 Enforcement
+item 4). It fails on a rule without vulnerability, package name, version or type; on a package found
+inside a file (any type but `apk`, `deb`, `rpm`) without a full `package.location`, or on any location
+with a wildcard, because Grype reads it as a glob [R26]; on a reason that is not `review-by …: <status>:
+detected …: <images>: <statement>` with `affected` or one of the three justifications rule 7 accepts;
+on a review date that has passed, is more than 90 days ahead, or, for `affected`, is more than 90 days
+after detection. Whether a statement is true, and whether Table 1 was read correctly, is left to review.
 
 ## Data Model
 
@@ -360,6 +486,10 @@ defer yet. Its release record is the `upgrade` job's summary, which every run wr
 | Extension packaging | built from owned source, signed | SAD-001 §7.6 |
 | Realm application | pipeline only, above local development | ADR-IAM-001 §5.7 |
 | Promotion | same image digest across environments | EAD-005 §6.5 |
+| Reverse proxy (1.8.0) | Caddy 2.11.7 built from source, x/net v0.60.0, Go 1.27.2 | §Images the Stack Runs; until a Caddy release carries the fix |
+| realm-apply base (1.8.0) | `alpine:3.24` by digest, with `git` | Only what the job runs (§Images the Stack Runs) |
+| Built images and the registry (1.8.0) | `pull_policy: build` on every service with `build:` and an `image:` name | A built image is never pulled under its name (§Images the Stack Runs) |
+| Upgrade lines (1.8.0) | `apk add --no-cache 'zlib>=1.3.2-r1'` in the proxy and realm-apply | CVE-2026-85091; goes when the pin moves |
 
 The database credential, the administration client's credential, and the signing keystore
 are resolved at runtime from the approved secret manager and are never present in the
@@ -461,6 +591,20 @@ bill of materials for one commit agree.
   sign-in. No refresh may be granted once the removal has answered. The job summary carries the counts
   per variant.
 
+### Image Scan (1.8.0)
+
+- The `image-scan` workflow builds the kernel, realm-apply and Caddy images as compose builds them,
+  and scans them and Postgres on every change and daily. It fails on a High or Critical vulnerability
+  with a fix.
+- `scripts/image-scan-rules.py` fails the run on an ignore rule out of rule 5's form or past its
+  review date, before any scan.
+- The Caddy build fails unless the binary reads x/net v0.60.0 and Go 1.26.9 or later. A `zlib` upgrade
+  line fails the build when no repository offers 1.3.2-r1.
+- `deploy-dev`'s `stack` and `tunnel` jobs bring the stack up with the built proxy, in both modes, and
+  their logs carry no pull attempt for an image this repository builds (`pull_policy: build`). Both
+  fail first when any compose file set names an image without a digest and its service is not
+  `pull_policy: build` or `never` (STD-GLB-009 1.8.0 rule 11).
+
 ### Promotion
 
 - The digest promoted to production equals the digest evaluated by the suite.
@@ -481,6 +625,11 @@ The session cache is off because a removal has to hold (§Session Store). A sess
 owner, by identity-control's containment, or by an operator is otherwise refreshed for as long as
 something keeps refreshing it, while the Admin API reports it gone. The setting is a provider option,
 not a feature flag, and the vendor recommends it for this defect [R10].
+
+The reverse proxy is the one image clients on a public network reach. A finding in it whose code serves
+those clients is fixed within its BOD 26-04 time, by a source build when no release has the fix
+(§Images the Stack Runs), and never excepted as not affecting it. The source build is this
+repository's to keep current until a Caddy release ends it.
 
 Deferring theme assertions on a security release is a deliberate trade: a delayed
 security patch is a larger risk than a temporarily unstyled recovery page. Deferring
@@ -534,6 +683,7 @@ release.
 | Publishes to | `identity-control`, `identity-experience`, and every protected resource — the declared realm contract |
 | Related design | `TDD-identity-kernel-001` — realm content this suite asserts |
 | Related design | `TDD-identity-kernel-002` — key invariants this suite asserts |
+| Conforms to | STD-GLB-009 1.8.0 §Container Images, rules 4, 5, 7, 8, 9, 10 and 11 (lands with scnehaux-architecture #86) — §Images the Stack Runs |
 | Consumed by | `TDD-identity-control-002`, `TDD-identity-control-005` — a session removed through the Admin API stays removed (§Session Store) |
 
 ### Open Questions
@@ -560,3 +710,16 @@ release.
 | R12 | Keycloak 26.7.5, `model/infinispan/.../InfinispanUserSessionProviderFactory.java`, `init`: "useCaches = config.getBoolean(CONFIG_USE_CACHES, !Profile.isFeatureEnabled(Profile.Feature.STATELESS)) && InfinispanUtils.isEmbeddedInfinispan();"; its configuration metadata: "Enable or disable caches"; `getOperationalInfo` reports `useCaches`, which the Admin API's server info shows. With it false, every cache holder is created "WithoutCache". |
 | R13 | Keycloak 26.8.0, *Upgrading Guide*, "Disabling caching of persistent user sessions", <https://github.com/keycloak/keycloak/blob/26.8.0/docs/documentation/upgrading/topics/changes/changes-26_8_0.adoc>: "To disable caching, set `--spi-user-sessions--infinispan--use-caches=false`"; *Configuring distributed caches*, "Disabling session caching", <https://github.com/keycloak/keycloak/blob/26.8.0/docs/guides/server/caching.adoc>: "When session caching is disabled, every session read goes directly to the database. This may increase database connection usage and CPU load, especially for workloads that rely heavily on token introspection or token exchange." Accessed 2026-10-09. |
 | R14 | Keycloak 26.7.5, `services/.../resources/admin/UserResource.java`, `logout`: "session.users().setNotBeforeForUser(realm, user, Time.currentTime());"; `services/.../protocol/oidc/refresh/AbstractRefreshTokenProvider.java`: "TokenVerifier.createWithoutSignature(oldRefreshToken).withChecks(…, TokenManager.NotBeforeCheck.forModel(session, realm, user)).verify(); } catch (VerificationException e) { throw new OAuthErrorException(OAuthErrorException.INVALID_GRANT, "Stale token");". `RealmAdminResource.deleteSession` sets no not-before. |
+| R15 | Caddy, *Build from source*, accessed 2026-10-10. <https://caddyserver.com/docs/build>. "You can use the `:builder` image as a short-cut to building a new Caddy binary with custom modules"; "Note the second `FROM` instruction — this produces a much smaller image by simply overlaying the newly-built binary on top of the regular `caddy` image." |
+| R16 | Caddy, *xcaddy* README, v0.4.7, accessed 2026-10-10. <https://github.com/caddyserver/xcaddy/blob/v0.4.7/README.md>. "`--replace` is like `--with`, but does not add a blank import to the code; it only writes a replace directive to `go.mod`, which is useful when developing on Caddy's dependencies (ones that are not Caddy modules)." |
+| R17 | Caddy, *Global options*, `protocols`, accessed 2026-10-10. <https://caddyserver.com/docs/caddyfile/options#protocols>. "Default: `h1 h2 h3`"; "Currently, enabling HTTP/2 (including H2C) necessarily implies enabling HTTP/1.1 because the Go standard library does not let us disable HTTP/1.1 when using its HTTP server." |
+| R18 | CISA, *BOD 26-04: Prioritizing Security Updates Based on Risk*, 2026-06-10, accessed 2026-10-10. <https://www.cisa.gov/news-events/directives/bod-26-04-prioritizing-security-updates-based-risk>. "Publicly exposed: Any agency-owned or agency-managed IT resource accessible to unauthenticated or untrusted entities via public networks, such as the internet, regardless of its physical or logical location"; "CISA publishes answers to KEV Status, Exploit Automation, and Technical Impact for every CVE ID through services such as the Vulnrichment Program"; "Fix on system upgrade means that, unless conditions change as described in item (e) above, the vulnerability should be remediated the next time the vulnerable asset receives a scheduled major upgrade or rebuild." Table 1 as transcribed in STD-GLB-009 1.8.0 rule 8: exposed, not in the KEV, automatable, total: 3 days; automatable, partial: 14 days; not exposed, not in the KEV, not automatable: fix on system upgrade. |
+| R19 | CISA, *Vulnrichment*, `cisagov/vulnrichment`, branch `develop`, accessed 2026-10-10, ADP "CISA Coordinator" SSVC options: CVE-2026-78663 (2026-10-09T16:40Z) Exploitation none, Automatable yes, Technical Impact total; CVE-2026-94440 (2026-10-09T16:09Z) none, yes, partial; CVE-2026-94439 (2026-10-09T16:45Z) none, yes, partial; CVE-2026-85091 (2026-09-03T13:21Z) poc, no, total. <https://github.com/cisagov/vulnrichment/tree/develop/2026>. CISA, *Known Exploited Vulnerabilities Catalog*, version 2026.10.08, <https://www.cisa.gov/sites/default/files/feeds/known_exploited_vulnerabilities.json>: none of the four is listed. |
+| R20 | The Go Project, *Go Vulnerability Database*, accessed 2026-10-10. <https://vuln.go.dev/ID/GO-2026-6612.json>: "Double flow control refund on HTTP/2 server streams in net/http", alias CVE-2026-78663, stdlib fixed in 1.26.9 and 1.27.2; <https://vuln.go.dev/ID/GO-2026-6608.json>: "Memory limit bypass when parsing MIME headers in net/textproto, mime/multipart", alias CVE-2026-94440, fixed in 1.26.9 and 1.27.2; <https://vuln.go.dev/ID/GO-2026-6613.json>: "HTTP/1 server connection desynchronization after 2xx CONNECT response in net/http", alias CVE-2026-94439, fixed in 1.26.9 and 1.27.2. |
+| R21 | caddyserver/caddy#8179, *go.mod: update golang.org/x/net to v0.60.0*, merged 2026-10-09 as `1b3838c`, <https://github.com/caddyserver/caddy/pull/8179>, accessed 2026-10-10. The latest release, v2.11.7, was published 2026-10-03 and does not carry it. |
+| R22 | Alpine Linux, apk-tools v3.0.8, *apk-world(5)*, accessed 2026-10-10. <https://gitlab.alpinelinux.org/alpine/apk-tools/-/blob/v3.0.8/doc/apk-world.5.scd>. "When modifying existing installation, the installed version is preferred unless an upgrade is requested or a world constraint or package dependency requires an alternate version." |
+| R23 | Docker, *Building best practices*, accessed 2026-10-10. <https://docs.docker.com/build/building/best-practices/>. On pinning by digest: "And you're opting out of automated security fixes, which is likely something you want to get"; "To keep your images up-to-date and secure, rebuild your images regularly with updated dependencies." |
+| R24 | CISA, *Vulnerability Exploitability eXchange (VEX) – Status Justifications*, June 2022, §3.3.1, accessed 2026-10-10. <https://www.cisa.gov/sites/default/files/publications/VEX_Status_Justification_Jun22.pdf>. "Base layer container images often contain unused packages. A later layer could remove one or more of these packages." |
+| R25 | Docker Official Images, *FAQ*, "Why does my security scanner show that an image has CVEs?", accessed 2026-10-10. <https://github.com/docker-library/faq#why-does-my-security-scanner-show-that-an-image-has-cves>. "Many Official Images are maintained by the community or their respective upstream projects, like Ubuntu, Alpine, and Oracle Linux, and are subject to their own maintenance schedule." |
+| R26 | Anchore, *Grype: Filter scan results*, accessed 2026-10-10. <https://oss.anchore.com/docs/guides/vulnerability/filter-results/>. "# Ignore by package location (supports glob patterns)". Grype v0.120.1, `grype/match/ignore.go`, <https://github.com/anchore/grype/blob/v0.120.1/grype/match/ignore.go>: "all specified criteria must be met by the vulnerability match in order for the rule to apply". |
+| R27 | Compose Specification, commit `914ec15`, accessed 2026-10-10. `build.md`, "Using `build` and `image`", <https://github.com/compose-spec/compose-spec/blob/914ec15d1fa498969c0df5c1d672306db3256089/build.md#using-build-and-image>: "When Compose is confronted with both a `build` subsection for a service and an `image` attribute. It follows the rules defined by the `pull_policy` attribute" (the source links `pull_policy` to `05-services.md`); "If `pull_policy` is missing in the service definition, Compose attempts to pull the image first and then builds from source if the image isn't found in the registry or platform cache." `05-services.md`, `pull_policy`, <https://github.com/compose-spec/compose-spec/blob/914ec15d1fa498969c0df5c1d672306db3256089/05-services.md#pull_policy>: "`build`: Compose builds the image. Compose rebuilds the image if it's already present"; "`never`: Compose doesn't pull the image from a registry and relies on the platform cached image. If there is no cached image, a failure is reported." |

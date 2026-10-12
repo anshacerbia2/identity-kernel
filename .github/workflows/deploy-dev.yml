@@ -51,6 +51,20 @@ jobs:
             echo "KC_BOOTSTRAP_ADMIN_PASSWORD=$(openssl rand -hex 16)"
           } > .env
 
+      # STD-GLB-009 1.8.0 rule 11 (TDD-identity-kernel-005 §Images the Stack Runs): no image this stack
+      # names without a digest is pulled from a registry. Compose pulls a name before building it unless
+      # pull_policy says otherwise, so every such name must be build where its service builds it and
+      # never elsewhere. Checked on every file set the stack runs, before anything is pulled.
+      - name: no image named here is pulled from a registry
+        run: |
+          files=()
+          for set in compose.yaml compose.yaml:compose.tunnel.yaml compose.yaml:compose.ci.yaml; do
+            out="$RUNNER_TEMP/compose-config-${set//[:.]/-}.json"
+            COMPOSE_FILE="$set" docker compose config --format json > "$out"
+            files+=("$out")
+          done
+          python3 ../../.github/scripts/pull-policy.py "${files[@]}"
+
       - name: start the stack, which applies the realm
         run: |
           docker compose -f compose.yaml -f compose.ci.yaml up -d --wait --wait-timeout 300 postgres keycloak caddy
@@ -59,6 +73,15 @@ jobs:
           code="$(docker wait "$(docker compose -f compose.yaml -f compose.ci.yaml ps -aq realm-apply)")"
           docker compose -f compose.yaml -f compose.ci.yaml logs --no-color realm-apply
           [ "$code" = "0" ] || { echo "::error::the realm-apply job exited $code"; exit 1; }
+
+      - name: the kernel image was built here, not pulled
+        run: |
+          digests="$(docker image inspect -f '{{len .RepoDigests}}' scnehaux/identity-kernel:dev)"
+          if [ "$digests" != 0 ]; then
+            echo "::error::scnehaux/identity-kernel:dev carries a registry digest: it was pulled, not built"
+            exit 1
+          fi
+          echo "scnehaux/identity-kernel:dev has no registry digest: built here"
 
       # The key is owned by the runner here, because the check below runs realm-apply on the runner
       # rather than in its container. On a server it belongs to the container's user, the default.
@@ -155,6 +178,20 @@ jobs:
             echo "KEYCLOAK_ADMIN_URL=http://localhost:8081"
           } > .env
 
+      # STD-GLB-009 1.8.0 rule 11 (TDD-identity-kernel-005 §Images the Stack Runs): no image this stack
+      # names without a digest is pulled from a registry. Compose pulls a name before building it unless
+      # pull_policy says otherwise, so every such name must be build where its service builds it and
+      # never elsewhere. Checked on every file set the stack runs, before anything is pulled.
+      - name: no image named here is pulled from a registry
+        run: |
+          files=()
+          for set in compose.yaml compose.yaml:compose.tunnel.yaml compose.yaml:compose.ci.yaml; do
+            out="$RUNNER_TEMP/compose-config-${set//[:.]/-}.json"
+            COMPOSE_FILE="$set" docker compose config --format json > "$out"
+            files+=("$out")
+          done
+          python3 ../../.github/scripts/pull-policy.py "${files[@]}"
+
       - name: start the stack in tunnel mode, which applies the realm
         run: |
           docker compose -f compose.yaml -f compose.tunnel.yaml up -d --wait --wait-timeout 300 postgres keycloak caddy
@@ -163,6 +200,15 @@ jobs:
           code="$(docker wait "$(docker compose -f compose.yaml -f compose.tunnel.yaml ps -aq realm-apply)")"
           docker compose -f compose.yaml -f compose.tunnel.yaml logs --no-color realm-apply
           [ "$code" = "0" ] || { echo "::error::the realm-apply job exited $code"; exit 1; }
+
+      - name: the kernel image was built here, not pulled
+        run: |
+          digests="$(docker image inspect -f '{{len .RepoDigests}}' scnehaux/identity-kernel:dev)"
+          if [ "$digests" != 0 ]; then
+            echo "::error::scnehaux/identity-kernel:dev carries a registry digest: it was pulled, not built"
+            exit 1
+          fi
+          echo "scnehaux/identity-kernel:dev has no registry digest: built here"
 
       - name: create the realm-apply service account, with its key
         run: |
