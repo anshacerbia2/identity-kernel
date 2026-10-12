@@ -1,7 +1,8 @@
 package compat
 
-// The login theme (TDD-identity-kernel-004 1.1.0): keycloak.v2's templates and styles under the
-// scnehaux theme, which replaces message bundles only. The pages render through it, declare their
+// The login theme (TDD-identity-kernel-004 1.7.0): keycloak.v2's templates and styles under the
+// scnehaux theme, which adds a stylesheet and changes message bundles and three copied templates. The
+// pages render through it, load its stylesheet, font and mark from the kernel, declare their
 // language, speak Indonesian when asked, and never tell an unknown identifier from a wrong password
 // or a disabled account.
 
@@ -91,6 +92,50 @@ func TestTheLoginPageIsTheThemesInEachLocale(t *testing.T) {
 		if !strings.Contains(html.UnescapeString(page), title) {
 			t.Errorf("%s: the login page does not read %q", locale, title)
 		}
+	}
+}
+
+var stylesheetLink = regexp.MustCompile(`<link href="([^"]*/login/scnehaux/css/scnehaux\.css)" rel="stylesheet"`)
+
+// TDD-identity-kernel-004 §Visual Language: the login page links keycloak.v2's stylesheet and then the
+// theme's, and the kernel serves the theme's stylesheet, its font and its mark. A theme.properties
+// that dropped the parent's stylesheet, or a resource the image does not carry, fails here.
+func TestTheLoginPageLoadsTheThemesStylesheetFontAndMark(t *testing.T) {
+	a := requireKeycloak(t)
+	caller := providerCaller(t, a)
+	page := newThemeBrowser(t).loginPage(a, caller, "en")
+	m := stylesheetLink.FindStringSubmatch(page)
+	if m == nil {
+		t.Fatalf("the login page links no scnehaux.css: %s", snippet(page))
+	}
+	parent := strings.Index(page, "/login/scnehaux/css/styles.css")
+	if parent < 0 || parent > strings.Index(page, m[1]) {
+		t.Errorf("keycloak.v2's css/styles.css is not linked before the theme's stylesheet")
+	}
+	base := strings.TrimSuffix(m[1], "css/scnehaux.css")
+	for path, kind := range map[string]string{
+		"css/scnehaux.css":                    "text/css",
+		"fonts/inter-latin-wght-normal.woff2": "font/woff2",
+		"img/scnehaux-mark.svg":               "image/svg+xml",
+	} {
+		target := base + path
+		if !strings.HasPrefix(target, "http") {
+			target = a.base + target
+		}
+		response, err := a.http.Get(target)
+		if err != nil {
+			t.Fatalf("GET %s: %v", target, err)
+		}
+		_ = response.Body.Close()
+		if response.StatusCode != http.StatusOK {
+			t.Errorf("GET %s answered %d", path, response.StatusCode)
+		}
+		if got := response.Header.Get("Content-Type"); !strings.HasPrefix(got, kind) {
+			t.Logf("GET %s: content type %q, expected %q", path, got, kind)
+		}
+	}
+	if !strings.Contains(page, "img/scnehaux-mark.svg") {
+		t.Errorf("the login page does not name the mark as its icon")
 	}
 }
 

@@ -3,6 +3,7 @@
 // asserts with, axe-core over a page and the CSP violations a page raised.
 import { createHash, createHmac, randomBytes } from "node:crypto";
 import { appendFileSync } from "node:fs";
+import { join } from "node:path";
 import { createServer } from "node:http";
 import type { AddressInfo } from "node:net";
 
@@ -216,8 +217,16 @@ export async function recordViolations(page: Page): Promise<string[]> {
 // The WCAG 2.2 A and AA rules axe-core carries (PAD-PLT-001 §6.6, STD-GLB-FE-009).
 const wcag = ["wcag2a", "wcag2aa", "wcag21a", "wcag21aa", "wcag22aa"];
 
+// Where each scanned surface is photographed, in each scheme: the compat workflow uploads the
+// directory as the browser job's artifact, the record of how the theme looks
+// (TDD-identity-kernel-004 §Visual Language).
+export const screenshots = process.env.SCREENSHOTS_DIR ?? "screenshots";
+
 // scan runs axe-core over the page as it stands, in the light scheme and in the dark one: the
-// theme follows prefers-color-scheme, so each is a rendering of its own.
+// theme follows prefers-color-scheme, so each is a rendering of its own. Each rendering is
+// photographed. What axe-core could not decide is written to the job summary as needing review,
+// never counted as passed: colour contrast over the translucent panel and the gradient canvas is
+// among it, because axe-core does not compute a background it cannot resolve to one colour.
 export async function scan(page: Page, locale: string, surface: string): Promise<void> {
   for (const colorScheme of ["light", "dark"] as const) {
     await page.emulateMedia({ colorScheme });
@@ -225,12 +234,18 @@ export async function scan(page: Page, locale: string, surface: string): Promise
       (dark) => document.documentElement.classList.contains("pf-v5-theme-dark") === dark,
       colorScheme === "dark",
     );
+    await page.evaluate(() => document.fonts.ready.then(() => undefined));
     const results = await new AxeBuilder({ page }).withTags(wcag).analyze();
     const found = results.violations.map(
       (v) => `${v.id} (${v.impact}): ${v.nodes.map((n) => n.target.join(" ")).join(", ")}`,
     );
-    summarize(`| ${surface} | ${locale} | ${colorScheme} | ${results.passes.length} | ${found.length} |`);
+    const review = results.incomplete.map((v) => `${v.id} (${v.nodes.length})`).join(", ") || "none";
+    summarize(
+      `| ${surface} | ${locale} | ${colorScheme} | ${results.passes.length} | ${found.length} | ${review} |`,
+    );
     expect.soft(found, `axe-core on ${surface}, ${locale}, ${colorScheme}`).toEqual([]);
+    const name = `${locale}-${surface.replace(/[^a-z0-9]+/gi, "-")}-${colorScheme}.png`.toLowerCase();
+    await page.screenshot({ path: join(screenshots, name), fullPage: true, animations: "disabled" });
   }
   await page.emulateMedia({ colorScheme: "light" });
 }
