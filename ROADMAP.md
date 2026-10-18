@@ -75,6 +75,13 @@ and context switch mechanism — are exercised here but decided in `identity-con
   - ✅ `.grype.yaml` holds one rule in rule 5's form: `zlib` 1.3.2-r0 in Postgres, `affected`, review
     by 2026-10-21 (Table 1 limit 2027-01-05). `scripts/image-scan-rules.py` checks every rule's form
     and dates before each scan
+- ✅ **The kernel's `pcre2` is upgraded where it is built** (TDD-005 1.9.0 §Images the Stack Runs). The
+  daily scan of 2026-10-17 (run 39020523059) failed on `pcre2` 10.40-6.el9 in Keycloak 26.7.5's base,
+  fixed in 10.40-7.el9_8 (RHSA-2026:81532: CVE-2026-103111, CVE-2026-86145, CVE-2026-89161).
+  `image/Dockerfile` upgrades it in a digest-pinned ubi9 stage, by Keycloak's documented RPM pattern
+- ⏳ **The `pcre2` stage ends with the Keycloak pin.** No 26.7 release carries the fix; 26.8.1 does.
+  When `image/keycloak.ref` moves to an image with 10.40-7.el9_8 or later, the ubi9 stage, its `COPY`
+  and the allowance in `scripts/image-build-compare.py` go
 - ⏳ **Caddy's source build ends with a release.** caddyserver/caddy#8179 moved x/net to v0.60.0 on
   2026-10-09; no release carries it yet (v2.11.7 is the latest). When one does, built with Go 1.26.9 or
   later, compose pulls it by digest again and `caddy.Dockerfile` goes, through `deploy-dev`'s `stack`
