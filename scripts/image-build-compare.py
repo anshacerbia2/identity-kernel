@@ -8,8 +8,10 @@ compare reads the two OCI archives the builds wrote, build-1.tar and build-2.tar
 
   1. requires the pinned upstream image's layers, unchanged, at the bottom of both;
   2. requires the layers above them, the ones this repository adds, to hold only Keycloak's build
-     output (lib/quarkus) and this repository's theme, byte for byte as git holds it, and no file
-     that could carry a key, a certificate, a realm export or an environment file;
+     output (lib/quarkus), this repository's theme, byte for byte as git holds it, and the pcre2
+     upgrade image/Dockerfile makes (its libraries, licences and build-id links, and the rpm
+     database), and no file that could carry a key, a certificate, a realm export or an environment
+     file;
   3. compares the two builds file by file. Equal digests pass at once. Otherwise every difference
      outside Keycloak's build output fails, and the differences inside it are recorded: Quarkus writes
      its augmented classes with random names, which this repository cannot change.
@@ -27,7 +29,19 @@ import tarfile
 import zipfile
 
 # What the kernel's own layers may hold. Parents of these directories may appear as entries too.
-ALLOWED_PREFIXES = ("opt/keycloak/lib/quarkus/", "opt/keycloak/themes/scnehaux/")
+# The pcre2 upgrade in image/Dockerfile (STD-GLB-009 1.8.0 rule 10, TDD-identity-kernel-005 §Images the
+# Stack Runs) adds the two packages' files and the rpm database that records them; it goes, with these
+# prefixes, when image/keycloak.ref moves to a Keycloak image that carries the fix.
+PCRE2_PREFIXES = (
+    "usr/lib64/libpcre2-",
+    "usr/share/licenses/pcre2-syntax/",
+    "var/lib/rpm/rpmdb.sqlite",
+)
+# Each entry here must be a link to one of the pcre2 libraries.
+BUILD_ID_PREFIX = "usr/lib/.build-id/"
+ALLOWED_PREFIXES = (
+    "opt/keycloak/lib/quarkus/", "opt/keycloak/themes/scnehaux/", *PCRE2_PREFIXES, BUILD_ID_PREFIX,
+)
 THEME_PREFIX = "opt/keycloak/themes/scnehaux/"
 
 # Files that would carry a key, a certificate, a realm export, or configuration with a credential.
@@ -97,6 +111,10 @@ def check_contents(errors, label, entries, theme_dir):
         if not name.startswith(ALLOWED_PREFIXES) and not any(p.startswith(name.rstrip("/") + "/") for p in ALLOWED_PREFIXES):
             fail(errors, f"{label}: {name} is outside Keycloak's build output and the theme")
             continue
+        if name.startswith(BUILD_ID_PREFIX) and meta[0] != tarfile.DIRTYPE and not (
+                meta[0] == tarfile.SYMTYPE and "/usr/lib64/libpcre2-" in meta[5]):
+            fail(errors, f"{label}: {name} is not a build-id link to a pcre2 library")
+            continue
         if name.lower().endswith(FORBIDDEN_SUFFIXES):
             fail(errors, f"{label}: {name} could carry a key, a realm export or a credential")
         if name.startswith(THEME_PREFIX) and content is not None:
@@ -106,8 +124,7 @@ def check_contents(errors, label, entries, theme_dir):
                 fail(errors, f"{label}: {name} is not a file git tracks")
             elif theme_dir[relative] != content:
                 fail(errors, f"{label}: {name} differs from {relative} in git")
-    for missing in sorted(set(theme_dir) - theme_files):
-        fail(errors, f"{label}: {missing} is tracked but not in the image")
+    return theme_files
 
 
 def compare_jar(errors, name, first, second):
@@ -172,10 +189,13 @@ def compare(out, theme_tree):
                 # "Keycloak - Version 26.7.5"
                 version = content.decode().split()[-1]
     recorded = []
+    # The theme is one layer and the pcre2 upgrade another, so a tracked file is looked for in all of
+    # the kernel's layers together.
+    themed_one, themed_two = set(), set()
     for index, (digest_one, digest_two) in enumerate(zip(ours_one, ours_two)):
         entries_one, entries_two = one.files(digest_one), two.files(digest_two)
-        check_contents(errors, f"build 1, layer {len(upstream) + index + 1}", entries_one, theme_dir)
-        check_contents(errors, f"build 2, layer {len(upstream) + index + 1}", entries_two, theme_dir)
+        themed_one |= check_contents(errors, f"build 1, layer {len(upstream) + index + 1}", entries_one, theme_dir)
+        themed_two |= check_contents(errors, f"build 2, layer {len(upstream) + index + 1}", entries_two, theme_dir)
         providers += [n for n, (_, c) in entries_one.items() if n.startswith("opt/keycloak/providers/") and c is not None]
         if digest_one == digest_two:
             continue
@@ -193,6 +213,9 @@ def compare(out, theme_tree):
                 recorded.append((name, dated, classes))
             else:
                 fail(errors, f"{name} differs between the builds")
+    for label, themed in (("build 1", themed_one), ("build 2", themed_two)):
+        for missing in sorted(set(theme_dir) - themed):
+            fail(errors, f"{label}: {missing} is tracked but not in the image")
 
     for archive in (one, two):
         config = dict(archive.config)
@@ -223,7 +246,8 @@ def compare(out, theme_tree):
             for entry in classes[:5]:
                 lines.append(f"    - `{entry}`")
     lines.append("- **Failed:** " + "; ".join(errors) if errors else "- Contents: upstream layers unchanged; "
-                 "the kernel's layers hold only Keycloak's build output and the theme as git holds it.")
+                 "the kernel's layers hold only Keycloak's build output, the theme as git holds it, and the pcre2 "
+                 "upgrade.")
     summary("\n".join(lines))
     return 1 if errors else 0
 

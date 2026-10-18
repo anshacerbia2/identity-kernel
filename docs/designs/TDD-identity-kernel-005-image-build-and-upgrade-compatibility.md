@@ -3,12 +3,12 @@ doc_meta:
   id: TDD-identity-kernel-005
   title: Image Build, Digest Pinning, and Upgrade Compatibility
   owner: Identity Platform Team
-  version: 1.8.0
+  version: 1.9.0
   status: approved
   classification: restricted
   review_cycle_days: 90
   created_date: 2026-08-11
-  last_reviewed: 2026-10-10
+  last_reviewed: 2026-10-18
   parent_sad: SAD-001
 ---
 
@@ -207,7 +207,7 @@ daily.
 
 | Image | Source | Publicly exposed (rule 8) | Remedy in 1.8.0 |
 | :-- | :-- | :-- | :-- |
-| kernel | `image/Dockerfile` on `image/keycloak.ref` | no: reached only through the proxy | none needed: no fixable High or Critical |
+| kernel | `image/Dockerfile` on `image/keycloak.ref` | no: reached only through the proxy | none needed in 1.8.0; since 1.9.0 `pcre2` upgraded where it is built (rule 10) |
 | `caddy` | `deploy/dev/caddy.Dockerfile`: Caddy 2.11.7 built from source on `caddy:2.11.7-builder-alpine`, overlaid on `caddy:2.11.7-alpine`, both by digest | **yes**: ports 80 and 443, or the tunnel's anonymous port | rebuilt from source (rule 9); `zlib` upgraded (rule 10) |
 | `realm-apply` | `deploy/dev/realm-apply.Dockerfile`: `alpine:3.24` by digest with `git`, binaries from `golang:1.26.9-alpine` by digest | no: a one-shot job on the internal network | base replaced (rule 10); `zlib` upgraded |
 | `postgres` | `postgres:17.11-alpine`, pulled by digest | no: the internal network, no published port | `affected` exception until the upstream rebuild (rules 5, 8, 10) |
@@ -268,6 +268,46 @@ git 2.54.0-r0, pcre2 10.49-r0, zlib 1.3.2-r1, nghttp2-libs 1.70.0-r0; no `git-lf
 exception is therefore gone, not decided again. realm-apply and client-key are built on
 `golang:1.26.9-alpine` by digest, and `go version` reads go1.26.9 for both.
 
+**The kernel's `pcre2` is upgraded where it is built (rule 10, 1.9.0).** The daily scan of
+2026-10-17, run 39020523059, failed on the kernel image: `pcre2` and `pcre2-syntax` 10.40-6.el9, from
+Keycloak 26.7.5's ubi9-micro base, with a fix in 0:10.40-7.el9_8 for CVE-2026-103111, CVE-2026-86145
+and CVE-2026-89161, High. Red Hat shipped it on 2026-10-12 as RHSA-2026:81532, "Important", whose CVE
+list names all three; the package's changelog reads "Backport multiple CVE fixes" [R30]. No 26.7
+release carries it: on 2026-10-18 26.7.5 is the newest 26.7 tag on quay.io and still resolves to the
+pinned digest. Keycloak 26.8.1 (2026-10-13) does carry 10.40-7.el9_8, but a move to it is a minor
+upgrade with its own compatibility run, not a patch, and it is left to the upgrade path
+(§Security Releases).
+
+The image is built here, so rule 10 patches it here. The Keycloak image has no package manager, and
+Keycloak's container guide says how RPMs are added to it: "It is possible to install new RPMs if
+absolutely required, following this two-stage pattern established by ubi-micro", a
+`FROM registry.access.redhat.com/ubi9 AS ubi-micro-build` stage that runs `dnf install --installroot
+/mnt/rootfs <package names go here> --releasever 9 --setopt install_weak_deps=false --nodocs -y`, then
+`COPY --from=ubi-micro-build /mnt/rootfs /` into the Keycloak stage; the chroot is there "so that only
+the packages you specify and their dependencies are installed" [R28]. `image/Dockerfile` follows it with
+two changes, each for the scan:
+
+- **The root is the pinned Keycloak image, not an empty directory.** An empty root gets a new rpm
+  database that lists only what was installed into it, and copying that root over `/` would replace the
+  image's database, so the scan would no longer see the image's other 42 packages. The stage copies the
+  upstream image to `/mnt/rootfs`, and dnf upgrades the two packages in that root's own database. dnf
+  takes its repositories from the host when the root has none: "configuration file and reposdir are
+  searched inside the installroot first. If they are not present, they are taken from the host system";
+  "Gpgkeys are imported into the installroot" [R29], so the key it imports is removed again.
+- **Only what changed is copied.** The files of `pcre2` and `pcre2-syntax` that are in the root (the two
+  libraries and their links, the licences, two build-id links) and `var/lib/rpm/rpmdb.sqlite*` go into
+  one layer above the theme. The build fails when the constraint `pcre2 >= 10.40-7.el9_8`,
+  `pcre2-syntax >= 10.40-7.el9_8` cannot be met, and when any package other than those two changed.
+
+The ubi9 stage is `registry.access.redhat.com/ubi9:9.8-1791888712`, pinned by digest (rule 1). Measured
+on 2026-10-18: the built image's rpm database lists the same 44 packages as the upstream image's, with
+`pcre2` and `pcre2-syntax` 10.40-7.el9_8 in place of 10.40-6.el9; the gate passes on the kernel image,
+which keeps only CVE-2022-41409, Low, in `pcre2`; and two `--no-cache` builds of one commit wrote the
+same `pcre2` layer, byte for byte. rpm 4.16.1.3 takes the install time from `SOURCE_DATE_EPOCH`, which
+`scripts/image-build-check.sh` passes, so the database does not carry the build date. The stage, its
+`COPY` and the allowance in `scripts/image-build-compare.py` go when `image/keycloak.ref` moves to a
+Keycloak image that carries 10.40-7.el9_8 or later, which 26.8.1 already does.
+
 **The trade-off of an upgrade line.** apk resolves `git` and the `zlib` constraint against Alpine's
 index on the day of the build, not against the digest. apk keeps the installed version "unless an
 upgrade is requested or a world constraint or package dependency requires an alternate version" [R22],
@@ -276,9 +316,11 @@ stays named by digest (rule 1); the packages added on top float within the `v3.2
 fixes, and the constraint sets the floor. Docker states the price of the alternative: pinning by digest
 alone means "you're opting out of automated security fixes" [R23]. Two builds on different days can
 therefore differ in a package version. That is acceptable for these two images, which are built where
-they run and never promoted; the kernel image, which is promoted (§Build Output), has no such line.
-Each line carries a comment naming CVE-2026-85091 and goes when its pin moves to an image that has
-the fix.
+they run and never promoted. Since 1.9.0 the kernel image, which is promoted (§Build Output), has one
+too, the `pcre2` constraint. Two builds on one day are compared byte for byte (§Build Reproducibility),
+and promotion carries the digest that was evaluated, not a rebuild, so a later Red Hat update to `pcre2`
+reaches the kernel only through a new build that the suite evaluates. Each line carries a comment
+naming its CVEs and goes when its pin moves to an image that has the fix.
 
 **Postgres waits for its upstream (rules 5, 8 and 10).** `postgres:17.11-alpine` carries `zlib`
 1.3.2-r0, and the official image has not been rebuilt: on 2026-10-10 the tag still resolves to the
@@ -517,7 +559,7 @@ requirements.
 | Requirement | As built | Met |
 | :-- | :-- | :-- |
 | Same image digest | **Not met; a recorded gap.** The digests differ (below). Every other layer and file is compared byte for byte, and a difference outside Keycloak's build output fails | no |
-| No secret, realm export or development keystore | The bottom layers must be the pinned upstream manifest's, unchanged. The layers above may hold only `lib/quarkus/` and `themes/scnehaux/`, each theme file byte-identical to git's copy. No key, certificate, `.json`, `.conf` or `.env` file may be added, no file deleted, and no `Env` name may carry a password, secret, token or credential | yes |
+| No secret, realm export or development keystore | The bottom layers must be the pinned upstream manifest's, unchanged. The layers above may hold only `lib/quarkus/` and `themes/scnehaux/`, each theme file byte-identical to git's copy, and, since 1.9.0, the `pcre2` upgrade: `usr/lib64/libpcre2-*`, `usr/share/licenses/pcre2-syntax/`, `var/lib/rpm/rpmdb.sqlite*`, and build-id links that point to a `pcre2` library. No key, certificate, `.json`, `.conf` or `.env` file may be added, no file deleted, and no `Env` name may carry a password, secret, token or credential | yes |
 | The bill of materials lists every extension and its version | CycloneDX 1.7 JSON, written by Syft pinned by digest. Every jar in `providers/` must be listed with a version; none is packaged yet. The theme is added as a component, versioned by its git tree id, and Keycloak's own version must be listed | yes |
 
 **Why the digests differ.** A reproducible build is one where "any party can recreate bit-by-bit
@@ -600,6 +642,8 @@ bill of materials for one commit agree.
   review date, before any scan.
 - The Caddy build fails unless the binary reads x/net v0.60.0 and Go 1.26.9 or later. A `zlib` upgrade
   line fails the build when no repository offers 1.3.2-r1.
+- The kernel build fails when no repository offers `pcre2` and `pcre2-syntax` 10.40-7.el9_8 or later,
+  or when the upgrade changes any other package (1.9.0).
 - `deploy-dev`'s `stack` and `tunnel` jobs bring the stack up with the built proxy, in both modes, and
   their logs carry no pull attempt for an image this repository builds (`pull_policy: build`). Both
   fail first when any compose file set names an image without a digest and its service is not
@@ -723,3 +767,6 @@ release.
 | R25 | Docker Official Images, *FAQ*, "Why does my security scanner show that an image has CVEs?", accessed 2026-10-10. <https://github.com/docker-library/faq#why-does-my-security-scanner-show-that-an-image-has-cves>. "Many Official Images are maintained by the community or their respective upstream projects, like Ubuntu, Alpine, and Oracle Linux, and are subject to their own maintenance schedule." |
 | R26 | Anchore, *Grype: Filter scan results*, accessed 2026-10-10. <https://oss.anchore.com/docs/guides/vulnerability/filter-results/>. "# Ignore by package location (supports glob patterns)". Grype v0.120.1, `grype/match/ignore.go`, <https://github.com/anchore/grype/blob/v0.120.1/grype/match/ignore.go>: "all specified criteria must be met by the vulnerability match in order for the rule to apply". |
 | R27 | Compose Specification, commit `914ec15`, accessed 2026-10-10. `build.md`, "Using `build` and `image`", <https://github.com/compose-spec/compose-spec/blob/914ec15d1fa498969c0df5c1d672306db3256089/build.md#using-build-and-image>: "When Compose is confronted with both a `build` subsection for a service and an `image` attribute. It follows the rules defined by the `pull_policy` attribute" (the source links `pull_policy` to `05-services.md`); "If `pull_policy` is missing in the service definition, Compose attempts to pull the image first and then builds from source if the image isn't found in the registry or platform cache." `05-services.md`, `pull_policy`, <https://github.com/compose-spec/compose-spec/blob/914ec15d1fa498969c0df5c1d672306db3256089/05-services.md#pull_policy>: "`build`: Compose builds the image. Compose rebuilds the image if it's already present"; "`never`: Compose doesn't pull the image from a registry and relies on the platform cached image. If there is no cached image, a failure is reported." |
+| R28 | Keycloak, *Running Keycloak in a container*, "Installing additional RPM packages", accessed 2026-10-18. <https://www.keycloak.org/server/containers>. "If you try to install new software in a stage FROM quay.io/keycloak/keycloak, you will notice that microdnf, dnf, and even rpm are not installed"; "It is possible to install new RPMs if absolutely required, following this two-stage pattern established by ubi-micro: FROM registry.access.redhat.com/ubi9 AS ubi-micro-build RUN mkdir -p /mnt/rootfs RUN dnf install --installroot /mnt/rootfs <package names go here> --releasever 9 --setopt install_weak_deps=false --nodocs -y && dnf --installroot /mnt/rootfs clean all && rpm --root /mnt/rootfs -e --nodeps setup FROM quay.io/keycloak/keycloak COPY --from=ubi-micro-build /mnt/rootfs /"; "This approach uses a chroot, /mnt/rootfs, so that only the packages you specify and their dependencies are installed, and so can be easily copied into the second stage without guesswork." |
+| R29 | DNF, *Command Reference*, `--installroot`, accessed 2026-10-18. <https://dnf.readthedocs.io/en/latest/command_ref.html>. "cachedir, log files, releasever, and gpgkey are taken from or stored in the installroot. Gpgkeys are imported into the installroot from a path relative to the host which can be specified in the repository section of configuration files. configuration file and reposdir are searched inside the installroot first. If they are not present, they are taken from the host system." |
+| R30 | Red Hat, RHSA-2026:81532, released 2026-10-12, severity "important", accessed 2026-10-18. <https://access.redhat.com/errata/RHSA-2026:81532>; Red Hat Security Data API, <https://access.redhat.com/hydra/rest/securitydata/csaf.json?rhsa_ids=RHSA-2026:81532>: CVEs "CVE-2026-86145", "CVE-2026-89156", "CVE-2026-89157", "CVE-2026-89158", "CVE-2026-89160", "CVE-2026-89161", "CVE-2026-103111"; released package "pcre2-0:10.40-7.el9_8". CVE pages: CVE-2026-86145 "PCRE2: Out-of-bounds write allows arbitrary code execution via crafted regular expressions"; CVE-2026-89161 "PCRE2: Memory corruption vulnerability in pcre2_jit_match"; CVE-2026-103111 "pcre2: Out-of-bounds write via crafted regular expression". The 10.40-7 changelog: "Backport multiple CVE fixes - CVE-2026-86145, CVE-2026-89156, CVE-2026-89157, CVE-2026-89158, CVE-2026-89160, CVE-2026-89161". |
