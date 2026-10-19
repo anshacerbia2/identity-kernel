@@ -6,6 +6,7 @@
   "registrationEmailAsUsername": false,
   "editUsernameAllowed": false,
   "resetPasswordAllowed": false,
+  "passwordPolicy": "passwordHistory(3)",
   "loginWithEmailAllowed": true,
   "duplicateEmailsAllowed": false,
   "defaultSignatureAlgorithm": "PS256",

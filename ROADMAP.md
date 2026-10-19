@@ -730,6 +730,27 @@ The cost is a database read for every session lookup.
 by user logout. Organization Experience's stack proof can require no refresh after the removal once this
 is merged.
 
+### A first credential, for ADR-IAM-010
+
+A person a provider creates gets a temporary password from identity-control, set through the Admin
+API's `reset-password` with `temporary` true (ADR-IAM-010 §5.1). The realm keeps it from becoming
+the lasting password (TDD-identity-kernel-001 1.20.0 §Password Policy):
+- `passwordPolicy` is `passwordHistory(3)`, Keycloak's *Not recently used*. Nothing else refuses the
+  current password at the forced change; Keycloak's update-password action compares nothing itself;
+- `resetPasswordAllowed` stays false, and the kernel still sends no mail;
+- `internal/realmdef` refuses a definition without `passwordHistory`, or with a reset on the login
+  page.
+
+`compat/first_credential_test.go` (`TestAFirstCredentialIsChangedAtFirstSignInAndNeverKept`) proves
+on the pinned image:
+- the temporary password leaves `UPDATE_PASSWORD` outstanding, and the first sign-in goes to the
+  update-password page;
+- the same value is refused there, and another one is accepted;
+- the temporary value signs in no more, and a deleted temporary password signs in no more;
+- no event carries a value, and the job summary records the marks identity-control maps.
+
+⏳ **Pending** its first compat run.
+
 ## Week 3 · Event listener
 
 - Minimal listener capturing user, admin, and security events

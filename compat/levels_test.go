@@ -59,6 +59,10 @@ type browser struct {
 	recover bool
 	// newPassword, when set, answers the update-password page; the sign-in after it uses it.
 	newPassword string
+	// firstNewPassword, when set, answers the first update-password page instead, once; newPassword
+	// answers the page shown again after it. updatePages holds each update-password page as shown.
+	firstNewPassword string
+	updatePages      []string
 	// refresh is the refresh token of the last sign-in.
 	refresh string
 }
@@ -184,11 +188,16 @@ func (b *browser) signIn(extra url.Values) map[string]any {
 			b.key.assert(b.t, page, origin, form)
 		case namedInput("password-new").MatchString(page):
 			b.pages = append(b.pages, "update-password")
-			if b.newPassword == "" {
+			b.updatePages = append(b.updatePages, page)
+			next := b.newPassword
+			if b.firstNewPassword != "" {
+				next, b.firstNewPassword = b.firstNewPassword, ""
+			}
+			if next == "" {
 				b.t.Fatal("the kernel asked for a new password the test holds none of")
 			}
-			form.Set("password-new", b.newPassword)
-			form.Set("password-confirm", b.newPassword)
+			form.Set("password-new", next)
+			form.Set("password-confirm", next)
 		case namedInput("accept").MatchString(page) && strings.Contains(page, `id="kc-oauth"`):
 			// The consent page (login-oauth-grant.ftl): "Yes" grants the client what it asked for.
 			b.pages = append(b.pages, "consent")

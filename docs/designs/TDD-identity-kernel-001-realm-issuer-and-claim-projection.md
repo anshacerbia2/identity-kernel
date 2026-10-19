@@ -3,12 +3,12 @@ doc_meta:
   id: TDD-identity-kernel-001
   title: Realm Topology, Issuer Identity, and Token Claim Projection
   owner: Identity Platform Team
-  version: 1.19.0
+  version: 1.20.0
   status: approved
   classification: restricted
   review_cycle_days: 90
   created_date: 2026-08-11
-  last_reviewed: 2026-10-12
+  last_reviewed: 2026-10-19
   parent_sad: SAD-001
 ---
 
@@ -743,6 +743,64 @@ restart of every Keycloak node clears them. A single-node development server the
 counts when it restarts. A cluster keeps them through a rolling restart only while another node holds
 a copy. That is a limit of the bound, recorded rather than closed.
 
+### Password Policy (1.20.0)
+
+`ADR-IAM-010` gives a person a provider created a first credential: a temporary password the
+Identity Control API generates and sets through the Admin API's `reset-password` with `temporary`
+true. ASVS 5.0 6.4.1 requires that "These initial secrets must not be permitted to become the long
+term password" (`ADR-IAM-010` [R3]). The realm holds that rule, as `ADR-IAM-010 §5.2` decides:
+
+| Setting | Value | Why |
+| :-- | :-- | :-- |
+| `passwordPolicy` | `passwordHistory(3)` | Keycloak's *Not recently used*: "Password cannot be already used by the user. Keycloak stores a history of used passwords" [R20]. 3 is the policy's own default [R21] |
+| `resetPasswordAllowed` | `false`, unchanged | The login page offers no reset; recovery is `ADR-IAM-005`'s |
+| `smtpServer` | none, unchanged | The kernel sends no mail (`ADR-IAM-007 §5.4`) |
+
+**What refuses the temporary value.** Only this policy. At the forced change, Keycloak's
+*Update Password* action checks that the two fields are filled and equal, then calls
+`updateCredential`, which validates the realm's password policies [R22]. It never compares the new
+value with the current one itself. Without a policy the same value is accepted, and the temporary
+password becomes the lasting one.
+
+**How the policy counts.** Keycloak's code [R21]:
+- With any `passwordHistory`, the new value is checked against the current password. The temporary
+  password is the current one at the forced change, so it is refused whatever `N` is.
+- With `N` above 1, it is also checked against the `N − 1` most recent replaced passwords. A
+  replaced password is kept as `password-history` only when `N` is above 1.
+- So `passwordHistory(3)` refuses the temporary value and the two values it replaced. A provider who
+  issues again while the first is unused replaces it (`ADR-IAM-010 §5.1`), and the person still
+  cannot choose either value a provider saw. A third issuance before any use falls outside the
+  history, and is the signal `ADR-IAM-010 §6` alerts on.
+- An administrator's `reset-password` is validated the same way [R22]. Setting a user's current
+  password again through the Admin API is refused with `400`. A random value never repeats, so
+  identity-control's issuance is unaffected. A script that resets a user to the same password twice
+  is refused on the second run.
+
+**Nothing else in the policy.** No composition rule is added: NIST SP 800-63B-4 §3.1.1.2 says
+"Verifiers and CSPs SHALL NOT impose other composition rules (e.g., requiring mixtures of different
+character types) for passwords" (`ADR-IAM-010` [R1]). identity-control's value is 24 characters of a
+32-symbol alphabet, which any length rule up to 24 would admit.
+
+**Why not periodic expiry.** The realm sets no `forceExpiredPasswordChange`. NIST: "Verifiers and
+CSPs SHALL NOT require subscribers to change passwords periodically" (`ADR-IAM-010` [R1]). The
+temporary password lapses because identity-control deletes it (`ADR-IAM-010 §5.2`), not by a
+kernel policy. A deleted password no longer signs in.
+
+**Nothing in an event carries the value.** The Admin API's `reset-password` records an admin event
+`ACTION` on `users/{id}/reset-password` with no representation [R22], although the realm records
+representations (`adminEventsDetailsEnabled`). The compat suite asserts that no user or admin event
+for the person contains the value (`STD-IAM-001` 2.8.0 §3.1, "not in … an event").
+
+`internal/realmdef` refuses a definition without `passwordHistory` of at least 1, or with
+`resetPasswordAllowed` true. `compat/first_credential_test.go` proves on the pinned image:
+- a temporary password set by the Admin API leaves `UPDATE_PASSWORD` outstanding, and the first
+  sign-in with it is sent to the update-password page;
+- the same value as the new password is refused there, and a different one is accepted;
+- the temporary value no longer signs in after the change;
+- a temporary password deleted through the Admin API no longer signs in, and `UPDATE_PASSWORD` stays;
+- the marks identity-control reads: the admin event of the issuance, the user events of the
+  refused and the accepted change, and that none of them carries the value.
+
 ### Upgrade Compatibility
 
 Every Keycloak upgrade runs the compatibility suite in this repository before the
@@ -781,6 +839,7 @@ persisted against, so they are asserted rather than observed.
 | Browser flow | `scnehaux-browser-v4` | Password at LoA 1, plus WebAuthn, TOTP or a recovery code at LoA 2; a Tenant sign-in on a session answered by the organization step (§Authentication Levels) |
 | Recovery codes | issued with the first TOTP (`add-recovery-codes`) | ADR-IAM-005 §5.3 |
 | Brute-force detection | permanent lockout after 90 temporary ones, at the 100th failure | ADR-IAM-005 §5.6; §Guessing Limits |
+| Password policy | `passwordHistory(3)`; `resetPasswordAllowed` false; no periodic expiry | ADR-IAM-010 §5.2: a temporary password never becomes the lasting one; §Password Policy (1.20.0) |
 | OTP policy | TOTP, 6 digits, 30 s, `HmacSHA1` | The realm default, accepted by common authenticator apps |
 | Preview features | disabled | ADR-IAM-001 §5.8 requires a separate ADR to enable any |
 | Organizations | enabled (`organizationsEnabled`); the `organization` scope maps `tenant_id` | ADR-IAM-006; §Tenant Context |
@@ -886,6 +945,21 @@ compatibility suite rather than left to operational discipline.
   - a Tenant the person is not a member of gets no token on the session.
 - The unit tests hold the organization step's two conditions to their declaration.
 
+### First Credential (1.20.0)
+
+`compat/first_credential_test.go`, against the pinned image and the declared realm
+(§Password Policy):
+- The applied realm holds `passwordHistory(3)` and `resetPasswordAllowed` false.
+- A user created as identity-control creates one, with `UPDATE_PASSWORD` and no credential, is given a
+  temporary password through `reset-password`. `UPDATE_PASSWORD` stays outstanding.
+- The first sign-in with it reaches the update-password page. The same value is refused there, with
+  `UPDATE_CREDENTIAL_ERROR` `password_rejected`; a different value is accepted, and
+  `UPDATE_PASSWORD` is gone.
+- The temporary value then signs in no more, and the new one does.
+- A second user's temporary password, deleted through the Admin API, signs in no more.
+- No user or admin event for either user contains a temporary value. The issuance's admin event and
+  the change's user events are recorded in the job summary, for identity-control's mapping.
+
 ### Upgrade
 
 - The compatibility suite passes against the candidate release before promotion.
@@ -953,6 +1027,9 @@ rollback, signing-key incident, and issuer change assessment.
 | Conforms to | STD-IAM-001 §3.1 2.2.0 — privileged access is multi-factor |
 | Consumed by | `TDD-identity-control-005` §Step-Up — the levels its challenge asks for |
 | Governed by | ADR-IAM-008 §5.4, §6 — switching the privileged form is a new sign-in; within the SSO session a Tenant switch needs no credential |
+| Governed by | ADR-IAM-010 §5.2, §5.5 — the realm refuses the temporary password as the new one; the kernel still offers no reset and sends no mail |
+| Conforms to | STD-IAM-001 2.8.0 §3.1 — a first credential is temporary in the kernel, and the realm refuses it as the new password |
+| Consumed by | identity-control — ADR-IAM-010's temporary password, issued through `reset-password` and deleted when it lapses |
 
 ### Open Proof-of-Concept Questions
 
@@ -1003,3 +1080,6 @@ standard amendment.
 | R17 | Keycloak 26.7.5, `services/src/main/java/org/keycloak/organization/authentication/authenticators/browser/OrganizationAuthenticator.java`, `action`: for an enabled user, "if (isSSOAuthentication(authSession)) { // if re-authenticating in the scope of an organization context.success(); } else { attempted(context, username); }". |
 | R18 | Keycloak 26.7.5, `services/src/main/java/org/keycloak/authentication/authenticators/conditional/ConditionalRoleAuthenticator.java`, `matchCondition`: "if (user != null && authConfig!=null && authConfig.getConfig()!=null) { … return negateOutput != user.hasRole(role); } return false;". `ConditionalUserConfiguredAuthenticator.isConfiguredFor`: "if (authenticator.requiresUser() && context.getUser() == null) { return false; } return authenticator.configuredFor(…)", and `IdentityProviderAuthenticator.requiresUser` returns false. `ConditionalClientScopeAuthenticator` matches a scope from "TokenManager.getRequestedClientScopes(… authSession.getAuthenticatedUser())". |
 | R19 | OpenID Foundation, *OpenID Connect Core 1.0 incorporating errata set 2*, <https://openid.net/specs/openid-connect-core-1_0.html>, accessed 2026-10-09: §3.1.2.1 `max_age`: "If the elapsed time is greater than this value, the OP MUST attempt to actively re-authenticate the End-User"; `prompt=login`: "The Authorization Server SHOULD prompt the End-User for reauthentication"; §3.1.2.3: "the Authorization Server attempts to Authenticate the End-User or determines whether the End-User is Authenticated, depending upon the request parameter values used. The methods used by the Authorization Server to Authenticate the End-User (e.g., username and password, session cookies, etc.) are beyond the scope of this specification"; "The Authentication Request contains the prompt parameter with the value login. In this case, the Authorization Server MUST reauthenticate the End-User even if the End-User is already authenticated." |
+| R20 | Keycloak 26.7.5, *Server Administration Guide*, Password policy types, source `docs/documentation/server_admin/topics/authentication/password-policies.adoc` at tag 26.7.5, accessed 2026-10-19: *Not recently used*: "Password cannot be already used by the user. {project_name} stores a history of used passwords. The number of old passwords stored is configurable in {project_name}." |
+| R21 | Keycloak 26.7.5, `server-spi-private/src/main/java/org/keycloak/policy/HistoryPasswordPolicyProvider.java`, `validate`: "if (passwordHistoryPolicyValue != -1) { if (user.credentialManager().getStoredCredentialsByTypeStream(PasswordCredentialModel.TYPE) … .anyMatch(… hash.verify(password, passwordCredential) …)) { return new PolicyError(ERROR_MESSAGE, passwordHistoryPolicyValue); } if (passwordHistoryPolicyValue > 0) { if (this.getRecent(… PasswordCredentialModel.PASSWORD_HISTORY), passwordHistoryPolicyValue - 1) …"; `HistoryPasswordPolicyProviderFactory.java`: "DEFAULT_VALUE = 3". `services/src/main/java/org/keycloak/credential/PasswordCredentialProvider.java`, `createCredential`: "// 2) add a password history item based on the old password if (expiredPasswordsPolicyValue > 1 \|\| passwordAgeInDaysPolicy > 0)". |
+| R22 | Keycloak 26.7.5 source. `PasswordCredentialProvider.java`, `updateCredential`: "PolicyError error = session.getProvider(PasswordPolicyManagerProvider.class).validate(realm, user, password); if (error != null) throw new ModelException(error.getMessage(), error.getParameters());". `services/src/main/java/org/keycloak/authentication/requiredactions/UpdatePassword.java`, `processAction`: after the blank and "!passwordNew.equals(passwordConfirm)" checks, "user.credentialManager().updateCredential(UserCredentialModel.password(passwordNew, false)); context.success();", and on a `ModelException` "errorEvent.detail(Details.REASON, me.getMessage()).error(Errors.PASSWORD_REJECTED)". `services/src/main/java/org/keycloak/services/resources/admin/UserResource.java`, `resetPassword`: "if (cred.isTemporary() != null && cred.isTemporary()) { user.addRequiredAction(UserModel.RequiredAction.UPDATE_PASSWORD); }" and "adminEvent.operation(OperationType.ACTION).resourcePath(session.getContext().getUri()).success();", with no representation. |
