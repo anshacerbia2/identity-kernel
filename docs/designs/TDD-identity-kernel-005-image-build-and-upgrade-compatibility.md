@@ -3,12 +3,12 @@ doc_meta:
   id: TDD-identity-kernel-005
   title: Image Build, Digest Pinning, and Upgrade Compatibility
   owner: Identity Platform Team
-  version: 1.9.0
+  version: 1.9.1
   status: approved
   classification: restricted
   review_cycle_days: 90
   created_date: 2026-08-11
-  last_reviewed: 2026-10-18
+  last_reviewed: 2026-10-19
   parent_sad: SAD-001
 ---
 
@@ -330,7 +330,7 @@ exposed; CVE-2026-85091 is not in the KEV, and Vulnrichment gives Automatable no
 [R19]. Table 1 gives fix on system upgrade, which for an image run without building is the next pin move
 within 90 days of detection (2026-10-07): by 2027-01-05. `.grype.yaml` holds it as an `affected` rule on
 `zlib` 1.3.2-r0, type `apk`; the version keeps it off the proxy and realm-apply, which carry 1.3.2-r1.
-Its review date, 2026-10-21, is earlier than that limit so the pin moves as soon as the rebuild lands.
+Its review date, 2026-11-16 (moved from 2026-10-21 on 2026-10-19: the image was not rebuilt, and PostgreSQL's next minor release is 2026-11-12), is earlier than that limit so the pin moves as soon as the rebuild lands.
 If 2027-01-05 would come first, the stack builds its own Postgres image from the pinned one with the
 upgrade line.
 

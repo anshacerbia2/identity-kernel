@@ -73,7 +73,7 @@ and context switch mechanism — are exercised here but decided in `identity-con
     10.49-r0, zlib 1.3.2-r1. The pcre2 exception is gone;
   - ✅ `zlib>=1.3.2-r1` upgrade lines (CVE-2026-85091) in both images this repository builds;
   - ✅ `.grype.yaml` holds one rule in rule 5's form: `zlib` 1.3.2-r0 in Postgres, `affected`, review
-    by 2026-10-21 (Table 1 limit 2027-01-05). `scripts/image-scan-rules.py` checks every rule's form
+    by 2026-11-16, after PostgreSQL's 2026-11-12 minor release (Table 1 limit 2027-01-05). `scripts/image-scan-rules.py` checks every rule's form
     and dates before each scan
 - ✅ **The kernel's `pcre2` is upgraded where it is built** (TDD-005 1.9.0 §Images the Stack Runs). The
   daily scan of 2026-10-17 (run 39020523059) failed on `pcre2` 10.40-6.el9 in Keycloak 26.7.5's base,
