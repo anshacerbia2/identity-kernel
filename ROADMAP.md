@@ -749,7 +749,14 @@ on the pinned image:
 - the temporary value signs in no more, and a deleted temporary password signs in no more;
 - no event carries a value, and the job summary records the marks identity-control maps.
 
-⏳ **Pending** its first compat run.
+✅ **Proven** on 2026-10-19 in compat run 39267767347, on 26.7.5. The marks it recorded:
+- the issuance: admin `ACTION` `USER` `users/{id}/reset-password`, with no representation;
+- the refused change: `UPDATE_CREDENTIAL_ERROR` `password_rejected`, reason
+  `invalidPasswordHistoryMessage`, beside the legacy `UPDATE_PASSWORD_ERROR`;
+- the change: `UPDATE_CREDENTIAL` `credential_type=password`, `custom_required_action=UPDATE_PASSWORD`,
+  beside the legacy `UPDATE_PASSWORD`;
+- the deletion: admin `ACTION` `USER` `users/{id}/credentials/{credentialId}`, with no representation;
+- no event carries a value.
 
 ## Week 3 · Event listener
 

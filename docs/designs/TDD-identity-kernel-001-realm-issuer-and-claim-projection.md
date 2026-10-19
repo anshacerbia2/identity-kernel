@@ -960,6 +960,17 @@ compatibility suite rather than left to operational discipline.
 - No user or admin event for either user contains a temporary value. The issuance's admin event and
   the change's user events are recorded in the job summary, for identity-control's mapping.
 
+**As recorded on 26.7.5** (compat run 39267767347), the marks identity-control maps:
+
+| Step | Event |
+| :-- | :-- |
+| Issued | admin `ACTION` `USER` `users/{id}/reset-password`, no representation |
+| The temporary value refused as the new one | `UPDATE_CREDENTIAL_ERROR` `password_rejected`, `credential_type=password`, `reason=invalidPasswordHistoryMessage`; legacy `UPDATE_PASSWORD_ERROR` beside it |
+| Changed at the first sign-in | `UPDATE_CREDENTIAL` `credential_type=password`, `custom_required_action=UPDATE_PASSWORD`; legacy `UPDATE_PASSWORD` beside it; then `LOGIN` with the same required action |
+| Deleted | admin `ACTION` `USER` `users/{id}/credentials/{credentialId}`, no representation |
+
+No user or admin event carried a value, although the user's `CREATE` carries a representation.
+
 ### Upgrade
 
 - The compatibility suite passes against the candidate release before promotion.
