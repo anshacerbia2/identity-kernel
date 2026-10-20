@@ -212,6 +212,9 @@ func (d Definition) validate() error {
 	if err := d.validateNoMail(); err != nil {
 		return err
 	}
+	if err := d.validatePasswordPolicy(); err != nil {
+		return err
+	}
 	return d.validateStructure()
 }
 

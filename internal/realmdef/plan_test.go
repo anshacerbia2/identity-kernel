@@ -257,8 +257,11 @@ const headerSettings = `"browserSecurityHeaders":{"contentSecurityPolicy":"defau
 	`"xContentTypeOptions":"nosniff","strictTransportSecurity":"max-age=31536000; includeSubDomains",` +
 	`"referrerPolicy":"no-referrer"}`
 
+// passwordSettings are the password policy every definition declares (ADR-IAM-010 §5.2).
+const passwordSettings = `"passwordPolicy":"passwordHistory(3)"`
+
 // realmSettings are what every definition declares.
-const realmSettings = eventSettings + "," + headerSettings
+const realmSettings = eventSettings + "," + headerSettings + "," + passwordSettings
 
 // TDD-identity-kernel-003 §Retention Constraint: "A realm configured with retention below the floor
 // fails the configuration diff." So does one that stores no user or admin events at all.
@@ -715,6 +718,33 @@ func TestABaselineIsStillHeldToItsStructure(t *testing.T) {
 		files["scnehaux.json"] = []byte(realm)
 		if _, err := ParseBaseline(files); err == nil {
 			t.Errorf("%s: ParseBaseline accepted it", name)
+		}
+	}
+}
+
+// ADR-IAM-010 §5.2, §5.5: the realm keeps a temporary password from becoming the lasting one, by
+// passwordHistory, and the login page offers no reset.
+func TestParseRefusesAPolicyThatKeepsATemporaryPassword(t *testing.T) {
+	for name, c := range map[string]struct {
+		edit    func(realm map[string]any)
+		refused bool
+	}{
+		"the declared policy":         {func(map[string]any) {}, false},
+		"history beside other rules":  {func(r map[string]any) { r["passwordPolicy"] = "length(8) and passwordHistory(5)" }, false},
+		"no password policy":          {func(r map[string]any) { delete(r, "passwordPolicy") }, true},
+		"a policy without history":    {func(r map[string]any) { r["passwordPolicy"] = "length(12)" }, true},
+		"history of zero":             {func(r map[string]any) { r["passwordPolicy"] = "passwordHistory(0)" }, true},
+		"the login page offers reset": {func(r map[string]any) { r["resetPasswordAllowed"] = true }, true},
+	} {
+		files := files(t)
+		var realm map[string]any
+		if err := json.Unmarshal(files["scnehaux.json"], &realm); err != nil {
+			t.Fatal(err)
+		}
+		c.edit(realm)
+		files["scnehaux.json"], _ = json.Marshal(realm)
+		if _, err := Parse(files); (err != nil) != c.refused {
+			t.Errorf("%s: refused %t, want %t (%v)", name, err != nil, c.refused, err)
 		}
 	}
 }
