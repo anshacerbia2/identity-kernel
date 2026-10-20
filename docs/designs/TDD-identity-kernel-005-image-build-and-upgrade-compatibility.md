@@ -3,12 +3,12 @@ doc_meta:
   id: TDD-identity-kernel-005
   title: Image Build, Digest Pinning, and Upgrade Compatibility
   owner: Identity Platform Team
-  version: 1.9.1
+  version: 1.10.0
   status: approved
   classification: restricted
   review_cycle_days: 90
   created_date: 2026-08-11
-  last_reviewed: 2026-10-19
+  last_reviewed: 2026-10-20
   parent_sad: SAD-001
 ---
 
@@ -92,6 +92,18 @@ Keycloak's container guide recommends: a builder stage sets `KC_HEALTH_ENABLED`,
 and `KC_DB=postgres` and runs `kc.sh build`, and the image copies its result. A server starts it with
 `start --optimized`, so the build-time options are the image's and no deployment can differ. `compat`
 starts it with `start-dev` on its own file database, which builds again in development mode.
+
+**The file vault and the custody check (1.10.0).** The builder stage also sets `KC_VAULT=file`, a
+build option: "For enabling the file-based vault you need to build Keycloak first using the following
+build option" (Keycloak, *Using a vault*, accessed 2026-10-20). The image sets `KC_VAULT_DIR` to
+`/opt/keycloak/vault`, where every environment mounts the realm signing keystore's password. Its
+entrypoint is `image/start.sh`: before a `start` or `start-dev`, it refuses to run Keycloak unless the
+keystore and its password are mounted and open together, then runs `kc.sh` with the same arguments
+(TDD-identity-kernel-002 1.2.0 §Startup as Built). So every job that starts the image mounts a keystore:
+`compat`'s three jobs make a throwaway one with the ceremony's generator, and `start-dev` names
+`KC_VAULT=file` again, because it builds again. The image holds neither file. §Build Reproducibility's
+content check allows the entrypoint, byte for byte as git holds it, and still refuses any file that
+could carry a key.
 
 The two ports have different audiences:
 

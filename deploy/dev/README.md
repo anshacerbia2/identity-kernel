@@ -6,8 +6,10 @@ Caddy for TLS. The realm is applied by `cmd/realm-apply`, which runs as a one-sh
 
 It is **development only**:
 
-- `realm-apply` accepts `development` and refuses anything that serves real tokens,
-  because the signing key is generated in-process.
+- `realm-apply` accepts `development` and refuses anything that serves real tokens. The signing
+  key is loaded from a keystore the signing-key ceremony made, as in production, but a shared
+  environment also needs the keystore delivered from its secret manager and key rotation, and
+  neither is built (TDD-identity-kernel-002 1.2.0 §Custody as Built).
 - The issuer this server gets is not the production issuer.
 - Nothing issued here is evidence of anything.
 
@@ -20,7 +22,7 @@ development server runbook (`docs/runbooks/dev-server.md`). This stack comes fir
 | Service | Image | Does |
 | :-- | :-- | :-- |
 | `postgres` | `postgres:17.11-alpine`, pinned by digest | Keycloak's database `keycloak`, owned by the role `keycloak`, in the volume `postgres` |
-| `keycloak` | `scnehaux/identity-kernel:dev`, built from `image/Dockerfile`: the digest in `image/keycloak.ref` plus this repository's login theme. `pull_policy: build`, so compose never pulls that name from a registry | The kernel, in production mode (`start --optimized`), reading sessions from the database with no session cache (TDD-identity-kernel-005 §Session Store) |
+| `keycloak` | `scnehaux/identity-kernel:dev`, built from `image/Dockerfile`: the digest in `image/keycloak.ref` plus this repository's login theme and its entrypoint. `pull_policy: build`, so compose never pulls that name from a registry | The kernel, in production mode (`start --optimized`), reading sessions from the database with no session cache (TDD-identity-kernel-005 §Session Store). It signs with the key in `keys/signing`, mounted read-only with its password from `keys/vault`, and refuses to start without them ([Keys](#keys)) |
 | `caddy` | built from `caddy.Dockerfile`: Caddy 2.11.7 compiled from source with `golang.org/x/net` v0.60.0 on Go 1.27.2, overlaid on `caddy:2.11.7-alpine`, both bases pinned by digest | The TLS proxy, which keeps administration off the public internet. Built rather than pulled until a Caddy release carries the fixes for GO-2026-6603 to GO-2026-6613 (TDD-identity-kernel-005 §Images the Stack Runs) |
 | `realm-apply` | built from `realm-apply.Dockerfile`: `alpine:3.24` pinned by digest, with `git` | A one-shot job on every `up`: brings the realm to `realm/` and exits |
 
@@ -32,10 +34,20 @@ development server runbook (`docs/runbooks/dev-server.md`). This stack comes fir
 | `/admin/...` (console and REST API), `/realms/master/...` | `ADMIN_ALLOW_CIDRS` only; everyone else gets `404` |
 | management port `9000` (`/health/started`, `/health/live`, `/health/ready`, `/metrics`) | the container only: the healthcheck reads `/health/ready`; in production the orchestrator and monitoring reach it internally (TDD-005 1.5.0) |
 
-CI brings this exact stack up on every change and asserts two things:
+CI brings this exact stack up on every change and asserts:
 
+- The kernel refuses to start before the signing-key ceremony, and the ceremony refuses a witness
+  equal to the operator and a second key.
+- The realm signs with the ceremony's key: the key set and a token carry the `kid` its record names.
 - The public issuer is served through the proxy.
 - Administration answers `404` to an address outside the allowlist.
+- The restore drill: `backup.sh`, the volume deleted, `restore.sh`, and the restored realm equal to the
+  source and signing with the same `kid` ([Backups](#backups)).
+
+`compose.ci.yaml`, which CI layers over `compose.yaml` and a server never does, adds a one-shot
+`signing-keystore` service. It makes a throwaway keystore with the ceremony's generator when `keys/`
+holds none, so a stack another repository's CI starts from this checkout signs as a server does. A
+keystore already there, such as the ceremony's, is left as it is.
 
 ### Against the deployment standard
 
@@ -75,13 +87,19 @@ with the account that will own the tunnel (see [Behind a dev tunnel instead of a
 
 ## First start
 
-On the server:
+On the server, with the operator and the witness of the signing-key ceremony both present
+([Signing-key ceremony](../../docs/runbooks/signing-key-ceremony.md)):
 
 ```sh
-git clone https://github.com/anshacerbia2/identity-kernel && cd identity-kernel/deploy/dev
-cp .env.example .env        # fill it in: hostname, your IP, two generated secrets
+git clone https://github.com/anshacerbia2/identity-kernel && cd identity-kernel
+cp deploy/dev/.env.example deploy/dev/.env   # fill it in: hostname, your IP, two generated secrets
+# The realm signing key: the keystore in deploy/dev/keys/signing, its password in deploy/dev/keys/vault,
+# its certificate and the ceremony record beside them. Before the first up: without it the kernel
+# refuses to start.
+scripts/signing-key-ceremony.sh deploy/dev/keys "<operator>" "<witness>" "<change ticket>"
+cd deploy/dev
 docker compose up -d
-docker compose logs realm-apply   # the plan it applied, ending in "applied revision ..."
+docker compose logs realm-apply   # the plan it applied, ending in "applied revision ... signs with the keystore's key"
 ./new-client-key.sh realm-apply   # the service account's key pair, in ./keys; the private key stays here
 ./create-apply-client.sh          # the service account, authenticating with that key; then set
                                   # KEYCLOAK_ADMIN_CLIENT_ID in .env and docker compose up -d again
@@ -118,7 +136,7 @@ Tunnel mode therefore splits the two audiences across two loopback ports:
 | `8080` | Caddy → Keycloak, with `/admin` and `/realms/master` answering `404` to everyone | **anonymous**: your local apps and anything else use this |
 | `8081` | Keycloak directly, including the Admin Console | **owner only**: reached as `localhost:8081` through `devtunnel connect` |
 
-Start the stack on the server:
+Start the stack on the server, after the signing-key ceremony of [First start](#first-start):
 
 ```sh
 cd identity-kernel/deploy/dev
@@ -305,6 +323,27 @@ Nothing is run here for the wiring.
 
 ## Keys
 
+**The realm signing key** is made once, by the signing-key ceremony, before the first `up`
+([First start](#first-start), ADR-IAM-002 §5.3, TDD-identity-kernel-002 1.2.0 §Custody as Built):
+
+| File | Holds | Owned by | Read by |
+| :-- | :-- | :-- | :-- |
+| `keys/signing/realm-signing.p12` | the PKCS#12 keystore: one RSA-3072 key pair, alias `realm-signing` | 1000, the kernel's user, mode 0400, in a directory of mode 0500 | the kernel, mounted read-only at `/opt/keycloak/data/scnehaux` |
+| `keys/vault/scnehaux_realm-signing-password` | its password, for Keycloak's file vault | the same | the kernel, mounted read-only at `/opt/keycloak/vault` |
+| `keys/realm-signing.crt` | its certificate, the public half | root, mode 0644 | `realm-apply`, which creates the provider with its `kid` and checks the realm signs with it |
+| `keys/realm-signing.ceremony.json` | the ceremony record: operator, witness, reason, times, `kid`. No secret | root, mode 0644 | the change ticket it is attached to |
+
+- The realm's provider reads both passwords as `${vault.realm-signing-password}`, never as literal
+  configuration. Its `kid` is the RFC 7638 thumbprint of the key, so it is the same after every
+  restart and every restore.
+- The image's entrypoint refuses to start the kernel without the keystore and its password, or when
+  they do not open together, so it can never sign with a key it generated. `docker compose logs
+  keycloak` says which ([Custody outage](../../docs/runbooks/custody-outage.md)).
+- **Neither file is ever copied**, to a backup or anywhere else ([Backups](#backups)). A lost keystore
+  is replaced by building the server from zero, with a new ceremony and a new `kid`.
+- A second key is a rotation, which is not built. The ceremony refuses a keys directory that holds
+  one.
+
 **No client here holds a client secret** (`STD-IAM-001 §3.2`). Every confidential client on this
 server authenticates with its own key by signed JWT. That covers realm-apply's account,
 identity-control's clients, and the Identity Experience BFF. Two scripts manage the keys, and both
@@ -313,7 +352,7 @@ run `client-key` from the realm-apply image, so the host needs Docker only:
 | Script | Does |
 | :-- | :-- |
 | `./new-client-key.sh NAME [DIR] [OWNER]` | Makes `DIR/NAME.pem`, mode 0600 and owned by the container user that signs with it, and `DIR/NAME.jwk.json`, its public half. It never overwrites a key. |
-| `./set-client-key.sh REALM CLIENT JWK [JWK]` | Sets an existing client to authenticate with exactly those public keys, two during a rotation. It regenerates the client's old secret without printing it. |
+| `./set-client-key.sh REALM CLIENT JWK [JWK]` | Sets an existing client to authenticate with exactly those public keys. A second JWK is only for a rotation's overlap, the old and the new key of one registration, never two devices' keys: each device has a registration of its own (STD-GLB-009 rule 15). It regenerates the client's old secret without printing it. |
 
 `create-apply-client.sh` makes realm-apply's master-realm service account from
 `keys/realm-apply.jwk.json`, and refuses when the account exists.
@@ -349,40 +388,72 @@ change through identity-control (`POST /v1/registrations/{registration_id}/keys`
 
 ## Backups
 
-The database holds the realm, its users, their credentials and the realm's signing keys. Back it up
-daily to storage outside the Docker volume, and before every Keycloak upgrade. The dumps are made in
-the container, as the role `keycloak`, over its local socket, so no password is typed:
+The database holds the realm, its users, their credentials, its clients, and the signing key
+provider's configuration. Back it up daily to storage outside the Docker volume, and before every
+Keycloak upgrade, with `backup.sh` (STD-GLB-009 1.10.0 rule 9):
 
 ```sh
-cd identity-kernel/deploy/dev
-dir=/path/outside/docker/identity-kernel/$(date +%F)    # another disk; readable by the operator alone
-mkdir -p "$dir" && chmod 700 "$dir"
-docker compose exec -T postgres pg_dump -U keycloak -d keycloak -Fc > "$dir/keycloak.dump"
-docker compose exec -T postgres pg_dumpall -U keycloak --globals-only > "$dir/globals.sql"
-cp .env "$dir/"
-sudo cp -a keys "$dir/"    # the private keys belong to container users, mode 0600
+./backup.sh /mnt/imam-storage/scnehaux-backups/identity-kernel   # another disk; mode 700, the operator's
 ```
 
-The same dump, daily, from the operator's crontab (`%` is escaped in a crontab line):
+- It writes one set: `globals-<date>.sql`, the cluster's roles (`pg_dumpall --globals-only`), and
+  `keycloak-<date>.dump`, the database (`pg_dump --format=custom`), `<date>` the UTC date. It prints
+  both paths, roles first.
+- Each file is written as `<name>.partial`, with `umask 077`, and renamed only when complete. The dump
+  is verified first: `pg_restore --list` reads it back, and the roles file must create the role
+  `keycloak`.
+- **It keeps the newest 14 complete sets, by count,** and deletes older ones only after the new set is
+  in place. A failed or silent backup deletes nothing.
+- It connects in the container, as the role `keycloak`, over the local socket, so no password is
+  typed. The kernel keeps running.
+- **It never copies the signing keystore or its password.** They are files in `keys/signing` and
+  `keys/vault`, outside the database. NIST SP 800-57 gives the backup of a private signature key as
+  "No (in general)" (ADR-IAM-002 §5.3). The database holds the provider's configuration, whose
+  passwords are vault references, and no private key of the realm's signing key.
+
+The daily line, in the operator's crontab:
 
 ```text
-30 2 * * * cd /path/to/identity-kernel/deploy/dev && docker compose exec -T postgres pg_dump -U keycloak -d keycloak -Fc > /path/outside/docker/identity-kernel/keycloak-$(date +\%F).dump
+45 2 * * * /path/to/identity-kernel/deploy/dev/backup.sh /mnt/imam-storage/scnehaux-backups/identity-kernel >/dev/null
 ```
 
-The dumps hold password hashes, and the copies hold `.env` and the keys, so the backup directory is
-kept like `.env`: readable by the operator alone.
+Check it runs: the line is in `crontab -l`, `journalctl -u cron` shows today's run, and today's set is
+in the directory.
 
-**Restoring.** Put `.env` and `keys/` back first, then:
+`.env` and `keys/` are copied beside the sets by hand when they change, **without the keystore and its
+vault file**. `keys/` belongs to the containers' users:
 
 ```sh
-docker compose up -d postgres
-docker compose exec -T postgres psql -U keycloak -d postgres < "$dir/globals.sql"   # "role keycloak already exists" is expected
-docker compose exec -T postgres pg_restore -U keycloak -d keycloak --clean --if-exists < "$dir/keycloak.dump"
+dir=/mnt/imam-storage/scnehaux-backups/identity-kernel
+cp .env "$dir/env-$(date -u +%F)"
+sudo tar -C . --exclude=keys/signing --exclude=keys/vault -cf "$dir/keys-$(date -u +%F).tar" keys
+sudo chown "$(id -u):$(id -g)" "$dir/keys-$(date -u +%F).tar"
+```
+
+The sets hold role password hashes and the copies hold client keys, so the directory is kept like
+`.env`: readable by the operator alone.
+
+**Restoring** ([Database restore](../../docs/runbooks/database-restore.md)). Put `.env` and `keys/` back
+first; the keystore stays where it is. Then, on an empty volume:
+
+```sh
+docker compose down --volumes        # only when the database is to be replaced; see Never do
+./restore.sh <dir>/globals-<date>.sql <dir>/keycloak-<date>.dump
 docker compose up -d --build --wait
 ```
 
+`restore.sh` starts `postgres` alone, refuses a `keycloak` database that holds anything, applies the
+roles, then restores the database with `pg_restore --create --exit-on-error`. The restored realm loads
+the same keystore, under the same `kid`. `deploy-dev` drills it on every change and weekly
+(`scripts/dev-restore-drill.sh`, STD-GLB-002 §Restore Evidence) and keeps the `restore-evidence`
+artifact.
+
+**No copy leaves the host.** A copy off the host is required before production (STD-GLB-009 1.10.0
+rule 9). The development server is redeployed from zero, so it records the gap and accepts it.
+
 **`docker compose down -v` deletes the database.** It removes the named volumes `postgres`,
-`caddy-data` and `caddy-config`, and a backup made into a volume goes with them.
+`caddy-data` and `caddy-config`, and a backup made into a volume goes with them. It does not touch
+`keys/`.
 
 ## Never do
 
@@ -395,6 +466,10 @@ docker compose up -d --build --wait
 - **Pass `-f` when `.env` sets `COMPOSE_FILE`.** The command then runs without the local file.
 - **Rerun `new-client-key.sh` or `create-apply-client.sh` to replace something.** Both refuse when their
   output exists. Replacing a key is a rotation ([Keys](#keys)).
+- **Copy `keys/signing` or `keys/vault` anywhere**, a backup included. A copy of the keystore is a copy
+  that can sign; the key is never restored, only replaced from zero ([Keys](#keys)).
+- **Delete `keys/signing` or `keys/vault`.** The kernel stops signing, and the key cannot come back:
+  the server is rebuilt from zero with a new ceremony and a new `kid`.
 - **Change the realm in the Admin Console and expect it to stay.** The next `up` refuses it
   ([Changing the realm](#changing-the-realm)).
 
@@ -435,6 +510,9 @@ Five mistakes to avoid in tunnel mode:
 | Every endpoint answers `403` "HTTPS required" | The realm's `sslRequired` was set to `none` and Keycloak reached over plain HTTP | TLS in front of Keycloak; keep `external` ([Never do](#never-do)) |
 | The public issuer stops answering while `devtunnel host` still runs | The host lost its relay and failed its token refresh without exiting, so systemd sees it active | Restart the host service. A timer that requests the public discovery URL and restarts it catches this (runbook, step 1) |
 | `realm-apply` exits 2 and lists differences | Console drift | Revert it, or commit it and adopt it once ([Changing the realm](#changing-the-realm)) |
+| `keycloak` restarts and never turns healthy; its log says `refusing to start` | The signing keystore or its password is missing, unreadable, or the two do not belong together | [Custody outage](../../docs/runbooks/custody-outage.md). Before the first `up`, run the ceremony ([First start](#first-start)) |
+| `realm-apply` fails with `the signing key:` or `verifying the signing key:` | The keystore did not load, or the realm holds a `fallback-PS256` | [Custody outage](../../docs/runbooks/custody-outage.md) |
+| `backup.sh` exits non-zero | `postgres` is not running, or the dump did not read back | Nothing was deleted, and the previous sets are intact. Fix the cause and run it again |
 | Every apply is refused with "scnehaux.json must set eventsEnabled true", on a realm applied at an older revision | realm-apply parsed the recorded baseline by today's policy | Fixed in identity-kernel#58: `git pull && docker compose up -d --build` |
 | `docker compose up` fails building `caddy`, at `xcaddy build`, with a TLS or `proxy.golang.org` error | The network intercepts TLS to the Go module proxy | `GOPROXY=direct` in `.env`, then `docker compose up -d --build` again |
 | A build fails at `apk add` with "unable to select packages" for `zlib>=1.3.2-r1` | Alpine's index was unreachable, or no longer offers the fixed package | Retry once the mirror answers. The constraint is the floor CVE-2026-85091 needs, so it is never removed to make a build pass |

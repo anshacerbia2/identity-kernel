@@ -193,9 +193,16 @@ unused.
 
 ## Week 2 · Key custody and questions 4 through 7
 
-- Key ceremony rehearsed, sealed keystore in the secret manager
-- `kid` derived as the RFC 7638 thumbprint, asserted at startup
-- Startup refuses to serve when custody is unreachable
+- ✅ Key custody, phase one (TDD-identity-kernel-002 1.2.0 §Custody as Built, ADR-IAM-002 §5.3 amended
+  2026-10-20) — **the realm signs with a key the kernel loads from a keystore, in every environment**;
+  see below
+- ✅ Key ceremony rehearsed on the development path — `scripts/signing-key-ceremony.sh`, an operator
+  and a witness who is never the operator (STD-IAM-001 2.9.0 §3.10), and its runbook. **Not yet:**
+  the keystore sealed in AWS Secrets Manager, which waits on a production environment; its
+  `SecretProviderClass` is written (`docs/production/`)
+- ✅ `kid` derived as the RFC 7638 thumbprint, set when the provider is created and checked by every
+  `realm-apply` run
+- ✅ Startup refuses to serve when custody is unreachable — the image's entrypoint, before Keycloak runs
 - Rotation through the five states of TDD-identity-kernel-002 1.1.0 (ADR-IAM-002 §5.2, NIST SP
   800-57): a staged key is published before it signs, and its private material is destroyed when it
   leaves the JWKS, every stored version of the sealed keystore included. No retention period
@@ -228,6 +235,8 @@ unused.
   claims the claim closure prohibits into both tokens; see below
 - ✅ Consents, asked by identity-control — **listed and withdrawn through the Admin API; a withdrawal
   ends the refresh tokens issued on it**; the consent page needs a scope shown on it; see below
+- ✅ Consent follows the audience class (STD-IAM-002 1.9.0 §3.6, TDD-identity-kernel-001 1.21.0) — the
+  scopes an external client releases are shown on the consent screen; see below
 - ✅ Client suspension and deletion, asked by identity-control — **a disabled or deleted client
   gets no new token and no refresh**; an access token issued before verifies offline until it
   expires; see below
@@ -534,7 +543,52 @@ required step held:
 
 What identity-control's slice 3b still waits for is not the kernel: a registered client has to
 require consent, with a scope shown on the consent screen. That is a decision about which clients
-ask a person's consent, and no client here does yet.
+ask a person's consent, and no client here does yet. **Decided (2026-10-20):** STD-IAM-002 1.9.0
+§3.6 and ADR-IAM-003 §5.11 tie it to the audience class, below.
+
+### Consent follows the audience class, for STD-IAM-002 §3.6
+
+An `external` registration requires consent and every scope it releases is shown; no other class asks.
+identity-control sets the client's consent from its class (TDD-identity-control-003). The kernel marks
+the scopes (TDD-identity-kernel-001 1.21.0 §Consent):
+
+- `realm/client-scopes.json` marks `scnehaux-external` and declares Keycloak's `basic` and `acr`, the
+  realm defaults every client holds, with their mappers by name, each "display on consent screen" with
+  a text from the theme's bundles in both locales (TDD-identity-kernel-004 1.9.0).
+- `compat/consent_scopes_test.go`: an external client shows the consent page on its first sign-in, the
+  page lists the three scopes by their texts, and the consent records them; a first-party client
+  never shows it.
+- The `browser` job scans the consent page with axe-core in both locales and schemes, answers it from
+  the keyboard, and requires that a second sign-in and every first-party sign-in do not ask.
+
+### Key custody, phase one, for ADR-IAM-002 §5.3
+
+Answered TDD-identity-kernel-002 Open Question 1: AWS Secrets Manager under a customer-managed KMS
+key, one per environment and realm, delivered by the AWS Secrets and Configuration Provider. Built:
+
+- `realm/signing-key.json` declares a `java-keystore` provider, PS256, reading `realm-signing.p12`
+  with both passwords as `${vault.realm-signing-password}`. `realmdef` refuses a literal password, a
+  generated key, and a `kid` of its own.
+- The image is built with the file vault, and its entrypoint (`image/start.sh`) refuses to start a
+  kernel whose keystore and password are not mounted or do not open together. Keycloak would otherwise
+  generate `fallback-PS256` in-process.
+- `realm-apply -signing-certificate` creates the provider with the certificate's thumbprint as its
+  `kid`; Keycloak would otherwise give it a random one. Every run checks the realm signs with that key
+  alone.
+- `scripts/signing-key-ceremony.sh` makes the keystore in the pinned image with no network, refuses a
+  witness equal to the operator and a second key, and writes the record for the change ticket.
+- `deploy/dev/compose.yaml` mounts `keys/signing` and `keys/vault` read-only. `compose.ci.yaml` gives a
+  test run's kernel a throwaway keystore made by the same generator, so the stacks identity-control,
+  organization-control and organization-experience start from this checkout keep working unchanged.
+- Proved: `compat/signing_key_test.go` (the key, its `kid` and two tokens, against a throwaway
+  keystore), the `contract` job's start without a keystore, and `deploy-dev`, which runs the ceremony
+  and checks the key set and a token against its record.
+- Runbooks: [signing-key ceremony](docs/runbooks/signing-key-ceremony.md),
+  [custody outage](docs/runbooks/custody-outage.md), [database restore](docs/runbooks/database-restore.md).
+
+**Not yet:** rotation through the five states, which the ceremony refuses until it is built; the
+production delivery, which waits on a production environment; replica consistency, which needs a
+second replica.
 
 ### Authentication levels, for ADR-IAM-004
 
@@ -815,7 +869,7 @@ upgrade the previous release's database, keeps the realm in sync, starts the pre
 the migrated database to find the rollback boundary, and writes the release record. The four paths
 are now all asserted (TDD-005 1.3.0): federated auto-creation is closed by a first login flow that
 denies (TDD-001 1.15.0), and only service accounts manage users. **Not yet:** the signing key rotation
-rehearsal, which waits on Week 2's custody.
+rehearsal, which waits on rotation; custody itself is built (Week 2).
 
 ✅ The login theme, first part (TDD-004 1.1.0, ADR-IAM-001 §5.7). `scnehaux` names `keycloak.v2` as its
 parent and overrides no template: the kernel ships both locales, and the theme changes one message, so
@@ -888,12 +942,24 @@ is applied with `cmd/realm-apply`. Two access modes, and CI brings up both:
 
 It is development only:
 
-- `realm-apply` refuses any environment that serves real tokens, because the signing key is generated
-  in-process.
+- `realm-apply` refuses any environment that serves real tokens. The key is loaded from a keystore as
+  in production, but the keystore's delivery from a secret manager and key rotation are not built.
 - The tunnel host is the issuer, so it is not the production issuer, and nothing may store a
   development `iss` as though it were.
 - Principals are created by `identity-control`, which runs beside it (identity-control's
   `deploy/dev/`), and never by hand in the Admin Console.
+
+✅ **Backups and the restore drill (STD-GLB-009 1.10.0 rule 9, STD-GLB-002 §Restore Evidence).**
+`deploy/dev/backup.sh` writes the roles and the database, verifies the dump, and keeps the newest 14
+complete sets by count, pruning only after a successful backup. `deploy/dev/restore.sh` restores into
+an empty volume, roles first, and stops on the first error. Neither touches the signing keystore or its
+password, which are never copied. `scripts/dev-restore-drill.sh` runs last in `deploy-dev`, on every
+change and weekly: it proves the retention rule, that the backup holds no signing material, that the
+restored database equals the source, and that the restored realm signs with the same `kid`, within the
+15-minute RTO of PAD-PLT-001 §6.2. **Not met:** the 1-minute RPO, which needs WAL archiving, and a copy
+off the host, required before production. The server's cron line becomes
+`45 2 * * * .../identity-kernel/deploy/dev/backup.sh /mnt/imam-storage/scnehaux-backups/identity-kernel`
+(`deploy/dev/README.md` §Backups).
 
 ## Sender constraint, the recorded gap
 
@@ -955,4 +1021,7 @@ key ceremony, console drift, failed upgrade, and consumer reporting an unknown `
 - ✅ Runbooks for console drift, failed upgrade and an unknown `kid`, in
   [`docs/runbooks/`](docs/runbooks/README.md). They are written for the development server, the one
   server there is, and each names what production still needs.
-- The key ceremony runbook waits on custody (Week 2).
+- ✅ The key ceremony runbook, [`docs/runbooks/signing-key-ceremony.md`](docs/runbooks/signing-key-ceremony.md),
+  with the custody-outage and database-restore runbooks TDD-identity-kernel-002 adds. Its production
+  section has never run.
+- Key rotation and emergency rotation, rehearsed in staging, wait on rotation (Week 2).

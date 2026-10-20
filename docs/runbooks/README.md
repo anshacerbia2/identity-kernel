@@ -1,16 +1,19 @@
 # Identity Kernel runbooks
 
-Version 1.0.0. Owner: Identity Platform Team. Last reviewed 2026-10-07.
+Version 1.1.0. Owner: Identity Platform Team. Last reviewed 2026-10-20.
 
-The production gate (ROADMAP §Gates) requires four runbooks. Three are here. The key ceremony
-runbook waits on key custody (TDD-identity-kernel-002), which is not built yet.
+The production gate (ROADMAP §Gates) requires four runbooks: console drift, failed upgrade, an unknown
+`kid` and the key ceremony. All four are here (1.1.0), with two that TDD-identity-kernel-002 adds: a
+custody outage at startup, and the database restore that keeps the key's `kid`.
 
 | Runbook | Answers |
 | :-- | :-- |
 | [Console drift](console-drift.md) | `realm-apply` exits 2 and prints `DRIFT`, or refuses an unmanaged realm |
 | [Failed upgrade](failed-upgrade.md) | a candidate Keycloak release fails `compat`, or a server does not come back after an upgrade |
 | [Consumer reports an unknown `kid`](unknown-kid.md) | a protected resource rejects tokens with `verify: signing key is unknown` |
-| Key ceremony | Not written. It waits on key custody (ROADMAP Week 2) |
+| [Signing-key ceremony](signing-key-ceremony.md) | the realm signing key is made: an operator, a witness, and a reviewer (STD-IAM-001 §3.10) |
+| [Custody outage at startup](custody-outage.md) | the kernel refuses to start without its keystore, or `realm-apply` refuses a realm that does not sign with it |
+| [Database restore](database-restore.md) | the kernel's database is restored from `backup.sh`'s set, and the realm keeps its `kid` |
 
 ## Why these exist
 
@@ -24,10 +27,11 @@ runbook waits on key custody (TDD-identity-kernel-002), which is not built yet.
 ## Where they apply today
 
 No production kernel exists. `realm-apply` refuses every environment but `local`, `ci` and
-`development`, because the signing key is generated in-process (`internal/realmdef/definition.go`,
-`ParseEnvironment`). So each runbook is written for the one long-lived server there is, the
-development server in [`deploy/dev/`](../../deploy/dev/README.md), and names what changes for
-production under "Gaps".
+`development`, because a shared environment also needs the keystore delivered from its secret manager
+and key rotation, and neither is built (`internal/realmdef/definition.go`, `ParseEnvironment`). So each
+runbook is written for the one long-lived server there is, the development server in
+[`deploy/dev/`](../../deploy/dev/README.md), and names what changes for production under "Gaps". The
+ceremony runbook also gives its production steps, which have never run.
 
 ## Conventions
 

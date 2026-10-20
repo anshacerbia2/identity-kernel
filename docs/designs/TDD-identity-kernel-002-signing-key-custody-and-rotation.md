@@ -3,12 +3,12 @@ doc_meta:
   id: TDD-identity-kernel-002
   title: Signing Key Custody, Identity, and Rotation
   owner: Identity Platform Team
-  version: 1.1.0
+  version: 1.2.0
   status: approved
   classification: restricted
   review_cycle_days: 90
   created_date: 2026-08-11
-  last_reviewed: 2026-10-01
+  last_reviewed: 2026-10-20
   parent_sad: SAD-001
 ---
 
@@ -107,6 +107,120 @@ Phase one is chosen because it satisfies every normative rule at negligible cost
 because the property the rules protect — stability and identical material across
 replicas — is a distribution property rather than a hardware property. Phase two is
 recorded now so the migration is planned rather than discovered.
+
+**Every environment is phase one today (1.2.0).** Keycloak 26.7.5 signs with a key pair it
+holds, so the private key is in the kernel's memory while it signs, in production too, which
+NIST SP 800-57 allows "provided that proper protection is afforded" (ADR-IAM-002 §5.3 [R6]).
+Phase two needs a kernel integration the pinned release does not document, and is decided in its
+own ADR (ADR-IAM-002 §8, Alternative F).
+
+### Custody as Built (1.2.0)
+
+Open Question 1 is answered by ADR-IAM-002 §5.3, amended 2026-10-20. The approved secret manager is
+**AWS Secrets Manager, under a customer-managed AWS KMS key**, one key and one secret per
+environment and realm. The secret holds the sealed keystore, and the kernel loads it as a file.
+
+| Item | In the kernel container | Development server | Production |
+| :-- | :-- | :-- | :-- |
+| Keystore, PKCS#12, one RSA-3072 pair, alias `realm-signing` | `/opt/keycloak/data/scnehaux/realm-signing.p12`, read-only | `deploy/dev/keys/signing/realm-signing.p12`, owned by the kernel's user (1000), mode 0400, in a directory of mode 0500 | a Secrets Manager binary secret, mounted by the AWS Secrets and Configuration Provider (ASCP) |
+| Its password | `/opt/keycloak/vault/scnehaux_realm-signing-password`, read-only | `deploy/dev/keys/vault/`, same owner and modes | a second secret, mounted by the ASCP into the vault directory |
+| Its certificate, the public half | not mounted | `deploy/dev/keys/realm-signing.crt`, mode 0644, read by `realm-apply` | kept with the ceremony record |
+
+- **The provider is `java-keystore`** (`realm/signing-key.json`). The Server Administration Guide:
+  "The keystore should be located inside a folder named like the realm name inside the main keystores
+  directory (by default data directory under Keycloak's installation folder)" [R1]. Its type is
+  PKCS12, one of "JKS, PKCS12 or BCFKS" [R1].
+- **Both passwords are vault references,** `${vault.realm-signing-password}`, never literal realm
+  configuration. Each "can refer a value from an external vault" [R1]. The image is built with the
+  file vault, a build option: "For enabling the file-based vault you need to build Keycloak first
+  using the following build option" [R2]. The realm and the secret's name give the file's name,
+  `scnehaux_realm-signing-password` [R2]. One entry serves both fields: keytool sets "the key
+  password ... to the same password as the keystore password" when none is given [R3], and the
+  generator gives none. `realmdef` refuses a literal password, a provider other than
+  `java-keystore`, and an algorithm other than `PS256`.
+- **The `kid` is rendered at creation, from the certificate.** The pinned release gives a
+  `java-keystore` provider created without a `kid` a random identifier
+  (`JavaKeystoreKeyProviderFactory.validateConfiguration`, which puts `KeycloakModelUtils.generateId()`
+  in the configuration) [R4]. That identifier is unrelated to the key, which §Key Identity forbids.
+  So `realm-apply -signing-certificate` reads the keystore's certificate, computes the RFC 7638
+  thumbprint, and creates the provider with it. Keycloak leaves `kid` out of every representation it
+  returns, because it is not one of the provider's declared properties (`StripSecretsUtils`), and an
+  update skips it for the same reason (`RepresentationToModel.updateComponent`) [R4]. So the `kid` is
+  never part of the definition or its comparison, and no update can rebind it.
+- **Every run checks the key as it signs** (`realmdef.VerifySigningKey`). The declared provider
+  serves exactly one key: an active RSA `PS256` key of at least 3072 bits, the realm's active
+  `PS256` key, with a `kid` equal to its own thumbprint, and, with the certificate given, equal to
+  the certificate's. No other `PS256` key may exist. An apply that fails the check records nothing.
+  This is §Startup's thumbprint assertion, made against the live realm.
+- **Keycloak would otherwise fall back silently.** When no active `PS256` key loads, the next token
+  makes the pinned release create a `fallback-PS256` provider, a key it generates in-process and
+  stores in its database (`DefaultKeyManager.getActiveKey`) [R4]. STD-IAM-001 §3.5 prohibits exactly
+  that. The start check below keeps a kernel without custody from starting, and `VerifySigningKey`
+  refuses a realm that holds a fallback key.
+- **The keystore is never copied to a backup** (STD-GLB-009 1.10.0 rule 9). NIST SP 800-57 gives the
+  backup of a private signature key as "No (in general); support for non-repudiation would be in
+  question" (ADR-IAM-002 [R6]). `deploy/dev/backup.sh` reads the database alone, which holds the
+  provider's configuration and no private material, and the restore drill proves it
+  (§Testing Strategy). A lost keystore is replaced by a new ceremony and a new `kid`, never restored.
+- **Production delivery is documented, not deployed.** [`docs/production/realm-signing-secret-provider-class.yaml`](../production/realm-signing-secret-provider-class.yaml)
+  holds the two `SecretProviderClass` objects the kernel's pods mount. AWS: "To determine which
+  secrets the ASCP mounts in Amazon EKS as files on the filesystem, you create a SecretProviderClass
+  YAML file" [R5]. The keystore is a binary secret, which the ASCP writes as its bytes: the provider
+  takes "either secret string or secret binary" [R6]. A secret value is at most 65,536 bytes
+  (`--secret-binary`, "max 65536") [R7]; the keystore is about 3.5 KB. No CI job calls AWS. The
+  artifact is reviewed with this design, and deployed when a production environment exists
+  (STD-GLB-009 rule 12 keeps `deploy/` to environments that exist).
+
+### Startup as Built (1.2.0)
+
+`image/start.sh` is the image's entrypoint. Before a `start` or `start-dev`, it checks that the
+keystore and its password are mounted and readable, and that the keystore opens with that password
+and holds the entry `realm-signing` (`keytool -list`). On any failure it prints why, names the
+custody-outage runbook, and exits 1. Keycloak never runs, so it can never reach the fallback above.
+Any other command, such as `kc.sh show-config`, runs unchecked.
+
+- **What it cannot see:** a keystore that opens, but that the realm's provider does not name. That
+  is what `VerifySigningKey` checks on every `realm-apply` run.
+- **Development server:** `deploy/dev/compose.yaml` mounts `keys/signing` and `keys/vault`
+  read-only. Without them the kernel restarts, refusing each time, and `docker compose logs keycloak`
+  says why.
+- **Production:** the ASCP mounts both. The Secrets Store CSI Driver's troubleshooting guide starts
+  from the case where "the pod fails to start because of the inline volume mount", with a
+  `FailedMount` event [R8]. The entrypoint's check is the second line, for a mount that succeeded
+  with the wrong content.
+- **CI:** every `compat` job and every stack another repository's CI starts from this checkout makes
+  a throwaway keystore with the ceremony's own generator. ADR-IAM-002 §5.3: "A throwaway kernel, such
+  as a test run's, may sign with a key it generated itself". `deploy/dev/compose.ci.yaml` does it
+  only when `./keys` holds none, so this repository's `deploy-dev`, which runs the ceremony first,
+  signs with the ceremony's key.
+
+### Key Ceremony (1.2.0)
+
+The ceremony that generates a key follows STD-IAM-001 2.9.0 §3.10. The runbook,
+[`docs/runbooks/signing-key-ceremony.md`](../runbooks/signing-key-ceremony.md), is its script, and
+`scripts/signing-key-ceremony.sh` is the step that makes the key.
+
+| Role | Who | What the run checks or records |
+| :-- | :-- | :-- |
+| Operator | a named member of the Identity Platform Team with the ceremony role | named in the record |
+| Witness | a second named holder of the role | named in the record; the script refuses a witness equal to the operator, compared case-folded and trimmed |
+| Reviewer | a named member of Security or the Architecture Authority, neither of the two | reviews the record afterwards, before the realm serves anyone else |
+
+- The key is generated once, by the JDK that will read it: `keytool -genkeypair` in the pinned
+  upstream image, as root, with `--network none` (`scripts/signing-keystore.sh`).
+- The script refuses a keys directory that already holds a keystore. A second key in a realm is a
+  rotation (§Rotation), which is not built.
+- It writes the record, `realm-signing.ceremony.json`: operator, witness, reason, times, the
+  generator's digest and the `kid`. It holds no secret. The operator attaches it to the change ticket
+  the reason names (STD-IAM-001 §3.10: "kept with the change ticket ... Never in chat"). Names are
+  given in the run, on the server, never in this public repository.
+- In production the operator then seals the keystore and its password into the environment's two
+  secrets, under the environment's customer-managed KMS key, and destroys the working copy. The
+  runbook gives the commands. They are not run by any CI job.
+
+Who holds the ceremony role and who reviews are the owner's to name (STD-IAM-001 §3.10, `OWNER
+DECISION REQUIRED`). They are named in identity-control's `docs/runbooks/bootstrap-ceremony.md`, the
+one runbook section both ceremonies use.
 
 ### Key Identity
 
@@ -278,7 +392,10 @@ signed by that key as valid.
 
 ### Separation of Duties
 
-- Key generation requires two operators; neither alone can complete a ceremony.
+- Key generation requires two people, an operator and a witness who is never the operator
+  (STD-IAM-001 §3.10); neither alone can complete a ceremony. As built (1.2.0),
+  `scripts/signing-key-ceremony.sh` refuses a witness equal to the operator and records both, and
+  a third person, the reviewer, reviews the record (§Key Ceremony).
 - The operator who generates a key does not approve its activation.
 - Retiring or revoking a key, which destroys its private material, requires an approval
   distinct from the operator performing it.
@@ -292,7 +409,8 @@ No individual can generate, activate, and destroy a key alone, which is what EAD
 
 | Setting | Value | Reason |
 | :-- | :-- | :-- |
-| Key source | Approved secret manager reference | Custody is external to the artifact |
+| Key source | AWS Secrets Manager, customer-managed KMS key, one secret per environment and realm, mounted by the ASCP; on the development server, `deploy/dev/keys/signing` | Custody is external to the artifact (ADR-IAM-002 §5.3) |
+| Key provider | `java-keystore`, PKCS#12, alias `realm-signing`, passwords `${vault.realm-signing-password}` | §Custody as Built |
 | Signing algorithm | `PS256` | STD-IAM-002 §3.2.2 baseline; candidate release must prove support |
 | RSA modulus | at least 3072 bits | Algorithm profile minimum |
 | Key generation in process | Prohibited, including as fallback | STD-IAM-001 §3.5 |
@@ -301,12 +419,25 @@ No individual can generate, activate, and destroy a key alone, which is what EAD
 | Rotation cadence | 30 days | Bounds the issuance window a single key covers |
 | Retirement window | 7 days, floor computed from live token classes | Verification continuity |
 | JWKS cache guidance to consumers | 10 minutes | Feeds the retirement floor |
-| Startup on custody failure | Exit non-zero | No silent ephemeral fallback |
+| Startup on custody failure | Exit non-zero, from the image's entrypoint before Keycloak runs | No silent ephemeral fallback |
 
 No key material appears in configuration, in an image, in a realm export, in source
 control, in a log, or in an event.
 
 ## Testing Strategy
+
+**As built (1.2.0).** `compat/signing_key_test.go` runs against a throwaway keystore made by the
+ceremony's generator and asserts the first four lines of §Identity and Custody, the absence of any
+other `PS256` key, and that an access token and an ID token carry the keystore's `kid` and verify with
+the certificate's key alone. The `contract` job also starts the image without a keystore and requires
+the refusal. `deploy-dev` proves the server's path: the kernel refuses to start before the ceremony,
+the ceremony refuses a witness equal to the operator and a second key, and after it the key set and a
+token carry the `kid` the record names. Its restore drill (`scripts/dev-restore-drill.sh`) proves
+§Compromise and Recovery's first restore line: the restored realm signs with the same `kid`, and the
+backup holds neither the keystore, nor its password, nor a private key. Unit tests in
+`internal/realmdef/signingkey_test.go` cover the `kid` derivation and each refusal of
+`VerifySigningKey`. Not built: replica consistency, which needs more than one replica, and everything
+under §Rotation and §Separation of Duties beyond the ceremony.
 
 ### Identity and Custody
 
@@ -423,14 +554,33 @@ exercised.
 | Enterprise constraint | EAD-005 §6.8 — recovery is proven by exercise, not by existence |
 | Consumed by | Every protected resource performing local verification |
 | Related design | `TDD-identity-kernel-001` — realm topology, issuer identity, claim projection |
+| Governed by | ADR-IAM-002 §5.3, amended 2026-10-20 — AWS Secrets Manager and KMS, `java-keystore` with vault passwords, no development backup |
+| Conforms to | STD-IAM-001 2.9.0 §3.10 — the ceremony: operator, witness, independent review |
+| Conforms to | STD-GLB-009 1.10.0 rule 9 — the keystore and its vault files are never copied |
 
 ### Open Questions
 
-1. Which approved secret manager holds the sealed keystore in each environment. The
-   enterprise direction is a managed capability and the adopted cloud provider offers
-   one; the specific service and its access model are recorded once the environment
-   baseline is fixed.
+1. ~~Which approved secret manager holds the sealed keystore in each environment.~~ Answered
+   by ADR-IAM-002 §5.3, amended 2026-10-20 (1.2.0): AWS Secrets Manager under a customer-managed
+   AWS KMS key, one per environment and realm, delivered by the ASCP as a file the `java-keystore`
+   provider loads, with both passwords from the file vault. The development server keeps the
+   keystore in `deploy/dev/keys/signing` and never backs it up (§Custody as Built).
 2. ~~Whether the evidence retention period for purged key material is set by security
    policy or by a regulatory obligation.~~ Answered by ADR-IAM-002 §5.2: private material
    has no retention period. It is destroyed when the key leaves JWKS, and the evidence kept
    is the public key and the record, which NIST SP 800-57 Part 1 permits.
+
+## References
+
+Accessed 2026-10-20. Each quote was read on the page or in the source file named.
+
+| # | Source |
+| :-- | :-- |
+| R1 | Keycloak, *Server Administration Guide* 26.7.5, "Loading keys from a Java Keystore", <https://www.keycloak.org/docs/26.7.5/server_admin/index.html>: "The keystore should be located inside a folder named like the realm name inside the main keystores directory (by default data directory under Keycloak's installation folder)"; "Enter the Keystore Password. The option can refer a value from an external vault."; "Enter a value for Keystore Type (JKS, PKCS12 or BCFKS)."; "Enter the Key Password. The option can refer a value from an external vault." |
+| R2 | Keycloak, *Using a vault*, <https://www.keycloak.org/server/vault>: "For enabling the file-based vault you need to build Keycloak first using the following build option"; the file is named `${vault.<realmname>_<secretname>}`, and "To process the secret correctly, you double all underscores in the <secretname>"; "The file-based vault implementation is especially useful for Kubernetes/OpenShift secrets." |
+| R3 | Oracle, *The keytool Command*, JDK 21, <https://docs.oracle.com/en/java/javase/21/docs/specs/man/keytool.html>: for `-keypass`, "If you press the Return key at the prompt, then the key password is set to the same password as the keystore password"; "file: Retrieve the password from the file named argument"; "In JDK 9 and later, the default keystore implementation is PKCS12." |
+| R4 | Keycloak 26.7.5 source, <https://github.com/keycloak/keycloak/tree/26.7.5>: `services/.../keys/JavaKeystoreKeyProviderFactory.java`, `validateConfiguration`: `if (kid == null) { kid = KeycloakModelUtils.generateId(); model.put(KID_KEY, kid); }`; `server-spi-private/.../models/utils/StripSecretsUtils.java`, `stripComponentConfigMap`, which removes every configuration key that is not a declared property; `RepresentationToModel.updateComponent`, which skips such a key (`if (!internal && !providerConfiguration.containsKey(k)) { continue; }`); `services/.../keys/DefaultKeyManager.java`, `getActiveKey`, which on no active key creates fallback keys and logs "No keys found for realm={0} and algorithm={1} for use={2}. Generating keys." |
+| R5 | AWS, *Use AWS Secrets and Configuration Provider CSI with IAM Roles for Service Accounts (IRSA)*, <https://docs.aws.amazon.com/secretsmanager/latest/userguide/integrating_csi_driver.html>: "To determine which secrets the ASCP mounts in Amazon EKS as files on the filesystem, you create a SecretProviderClass YAML file"; and *AWS Secrets and Configuration Provider code examples*, <https://docs.aws.amazon.com/secretsmanager/latest/userguide/ascp-examples.html>: `objectAlias`, "The file name of the secret in the Amazon EKS Pod"; `filePermission`, "If you don't specify this field it will default to "0644"". |
+| R6 | AWS, `secrets-store-csi-driver-provider-aws`, `provider/secrets_manager_provider.go` at a8f9f58, <https://github.com/aws/secrets-store-csi-driver-provider-aws/blob/a8f9f58f9dc951766134cc60a04c00b2c1a67a6a/provider/secrets_manager_provider.go>: "// Use either secret string or secret binary.", then `sValue = rsp.SecretBinary` when the secret has no string. |
+| R7 | AWS CLI, `secretsmanager create-secret`, <https://docs.aws.amazon.com/cli/latest/reference/secretsmanager/create-secret.html>: `--secret-binary`, "We recommend that you store your binary data in a file and then pass the contents of the file as a parameter", "Constraints: min 1, max 65536"; `--kms-key-id`, "If you don't specify this value, then Secrets Manager uses the key aws/secretsmanager"; `fileb://` "will always be treated as binary and use the file contents directly". |
+| R8 | Kubernetes SIG Auth, *Secrets Store CSI Driver*, Troubleshooting, <https://secrets-store-csi-driver.sigs.k8s.io/troubleshooting.html>: "If the pod fails to start because of the inline volume mount", with the event "MountVolume.SetUp failed for volume "secrets-store-inline"". |

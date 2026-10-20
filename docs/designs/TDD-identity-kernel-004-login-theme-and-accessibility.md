@@ -3,12 +3,12 @@ doc_meta:
   id: TDD-identity-kernel-004
   title: Hosted Login Theme, Accessibility, and Disclosure Discipline
   owner: Identity Platform Team
-  version: 1.8.0
+  version: 1.9.0
   status: approved
   classification: restricted
   review_cycle_days: 90
   created_date: 2026-08-11
-  last_reviewed: 2026-10-12
+  last_reviewed: 2026-10-20
   parent_sad: SAD-001
 ---
 
@@ -283,6 +283,12 @@ temporary or permanent lockout. `compat/theme_test.go` signs in with an unknown 
 password and a disabled account, in each locale, and requires the same status and message from all
 three.
 
+**The consent texts (1.9.0).** The consent page lists each scope an external client receives by the
+text its `consent.screen.text` names (TDD-identity-kernel-001 1.21.0 §Consent, STD-IAM-002 §3.6). The
+bundles carry the three keys in both locales, each saying what the client receives and nothing more:
+`consentScnehauxExternal`, `consentBasic` and `consentAcr`. A text names no account state and no
+claim the client does not receive.
+
 ## API / Interface
 
 The theme publishes no API. It consumes the Keycloak template contract, which is why
@@ -443,7 +449,10 @@ the light and the dark scheme. STD-GLB-FE-009 names axe-core for automated scans
 the login page, the failed sign-in, the one-time-code enrolment, the recovery codes, the one-time
 code, the authenticator selection, the recovery-code sign-in, the passkey binding, the passkey
 sign-in and an error page. Since 1.7.0 they also include an account under lockout, the logout
-confirmation and the page after it. The one-time-code enrolment, the recovery codes and the passkey
+confirmation and the page after it. Since 1.9.0 they also include the consent page
+(`login-oauth-grant`), which an external client's first sign-in shows: the suite requires its three
+scope lines in each locale, answers "Yes" by Tab and Enter, requires that a second sign-in does not ask
+again, and that no first-party sign-in in the sequence ever showed it. The one-time-code enrolment, the recovery codes and the passkey
 binding are this realm's three required actions. Each scan is a row in the job summary. Each row also
 names what axe-core could not decide, with a node count, as needing review: that is left to the manual
 audit, never counted as passed. Each scan is photographed in both schemes. The pictures are the
