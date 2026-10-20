@@ -27,9 +27,7 @@ import (
 	"strconv"
 )
 
-// Environment names where a definition is applied. Only environments that may hold an in-process
-// generated signing key are accepted, because that is the only key this definition knows how to
-// provide.
+// Environment names where a definition is applied. Only the environments that exist are accepted.
 type Environment string
 
 const (
@@ -38,9 +36,11 @@ const (
 	Development Environment = "development"
 )
 
-// ParseEnvironment refuses every environment that would serve real tokens. TDD-identity-kernel-002
-// prohibits per-process key generation there, including as a fallback, and the key custody it
-// requires instead is not built; refusing here keeps the generated key from reaching one.
+// ParseEnvironment refuses every environment that would serve real tokens. The realm signs with a key
+// loaded from a keystore in every environment (TDD-identity-kernel-002 1.2.0 §Custody as Built), but a
+// shared environment also needs what is not built yet: the keystore delivered from AWS Secrets Manager
+// (docs/production/), and rotation through the five key states (§Rotation). Refusing here keeps a
+// realm that cannot rotate its key from serving anyone.
 func ParseEnvironment(name string) (Environment, error) {
 	switch environment := Environment(name); environment {
 	case Local, CI, Development:
@@ -48,14 +48,14 @@ func ParseEnvironment(name string) (Environment, error) {
 	case "":
 		return "", errors.New("an environment is required: local, ci, or development")
 	default:
-		return "", fmt.Errorf("environment %q is refused: this definition signs with a key Keycloak "+
-			"generates in-process, which TDD-identity-kernel-002 prohibits wherever real tokens are "+
-			"served, and the key custody it requires instead is not built", name)
+		return "", fmt.Errorf("environment %q is refused: a shared environment needs the keystore delivered "+
+			"from its secret manager and key rotation (TDD-identity-kernel-002 §Custody as Built, §Rotation), "+
+			"and neither is built", name)
 	}
 }
 
 // Files are the definition's sources under realm/, in the order they are applied.
-var Files = []string{"scnehaux.json", "signing-key.generated.json", "client-scopes.json", "user-profile.json"}
+var Files = []string{"scnehaux.json", "signing-key.json", "client-scopes.json", "user-profile.json"}
 
 // OptionalFiles are sources a definition may lack. A revision from before one was added is still a
 // definition, so the drift check can judge the live realm against it.
@@ -164,10 +164,10 @@ func decode(files map[string][]byte) (Definition, error) {
 		Attributes []map[string]any `json:"attributes"`
 	}
 	for name, into := range map[string]any{
-		"scnehaux.json":              &d.Realm,
-		"signing-key.generated.json": &d.Key,
-		"client-scopes.json":         &d.Scopes,
-		"user-profile.json":          &profile,
+		"scnehaux.json":      &d.Realm,
+		"signing-key.json":   &d.Key,
+		"client-scopes.json": &d.Scopes,
+		"user-profile.json":  &profile,
 	} {
 		content, ok := files[name]
 		if !ok {
@@ -215,6 +215,9 @@ func (d Definition) validate() error {
 	if err := d.validatePasswordPolicy(); err != nil {
 		return err
 	}
+	if err := d.validateSigningKey(); err != nil {
+		return err
+	}
 	return d.validateStructure()
 }
 
@@ -245,7 +248,7 @@ func (d Definition) validateStructure() error {
 		}
 	}
 	if name(d.Key) == "" || d.Key["providerId"] == nil {
-		return errors.New("signing-key.generated.json needs a name and a providerId")
+		return errors.New("signing-key.json needs a name and a providerId")
 	}
 	scopes := map[string]bool{}
 	for _, scope := range d.Scopes {

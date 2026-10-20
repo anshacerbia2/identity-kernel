@@ -9,8 +9,10 @@ package compat
 //
 // The consent page lists only client scopes marked "display on consent screen", and with none to
 // list, 26.7.5 shows no page and records no consent (AuthenticationManager
-// .getClientScopesToApproveOnConsentScreen). Every scope this realm declares is marked false, so the
-// test adds one of its own.
+// .getClientScopesToApproveOnConsentScreen). Since TDD-identity-kernel-001 1.21.0 the realm marks the
+// scopes an external registration releases, basic, acr and scnehaux-external (consent_scopes_test.go).
+// This test gives its client a scope of its own as well, so what it asks of withdrawal does not depend
+// on which scopes the realm marks.
 
 import (
 	"net/http"

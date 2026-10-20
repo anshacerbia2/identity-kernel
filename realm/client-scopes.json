@@ -239,9 +239,45 @@
     "protocol": "openid-connect",
     "attributes": {
       "include.in.token.scope": "true",
-      "display.on.consent.screen": "false"
+      "display.on.consent.screen": "true",
+      "consent.screen.text": "${consentScnehauxExternal}"
     },
     "protocolMappers": []
+  },
+  {
+    "name": "basic",
+    "protocol": "openid-connect",
+    "attributes": {
+      "display.on.consent.screen": "true",
+      "consent.screen.text": "${consentBasic}"
+    },
+    "protocolMappers": [
+      {
+        "name": "auth_time",
+        "protocol": "openid-connect",
+        "protocolMapper": "oidc-usersessionmodel-note-mapper"
+      },
+      {
+        "name": "sub",
+        "protocol": "openid-connect",
+        "protocolMapper": "oidc-sub-mapper"
+      }
+    ]
+  },
+  {
+    "name": "acr",
+    "protocol": "openid-connect",
+    "attributes": {
+      "display.on.consent.screen": "true",
+      "consent.screen.text": "${consentAcr}"
+    },
+    "protocolMappers": [
+      {
+        "name": "acr loa level",
+        "protocol": "openid-connect",
+        "protocolMapper": "oidc-acr-mapper"
+      }
+    ]
   },
   {
     "name": "scnehaux-profile",

@@ -12,6 +12,13 @@
 // client's secret without printing it, so a secret the client held before is useless even if the
 // authenticator is switched back in the console. install takes the administrator from the
 // environment, as realm-apply does.
+//
+//	client-key kid -certificate keys/realm-signing.crt
+//
+// kid prints the kid of the realm signing key a keystore's certificate carries: the RFC 7638
+// thumbprint of its public key (TDD-identity-kernel-002 §Key Identity). The signing-key ceremony
+// records it (scripts/signing-key-ceremony.sh), and realm-apply creates the provider with it. The tool
+// is here because it ships in the realm-apply image the ceremony already runs.
 package main
 
 import (
@@ -32,13 +39,14 @@ import (
 	"time"
 
 	"github.com/anshacerbia2/identity-kernel/internal/admin"
+	"github.com/anshacerbia2/identity-kernel/internal/realmdef"
 )
 
 func main() { os.Exit(run(os.Args[1:], os.Stdout, os.Stderr)) }
 
 func run(args []string, stdout, stderr io.Writer) int {
 	if len(args) == 0 {
-		fmt.Fprintln(stderr, "usage: client-key new -out FILE.pem | client-key install -url URL -realm REALM -client ID -jwk FILE [-jwk FILE]")
+		fmt.Fprintln(stderr, "usage: client-key new -out FILE.pem | client-key install -url URL -realm REALM -client ID -jwk FILE [-jwk FILE] | client-key kid -certificate FILE.crt")
 		return 1
 	}
 	var err error
@@ -47,6 +55,8 @@ func run(args []string, stdout, stderr io.Writer) int {
 		err = newKey(args[1:], stdout, stderr)
 	case "install":
 		err = install(args[1:], stdout, stderr)
+	case "kid":
+		err = signingKID(args[1:], stdout, stderr)
 	default:
 		err = fmt.Errorf("unknown command %q", args[0])
 	}
@@ -55,6 +65,25 @@ func run(args []string, stdout, stderr io.Writer) int {
 		return 1
 	}
 	return 0
+}
+
+func signingKID(args []string, stdout, stderr io.Writer) error {
+	flags := flag.NewFlagSet("client-key kid", flag.ContinueOnError)
+	flags.SetOutput(stderr)
+	certificate := flags.String("certificate", "", "the realm signing keystore's certificate, PEM")
+	if err := flags.Parse(args); err != nil {
+		return err
+	}
+	content, err := os.ReadFile(*certificate)
+	if err != nil {
+		return err
+	}
+	kid, err := realmdef.SigningKeyID(content)
+	if err != nil {
+		return err
+	}
+	fmt.Fprintln(stdout, kid)
+	return nil
 }
 
 func newKey(args []string, stdout, stderr io.Writer) error {

@@ -30,6 +30,10 @@ type Options struct {
 	// accepting a console change after committing it to realm/ -- and it is the one way to
 	// overwrite a change nobody recorded, so it is never a default.
 	Adopt bool
+	// SigningKeyID is the kid the signing key provider is created with: the RFC 7638 thumbprint of
+	// the keystore's certificate (SigningKeyID). Required when the provider is created, and checked
+	// against the key the realm serves after every apply.
+	SigningKeyID string
 }
 
 // Apply converges the live realm to the plan's definition, verifies that it did, and records the
@@ -79,7 +83,7 @@ func Apply(ctx context.Context, c *admin.Client, plan Plan, options Options) err
 		case KindRealm:
 			err = applyRealm(ctx, c, d, plan.live, change.Action)
 		case KindKey:
-			err = applyKey(ctx, c, base, d.Key, plan.live, change.Action)
+			err = applyKey(ctx, c, base, d.Key, plan.live, change.Action, options.SigningKeyID)
 		case KindScope:
 			err = applyScope(ctx, c, base, scopeNamed(d, change.Name), plan.live, change.Action)
 		case KindAttribute:
@@ -132,6 +136,11 @@ func Apply(ctx context.Context, c *admin.Client, plan Plan, options Options) err
 		}
 		return fmt.Errorf("%w:\n  %s", ErrNotConverged, strings.Join(diffs, "\n  "))
 	}
+	// The key is checked as it signs, not as it is configured: a keystore that did not load is a
+	// configuration in sync and a realm that signs with nothing, or with a fallback key.
+	if _, err := VerifySigningKey(ctx, c, d, options.SigningKeyID); err != nil {
+		return fmt.Errorf("verifying the signing key: %w", err)
+	}
 	return record(ctx, c, base, d, options.Revision)
 }
 
@@ -153,8 +162,15 @@ func applyRealm(ctx context.Context, c *admin.Client, d Definition, l *live, act
 	return err
 }
 
-func applyKey(ctx context.Context, c *admin.Client, base string, key map[string]any, l *live, action Action) error {
+func applyKey(ctx context.Context, c *admin.Client, base string, key map[string]any, l *live, action Action,
+	kid string) error {
 	if action == Create {
+		// Without a kid, Keycloak makes one up (signingkey.go), so the provider is never created
+		// without the certificate's thumbprint.
+		if kid == "" {
+			return errors.New("creating the signing key provider needs its kid: pass the keystore's certificate " +
+				"with -signing-certificate")
+		}
 		var realm struct {
 			ID string `json:"id"`
 		}
@@ -163,6 +179,12 @@ func applyKey(ctx context.Context, c *admin.Client, base string, key map[string]
 		}
 		body := overlay(nil, key)
 		body["parentId"] = realm.ID
+		config, _ := body["config"].(map[string]any)
+		if config == nil {
+			config = map[string]any{}
+		}
+		config["kid"] = []any{kid}
+		body["config"] = config
 		_, err := c.Call(ctx, http.MethodPost, base+"/components", body, http.StatusCreated)
 		return err
 	}

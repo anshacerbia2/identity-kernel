@@ -1,12 +1,16 @@
 {
-  "name": "rsa-ps256-3072",
-  "providerId": "rsa-generated",
+  "name": "realm-signing-ps256",
+  "providerId": "java-keystore",
   "providerType": "org.keycloak.keys.KeyProvider",
   "config": {
     "priority": ["200"],
-    "keySize": ["3072"],
     "algorithm": ["PS256"],
     "active": ["true"],
-    "enabled": ["true"]
+    "enabled": ["true"],
+    "keystore": ["realm-signing.p12"],
+    "keystoreType": ["PKCS12"],
+    "keyAlias": ["realm-signing"],
+    "keystorePassword": ["${vault.realm-signing-password}"],
+    "keyPassword": ["${vault.realm-signing-password}"]
   }
 }
