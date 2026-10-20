@@ -85,7 +85,7 @@ read_kernel() {
 	users="$(kc get users -r "$realm" --limit 1000 --fields username | jq -c '[.[].username] | sort')"
 	revision="$(kc get "realms/$realm" --fields attributes |
 		jq -r '.attributes["scnehaux.definition.revision"] // ""')"
-	active="$(kc get keys -r "$realm" --fields active | jq -c '.active')"
+	active="$(kc get keys -r "$realm" | jq -c '.active')"
 	jwks="$(curl -sfk "https://localhost/realms/$realm/protocol/openid-connect/certs" | jq -c '[.keys[].kid] | sort')"
 	jq -n -S --argjson users "$users" --arg revision "$revision" --argjson active "$active" --argjson jwks "$jwks" \
 		'{users: $users, revision: $revision, active: $active, jwks: $jwks}' > "$out/read-$1.json"

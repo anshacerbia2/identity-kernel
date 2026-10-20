@@ -44,9 +44,9 @@ jobs:
             echo "::error::deploy/dev/compose.yaml does not build the kernel image from $ref in image/keycloak.ref"
             exit 1
           fi
-          # The CI file's throwaway keystore is made by the same release (compose.ci.yaml).
-          if ! grep -Eq "^[[:space:]]*image:[[:space:]]*${ref}[[:space:]]*$" compose.ci.yaml; then
-            echo "::error::deploy/dev/compose.ci.yaml does not make its keystore with $ref in image/keycloak.ref"
+          # The CI file's throwaway keystore is made by the kernel image itself (compose.ci.yaml).
+          if ! grep -Eq "^[[:space:]]*image:[[:space:]]*scnehaux/identity-kernel:dev[[:space:]]*$" compose.ci.yaml; then
+            echo "::error::deploy/dev/compose.ci.yaml does not make its keystore with the kernel image"
             exit 1
           fi
 

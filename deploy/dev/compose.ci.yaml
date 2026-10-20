@@ -18,9 +18,11 @@ services:
         condition: service_completed_successfully
 
   signing-keystore:
-    # The pinned upstream Keycloak, the digest in image/keycloak.ref, which the ceremony runs too: the
-    # keystore is written by the JDK that reads it. CI fails when the digest differs from the ref.
-    image: quay.io/keycloak/keycloak@sha256:37dbaf6f0722c9ec246335f36e1ef8b2e6cb960f7c27e0d8c615121a3d475a85
+    # The kernel image keycloak builds, so the keystore is written by the JDK that reads it, and the
+    # image the scan checks is the one that runs (scripts/image-scan.sh scans every image a compose file
+    # names by digest). Built by keycloak's build, never pulled: pull_policy never.
+    image: scnehaux/identity-kernel:dev
+    pull_policy: never
     restart: "no"
     user: "0:0"
     network_mode: none
