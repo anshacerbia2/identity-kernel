@@ -3,7 +3,7 @@ doc_meta:
   id: TDD-identity-kernel-005
   title: Image Build, Digest Pinning, and Upgrade Compatibility
   owner: Identity Platform Team
-  version: 1.10.0
+  version: 1.11.0
   status: approved
   classification: restricted
   review_cycle_days: 90
@@ -725,6 +725,44 @@ Runbooks required before production: failed upgrade and rollback, restore-from-b
 for an irreversible release, console drift reconciliation, and emergency security
 release.
 
+### Backups and the Restore Drill (1.11.0)
+
+A release recorded as irreversible is rolled back by a restore (§Determining the Rollback Boundary),
+so the backup is part of the upgrade path. On the development server it follows STD-GLB-009
+§Development Server Deployment rule 9 (1.10.0, unchanged in 2.0.0) and is proved by STD-GLB-002
+§Restore Evidence. `deploy/dev/README.md` §Backups is the operator's procedure, and
+[database restore](../runbooks/database-restore.md) the runbook.
+
+- **What a set is.** `deploy/dev/backup.sh` writes the cluster's roles (`pg_dumpall --globals-only`)
+  and the database (`pg_dump --format=custom`), named by the UTC date. Each file is written as
+  `<name>.partial` under `umask 077`, verified, and only then renamed: the dump must read back with
+  `pg_restore --list`, and the roles file must create the role `keycloak`.
+- **Retention is by count: the newest 14 complete sets.** Older sets are deleted only after both
+  files of the new set are in place. A failed or silent backup deletes nothing, so a week of failures
+  still leaves 14 good sets, which an age-based delete would not.
+- **The signing keystore and its vault file are never in a set** (`TDD-identity-kernel-002` §Custody
+  as Built). A restored realm loads the same keystore, so it signs under the same `kid`.
+- **The restore** is `deploy/dev/restore.sh`, on an empty volume: `postgres` alone, the roles first,
+  then `pg_restore --create --exit-on-error`. It refuses a `keycloak` database that holds anything.
+- **The drill runs weekly and on every change.** `deploy-dev` runs `scripts/dev-restore-drill.sh`
+  last, on each pull request, each push to `main`, and every Monday at 05:23 UTC. STD-GLB-002
+  §Restore Evidence asks for a drill at least every 90 days. The drill proves the retention rule
+  (with 15 older sets present, a failed backup deletes none, and the next one keeps the newest 14,
+  its own among them), that the set holds no signing material, that the restored database equals the
+  source, and that the restored realm is in sync and signs with the same `kid`. It writes
+  `restore-evidence.json`.
+- **The RTO is checked: 900 seconds.** The drill measures from `restore.sh` on an empty volume to the
+  verified read, and fails above the 15-minute RTO of PAD-PLT-001 §6.2.
+- **The RPO is not met, and the evidence says so.** PAD-PLT-001 §6.2 sets one minute. A daily
+  `pg_dump` loses up to 24 hours. A one-minute RPO needs continuous WAL archiving with point-in-time
+  recovery on the production platform, which a drill of a logical dump never proves. The drill
+  records `met: false`.
+- **No copy leaves the host yet.** STD-GLB-009 rule 9 requires a copy off the host before production.
+  The development server is redeployed from zero, so it records the gap and accepts it there alone.
+- **A restore to an older point is not drilled.** The drill restores to the instant of its own
+  backup. An older point gives back users and clients identity-control has changed since, and
+  identity-control reconciles them (its restore runbook).
+
 ## Traceability
 
 | Relationship | Target |
@@ -741,6 +779,9 @@ release.
 | Related design | `TDD-identity-kernel-002` — key invariants this suite asserts |
 | Conforms to | STD-GLB-009 1.8.0 §Container Images, rules 4, 5, 7, 8, 9, 10 and 11 (lands with scnehaux-architecture #86) — §Images the Stack Runs |
 | Consumed by | `TDD-identity-control-002`, `TDD-identity-control-005` — a session removed through the Admin API stays removed (§Session Store) |
+| Conforms to | STD-GLB-009 §Development Server Deployment rule 9 (1.10.0, in 2.0.0) — backups, 14 sets by count, no keystore copied, off-host before production (§Backups and the Restore Drill) |
+| Conforms to | STD-GLB-002 §Restore Evidence — the drill, on a schedule (§Backups and the Restore Drill) |
+| Enterprise constraint | PAD-PLT-001 §6.2 — RTO 15 minutes, checked; RPO 1 minute, not met (§Backups and the Restore Drill) |
 
 ### Open Questions
 
