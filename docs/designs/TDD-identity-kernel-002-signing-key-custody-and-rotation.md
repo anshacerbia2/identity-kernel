@@ -3,7 +3,7 @@ doc_meta:
   id: TDD-identity-kernel-002
   title: Signing Key Custody, Identity, and Rotation
   owner: Identity Platform Team
-  version: 1.2.0
+  version: 1.3.0
   status: approved
   classification: restricted
   review_cycle_days: 90
@@ -204,6 +204,18 @@ decided by what depends on it:
     `fallback-RS256` made by a caller on the internal network fails the next `realm-apply` run;
   - `compat/signing_key_test.go` asks the pinned image what the legacy endpoint does with the RS256
     provider disabled, records it, and removes any fallback key it made.
+  - **The production ingress carries the same rule, and it is a production gate (1.3.0).** ADR-IAM-002
+    §5.4 (amended 2026-10-20) has every ingress that serves the realm answer `404` to `GET
+    /realms/{realm}`, its root path and nothing below it, and STD-GLB-009 2.0.0 §Security & Access
+    Governance makes it a gate: "Before the production realm serves anyone, a test against its public
+    host requests the endpoint in each spelling and requires `404`, and requests discovery and the key
+    set and requires `200`." A production ingress that is not Caddy "MUST match the same set of
+    requests": without regard to case, with repeated or trailing slashes, matrix parameters or
+    percent-encoding, on the decoded path. `deploy-dev` is that test for the development server, on
+    every change: six spellings through the proxy and three on the tunnel's public port, then the key
+    set holding the ceremony's `kid` alone. No production ingress exists yet. When one does, the same
+    test runs against its public host before the realm serves anyone, and again after every Keycloak
+    upgrade (ROADMAP §Gates).
 - An external registration's RS256 exception (STD-IAM-002 §3.2.2) needs its own RS256 key from custody,
   loaded the way the PS256 key is. Until one exists, identity-control registers none, and a client
   configured for RS256 would make Keycloak generate `fallback-RS256`, which the checks above refuse.
@@ -247,6 +259,10 @@ The ceremony that generates a key follows STD-IAM-001 2.9.0 §3.10. The runbook,
   upstream image, as root, with `--network none` (`scripts/signing-keystore.sh`).
 - The script refuses a keys directory that already holds a keystore. A second key in a realm is a
   rotation (§Rotation), which is not built.
+- It reads the `kid` from the new certificate with `client-key kid -certificate realm-signing.crt`
+  (1.3.0): the RFC 7638 thumbprint of the public key (§Key Identity). The command ships in the
+  realm-apply image, which the ceremony builds and then runs with `--network none`. realm-apply later
+  creates the provider with the same value.
 - It writes the record, `realm-signing.ceremony.json`: operator, witness, reason, times, the
   generator's digest and the `kid`. It holds no secret. The operator attaches it to the change ticket
   the reason names (STD-IAM-001 §3.10: "kept with the change ticket ... Never in chat"). Names are
@@ -595,6 +611,8 @@ exercised.
 | Governed by | ADR-IAM-002 §5.3, amended 2026-10-20 — AWS Secrets Manager and KMS, `java-keystore` with vault passwords, no development backup |
 | Conforms to | STD-IAM-001 2.9.0 §3.10 — the ceremony: operator, witness, independent review |
 | Conforms to | STD-GLB-009 1.10.0 rule 9 — the keystore and its vault files are never copied |
+| Governed by | ADR-IAM-002 §5.4, amended 2026-10-20 — every ingress that serves the realm closes the legacy realm endpoint (1.3.0) |
+| Conforms to | STD-GLB-009 2.0.0 §Security & Access Governance — the production gate on the legacy realm endpoint (1.3.0) |
 
 ### Open Questions
 

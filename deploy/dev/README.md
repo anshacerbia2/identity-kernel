@@ -363,21 +363,26 @@ run `client-key` from the realm-apply image, so the host needs Docker only:
 | realm-apply's service account | `./new-client-key.sh realm-apply` | `./keys/realm-apply.pem`, gitignored | 65534, the realm-apply container's user, mode 0600 |
 | identity-control's clients | identity-control's scripts, with this `new-client-key.sh` | identity-control's `deploy/dev/keys` | 65532, identity-control's distroless user |
 | a BFF's client | the developer, on the laptop (`scripts/new-client-key.mjs`) | the laptop; only the public JWK reaches the server | the developer |
+| a reporter workload, one per external system | organization-control's `scripts/dev-wire.ps1`, with this `new-client-key.sh` | beside the operator's wiring state file, outside every directory a container mounts | the operator |
 
-**Moving an existing client from a secret to a key.** This applies to a server set up before keys:
+**A reporter workload per external system** (`ADR-ORG-001 §5.11`, STD-GLB-009 §Development Server
+Deployment rule 13). Each system that reports to Organization Control, the provisioning system and
+each obligation-owning domain, is its own workload client with its own key. Two systems never share a
+client or a key, so one can be suspended or retired without touching the other. On this server the
+operator's stand-in scripts play those systems, and each stand-in is such a workload. It is made once,
+from zero, by organization-control's `scripts/dev-wire.ps1` step 6b, not by hand:
 
-1. Make the key where the client runs.
-2. Run `./set-client-key.sh`.
-3. Point the client at its key and restart it.
+1. `./new-client-key.sh dev-reporter-<what it reports> <state directory> <operator uid:gid>` makes the
+   key pair. The private key stays with the operator.
+2. identity-control registers the workload (`POST /v1/workloads`) with the public JWK, an owner, and
+   `organization-control-api` as its audience. identity-control creates the client in this realm; no
+   client is created in the Admin Console.
+3. organization-control records it as a reporter (`POST /v1/reporters`) for `provisioning`, or for
+   `obligation:<domain>`.
 
-The client cannot authenticate between steps 2 and 3, so run them together. For realm-apply:
-
-```sh
-./new-client-key.sh realm-apply
-./set-client-key.sh master realm-apply keys/realm-apply.jwk.json
-# .env: keep KEYCLOAK_ADMIN_CLIENT_ID=realm-apply, delete KEYCLOAK_ADMIN_CLIENT_SECRET
-docker compose up -d
-```
+The step makes `dev-reporter-provisioning` and one `dev-reporter-obligation-<domain>` per domain. A new
+external system gets a workload of its own the same way. Its keys then change through identity-control,
+like every registered client (below), never through `set-client-key.sh`.
 
 **Rotating a key.** Make the new pair and install both public keys, so the old and the new key
 are accepted together. Move the client to the new private key. Then install the new public key

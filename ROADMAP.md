@@ -197,14 +197,16 @@ unused.
   2026-10-20) — **the realm signs with a key the kernel loads from a keystore, in every environment**;
   see below
 - ✅ Key ceremony rehearsed on the development path — `scripts/signing-key-ceremony.sh`, an operator
-  and a witness who is never the operator (STD-IAM-001 2.9.0 §3.10), and its runbook. **Not yet:**
+  and a witness who is never the operator, and an independent reviewer, neither of the two, who reviews
+  the record before the realm serves anyone else (STD-IAM-001 2.9.0 §3.10; the runbook's step 7). The
+  script records the review as pending, and the runbook keeps it on the change ticket. **Not yet:**
   the keystore sealed in AWS Secrets Manager, which waits on a production environment; its
   `SecretProviderClass` is written (`docs/production/`)
 - ✅ `kid` derived as the RFC 7638 thumbprint, set when the provider is created and checked by every
   `realm-apply` run
 - ✅ Startup refuses to serve when custody is unreachable — the image's entrypoint, before Keycloak runs
-- Rotation through the five states of TDD-identity-kernel-002 1.1.0 (ADR-IAM-002 §5.2, NIST SP
-  800-57): a staged key is published before it signs, and its private material is destroyed when it
+- ⏳ Rotation through the five states of TDD-identity-kernel-002 1.3.0 §Rotation State Machine
+  (ADR-IAM-002 §5.2, NIST SP 800-57): a staged key is published before it signs, and its private material is destroyed when it
   leaves the JWKS, every stored version of the sealed keystore included. No retention period
 - ✅ Question 4 executed and recorded — **path form retained**. `iss` is
   `{frontend URL}/realms/{realm name}`, and a realm rename moves it too (compat run 36113564506).
@@ -953,7 +955,8 @@ It is development only:
 - Principals are created by `identity-control`, which runs beside it (identity-control's
   `deploy/dev/`), and never by hand in the Admin Console.
 
-✅ **Backups and the restore drill (STD-GLB-009 1.10.0 rule 9, STD-GLB-002 §Restore Evidence).**
+✅ **Backups and the restore drill (STD-GLB-009 1.10.0 rule 9, STD-GLB-002 §Restore Evidence;
+TDD-identity-kernel-005 1.11.0 §Backups and the Restore Drill).**
 `deploy/dev/backup.sh` writes the roles and the database, verifies the dump, and keeps the newest 14
 complete sets by count, pruning only after a successful backup. `deploy/dev/restore.sh` restores into
 an empty volume, roles first, and stops on the first error. Neither touches the signing keystore or its
@@ -964,6 +967,26 @@ restored database equals the source, and that the restored realm signs with the 
 off the host, required before production. The server's cron line becomes
 `45 2 * * * .../identity-kernel/deploy/dev/backup.sh /mnt/imam-storage/scnehaux-backups/identity-kernel`
 (`deploy/dev/README.md` §Backups).
+
+### Clients on the development server
+
+- ✅ **One client registration per developer device (I4, done 2026-10-20; STD-GLB-009 §Development
+  Server Deployment rule 15, 1.10.0, in force in 2.0.0).** `deploy/dev/set-client-key.sh` takes one JWK,
+  or two only for one registration's rotation overlap, and refuses three. Its header, `client-key
+  install` and `deploy/dev/README.md` §Keys say a second device registers a client of its own, such as
+  `identity-experience-bff-<device>`, and is never given another device's key. The registrations
+  themselves are identity-experience's and identity-control's.
+- ⏳ **One workload client per external system, with its own key (O1, planned 2026-10-20;
+  `ADR-ORG-001 §5.11`, amended 2026-10-20; STD-GLB-009 §Development Server Deployment rule 13).** Each
+  system that reports to Organization Control, the provisioning system and each obligation-owning
+  domain, is a workload client of this realm. It is registered through identity-control's workload
+  registration with an owner, and authenticates by a signed JWT with its own RSA key of at least 3072
+  bits. The realm needs nothing new: the workload profile (Week 1) already issues the token, and this
+  repository builds no client of its own for it. On the development server organization-control's `scripts/dev-wire.ps1`
+  step 6b makes one per stand-in with this repository's `new-client-key.sh`
+  (`deploy/dev/README.md` §Keys, "A reporter workload per external system"). What remains: each
+  production system's workload, key and owner, registered when that system exists. No date can be
+  set until one does.
 
 ## Sender constraint, the recorded gap
 
@@ -1029,3 +1052,10 @@ key ceremony, console drift, failed upgrade, and consumer reporting an unknown `
   with the custody-outage and database-restore runbooks TDD-identity-kernel-002 adds. Its production
   section has never run.
 - Key rotation and emergency rotation, rehearsed in staging, wait on rotation (Week 2).
+- ⏳ **The production ingress closes the legacy realm endpoint, and a test proves it** (added
+  2026-10-20; ADR-IAM-002 §5.4, amended 2026-10-20; STD-GLB-009 2.0.0 §Security & Access Governance;
+  TDD-identity-kernel-002 1.3.0 §The Published Key Set). Before the production realm serves anyone, a
+  test against its public host requires `404` for `GET /realms/scnehaux` in every spelling, `200` for
+  discovery and the key set, and the custody key alone in the key set. It runs again after every
+  Keycloak upgrade. `deploy-dev` already runs the same test for the development server; no production
+  ingress exists yet.
