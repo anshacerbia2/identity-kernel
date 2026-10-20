@@ -3,12 +3,12 @@ doc_meta:
   id: TDD-identity-kernel-001
   title: Realm Topology, Issuer Identity, and Token Claim Projection
   owner: Identity Platform Team
-  version: 1.20.0
+  version: 1.21.0
   status: approved
   classification: restricted
   review_cycle_days: 90
   created_date: 2026-08-11
-  last_reviewed: 2026-10-19
+  last_reviewed: 2026-10-20
   parent_sad: SAD-001
 ---
 
@@ -220,6 +220,35 @@ workload (`TDD-identity-control-003`). The realm default is left as it is: remov
 every client created after, and a provider token's `acr` comes from `scnehaux-provider` either way.
 `compat/workload_test.go` asserts the workload token, the detachment included, and the absence of
 `workload_owner` from an internal token.
+
+### Consent (1.21.0)
+
+**Consent follows the audience class** (STD-IAM-002 1.9.0 §3.6, ADR-IAM-003 §5.11). An `external`
+registration requires consent, and every scope it releases is shown on the consent screen. An
+`internal`, `privileged` or `workload` registration never does: its recorded registration is the
+administrative consent. identity-control sets the client's consent from its class at registration
+and adoption, and repairs a difference as drift (TDD-identity-control-003). The kernel's part is the
+scopes: the pinned release shows a scope's text only when "Display On Consent Screen is enabled, and
+the scope is added to a client that requires consent" (STD-IAM-002 [R32]), and with no scope to show
+it shows no page and records no consent (ROADMAP §Consents, asked by identity-control).
+
+An external registration holds the realm's default scopes and its audience scope
+(`realm/default-client-scopes.json`, TDD-identity-control-003). Each is marked, with a text from the
+theme's bundles in both locales (TDD-identity-kernel-004 §Message Bundle Discipline):
+
+| Scope | What the client receives | Consent text key |
+| :-- | :-- | :-- |
+| `scnehaux-external` | that the person signed in with a Scnehaux account; no enterprise or context claim | `consentScnehauxExternal` |
+| `basic` | `sub` and `auth_time` | `consentBasic` |
+| `acr` | `acr` | `consentAcr` |
+
+- `basic` and `acr` are Keycloak's built-in scopes. The definition declares them with their mappers
+  by name and their two consent attributes, and nothing else, so the comparison holds those fields and
+  the mapper set and Keycloak keeps the rest.
+- Every other scope stays unmarked. A first-party client never shows the page, whatever it holds,
+  because it does not require consent.
+- A scope added to the external profile later is marked in the same change, or an external client
+  would receive it without the person being asked.
 
 ### Tenant Context (1.13.0)
 
@@ -893,6 +922,15 @@ compatibility suite rather than left to operational discipline.
     - `invalid_grant` after removal or disabling, with other Tenants unaffected;
     - a workload's token.
 
+### Consent (1.21.0)
+
+- An external client, registered as identity-control registers one, shows the consent page on its
+  first sign-in, the page lists `basic`, `acr` and `scnehaux-external` by their texts, and the consent
+  records all three. A first-party client holding `scnehaux-internal` never shows it
+  (`compat/consent_scopes_test.go`).
+- The page passes axe-core in both locales and both schemes and is answered from the keyboard
+  (`browser/`, TDD-identity-kernel-004).
+
 ### Creation Paths
 
 - Self-registration is unreachable in the configured realm.
@@ -1028,6 +1066,7 @@ rollback, signing-key incident, and issuer change assessment.
 | Governed by | ADR-IAM-001 — Adopt Keycloak Identity Kernel; realm strategy, extension policy, operational baseline |
 | Conforms to | STD-IAM-001 §3.3 — `principal_id` on internal access tokens; `sub` is not an enterprise foreign key |
 | Conforms to | STD-IAM-001 §3.5 — one `kid` to one immutable key pair; no per-replica production key generation |
+| Conforms to | STD-IAM-002 1.9.0 §3.6, ADR-IAM-003 §5.11 — consent follows the audience class; the scopes an external client releases are shown on the consent screen |
 | Enterprise constraint | EAD-006 §5.2 — distinct realm policies per identity population; correlation limited to justified realm and purpose |
 | Enterprise constraint | EAD-003 — canonical identifiers are opaque, stable, and authority-scoped |
 | Consumed by | `TDD-identity-control-001` — depends on the four closed creation paths and the mapper |

@@ -14,6 +14,11 @@ FROM ${KEYCLOAK_IMAGE} AS builder
 ENV KC_HEALTH_ENABLED=true
 ENV KC_METRICS_ENABLED=true
 ENV KC_DB=postgres
+# The file vault, a build-time option: "For enabling the file-based vault you need to build Keycloak
+# first using the following build option" (Keycloak, Using a vault). The realm signing keystore's
+# passwords are ${vault.realm-signing-password}, read from $KC_VAULT_DIR (ADR-IAM-002 §5.3,
+# TDD-identity-kernel-002 1.2.0 §Custody as Built).
+ENV KC_VAULT=file
 COPY --chown=1000:0 themes/scnehaux /opt/keycloak/themes/scnehaux
 RUN /opt/keycloak/bin/kc.sh build
 
@@ -63,3 +68,11 @@ COPY --from=ubi-micro-build /mnt/patch/ /
 # back into the cache after the database lost it, and the removed session keeps refreshing
 # (keycloak#51127). A runtime option, set here so every environment that runs the image has it.
 ENV KC_SPI_USER_SESSIONS__INFINISPAN__USE_CACHES=false
+# Where the file vault reads the realm's secrets, a runtime option. Every environment mounts the vault
+# here read-only: deploy/dev/compose.yaml from keys/vault, production through the AWS Secrets and
+# Configuration Provider (docs/production/realm-signing-secret-provider-class.yaml).
+ENV KC_VAULT_DIR=/opt/keycloak/vault
+# The entrypoint refuses to start a server without the realm signing keystore and its password, then
+# runs kc.sh with the same arguments (image/start.sh, TDD-identity-kernel-002 1.2.0 §Startup as Built).
+COPY image/start.sh /opt/scnehaux/start.sh
+ENTRYPOINT ["/opt/scnehaux/start.sh"]

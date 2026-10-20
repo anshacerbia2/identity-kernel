@@ -7,6 +7,8 @@
 # /realms/master answer 404 to everyone on this listener, and administrators reach Keycloak through
 # the private port instead (compose.tunnel.yaml, KC_HOSTNAME_ADMIN).
 #
+# The legacy realm endpoint answers 404 to everyone (below).
+#
 # Anything else answers 404 rather than 403, so the path does not confirm it exists.
 
 {
@@ -18,6 +20,16 @@
 		path /admin /admin/* /realms/master /realms/master/*
 	}
 	respond @administration 404
+
+	# The legacy realm endpoint, GET /realms/<realm>, closed to everyone. Keycloak 26.7.5 answers it with
+	# the realm's active RS256 key, and generates one in-process when none is active, which the realm's
+	# disabled RS256 provider makes the case (TDD-identity-kernel-002 §The Published Key Set). No client
+	# needs it: discovery, the key set and the token endpoint are below it. Matched on the unescaped path,
+	# with any case, repeated slashes and matrix parameters.
+	@legacy_realm {
+		path_regexp (?i)^/+realms/+[^/]+/*$
+	}
+	respond @legacy_realm 404
 
 	# The tunnel's TLS is the client's TLS. Caddy replaces any X-Forwarded-* a client sent and states
 	# what it knows: the scheme the client used, and the public host.

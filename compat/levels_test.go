@@ -65,6 +65,8 @@ type browser struct {
 	updatePages      []string
 	// refresh is the refresh token of the last sign-in.
 	refresh string
+	// consentPages holds each consent page as shown, for the scopes it lists.
+	consentPages []string
 }
 
 var (
@@ -201,6 +203,7 @@ func (b *browser) signIn(extra url.Values) map[string]any {
 		case namedInput("accept").MatchString(page) && strings.Contains(page, `id="kc-oauth"`):
 			// The consent page (login-oauth-grant.ftl): "Yes" grants the client what it asked for.
 			b.pages = append(b.pages, "consent")
+			b.consentPages = append(b.consentPages, page)
 			form.Set("accept", "")
 		case namedInput("accept").MatchString(page) && strings.Contains(page, "kc-delete-text"):
 			b.pages = append(b.pages, "delete-credential")

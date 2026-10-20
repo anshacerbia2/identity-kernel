@@ -3,12 +3,18 @@ name: deploy-dev
 # Brings up deploy/dev exactly as a server runs it -- production-mode Keycloak on Postgres behind
 # Caddy -- applies the realm through the service account the setup script creates, and asserts the
 # two properties the stack exists for: the realm is served on its public issuer, and administration
-# is hidden from any address outside the allowlist.
+# is hidden from any address outside the allowlist. It also runs the signing-key ceremony the server
+# runs, proves the kernel refuses to start without its keystore and signs with the ceremony's key, and
+# ends with the database's restore drill (STD-GLB-002 §Restore Evidence).
 
 on:
   push:
     branches: [main]
   pull_request:
+  # Weekly, for the restore drill, which STD-GLB-002 §Restore Evidence asks for on a schedule of at
+  # most 90 days.
+  schedule:
+    - cron: "23 5 * * 1"
 
 permissions:
   contents: read
@@ -38,6 +44,11 @@ jobs:
             echo "::error::deploy/dev/compose.yaml does not build the kernel image from $ref in image/keycloak.ref"
             exit 1
           fi
+          # The CI file's throwaway keystore is made by the kernel image itself (compose.ci.yaml).
+          if ! grep -Eq "^[[:space:]]*image:[[:space:]]*scnehaux/identity-kernel:dev[[:space:]]*$" compose.ci.yaml; then
+            echo "::error::deploy/dev/compose.ci.yaml does not make its keystore with the kernel image"
+            exit 1
+          fi
 
       # The allowlist names a documentation address (RFC 5737) the runner never has, so every
       # request from the runner is "outside" it.
@@ -64,6 +75,46 @@ jobs:
             files+=("$out")
           done
           python3 ../../.github/scripts/pull-policy.py "${files[@]}"
+
+      # The kernel refuses to start without the realm signing keystore and its password: before the
+      # ceremony there is none, and the image's entrypoint stops Keycloak before it can generate one
+      # (image/start.sh, TDD-identity-kernel-002 1.2.0 §Startup as Built). compose.yaml alone, as a server
+      # runs it: the CI file would give it a throwaway keystore.
+      - name: the kernel refuses to start without its signing keystore
+        run: |
+          docker compose -f compose.yaml up -d postgres keycloak
+          refused=0
+          for i in $(seq 1 90); do
+            if docker compose -f compose.yaml logs --no-color keycloak 2>&1 | grep -F "refusing to start: the realm signing keystore"; then
+              refused=1
+              break
+            fi
+            sleep 2
+          done
+          if docker compose -f compose.yaml logs --no-color keycloak 2>&1 | grep -q "Keycloak.*started"; then
+            echo "::error::Keycloak started without its signing keystore"
+            exit 1
+          fi
+          docker compose -f compose.yaml down
+          [ "$refused" = 1 ] || { echo "::error::the kernel did not refuse to start without its keystore"; exit 1; }
+
+      # The ceremony as the runbook runs it (docs/runbooks/signing-key-ceremony.md): an operator and a
+      # witness, never the same person, and never a second key over the first.
+      - name: the signing-key ceremony
+        run: |
+          if bash ../../scripts/signing-key-ceremony.sh ./keys "CI Operator" " ci  operator " "deploy-dev run $GITHUB_RUN_ID" 2>"$RUNNER_TEMP/same.txt"; then
+            echo "::error::the ceremony ran with the operator as the witness"
+            exit 1
+          fi
+          grep -F "the witness is the operator" "$RUNNER_TEMP/same.txt"
+          bash ../../scripts/signing-key-ceremony.sh ./keys "CI Operator" "CI Witness" "deploy-dev run $GITHUB_RUN_ID" \
+            | tee "$RUNNER_TEMP/ceremony.txt"
+          if bash ../../scripts/signing-key-ceremony.sh ./keys "CI Operator" "CI Witness" "a second key" >/dev/null 2>&1; then
+            echo "::error::a second ceremony replaced the keystore"
+            exit 1
+          fi
+          kid="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["key"]["kid"])' keys/realm-signing.ceremony.json)"
+          echo "CEREMONY_KID=$kid" >> "$GITHUB_ENV"
 
       - name: start the stack, which applies the realm
         run: |
@@ -95,7 +146,37 @@ jobs:
         run: |
           set -a; . "$RUNNER_TEMP/client.env"; set +a
           export KEYCLOAK_ADMIN_CLIENT_KEY_FILE=deploy/dev/keys/realm-apply.pem
-          go run ./cmd/realm-apply -environment development -url http://localhost:8080 -require-in-sync
+          # With the ceremony's certificate: the realm signs with the keystore the ceremony made.
+          go run ./cmd/realm-apply -environment development -url http://localhost:8080 -require-in-sync \
+            -signing-certificate deploy/dev/keys/realm-signing.crt
+
+      # The witness's check, step 5 of the ceremony runbook: the kid the ceremony recorded is the one the
+      # key set publishes through the proxy, and a token the realm issues carries it.
+      - name: the realm signs with the ceremony's key, under its recorded kid
+        run: |
+          set -a; . ./.env; set +a
+          kc() { docker compose -f compose.yaml -f compose.ci.yaml exec -T keycloak /opt/keycloak/bin/kcadm.sh "$@" --config /tmp/kcadm-ci.config; }
+          kc config credentials --server http://localhost:8080 --realm master --user admin --password "$KC_BOOTSTRAP_ADMIN_PASSWORD" >/dev/null
+          curl -sfk https://localhost/realms/scnehaux/protocol/openid-connect/certs > "$RUNNER_TEMP/certs.json"
+          # A throwaway client, deleted at once, for one token of the realm's.
+          secret="$(openssl rand -hex 16)"
+          kc create clients -r scnehaux -s clientId=deploy-dev-kid-probe -s publicClient=false -s "secret=$secret" \
+            -s serviceAccountsEnabled=true -s standardFlowEnabled=false >/dev/null
+          curl -sfk https://localhost/realms/scnehaux/protocol/openid-connect/token \
+            -d grant_type=client_credentials -d client_id=deploy-dev-kid-probe -d "client_secret=$secret" \
+            > "$RUNNER_TEMP/token.json"
+          id="$(kc get clients -r scnehaux -q clientId=deploy-dev-kid-probe --fields id | jq -r '.[0].id')"
+          kc delete "clients/$id" -r scnehaux
+          python3 - "$RUNNER_TEMP/certs.json" "$RUNNER_TEMP/token.json" "$CEREMONY_KID" <<'PY'
+          import base64, json, sys
+          certs, token, kid = json.load(open(sys.argv[1])), json.load(open(sys.argv[2])), sys.argv[3]
+          published = sorted(k["kid"] for k in certs["keys"] if k.get("alg") == "PS256")
+          assert published == [kid], f"the key set publishes PS256 keys {published}, want the ceremony's {kid} alone"
+          segment = token["access_token"].split(".")[0]
+          header = json.loads(base64.urlsafe_b64decode(segment + "=" * (-len(segment) % 4)))
+          assert header["alg"] == "PS256" and header["kid"] == kid, f"the token header is {header}, want PS256 and {kid}"
+          print(f"the key set and a token carry the ceremony's kid {kid}")
+          PY
 
       # The job must refuse drift, not overwrite it: a declared value changed in Keycloak by hand makes
       # the next up fail and leaves the change in place for someone to look at. Reverted, the next up
@@ -143,6 +224,44 @@ jobs:
             fi
           done
           exit "$failed"
+
+      # The legacy realm endpoint makes Keycloak generate an RS256 key in-process once the realm's RS256
+      # provider is disabled, so the proxy closes it to everyone, in any spelling (TDD-identity-kernel-002
+      # §The Published Key Set). The key set it would have joined still holds the keystore's key alone.
+      - name: the legacy realm endpoint is closed, and the key set holds one key
+        run: |
+          failed=0
+          for path in /realms/scnehaux /realms/scnehaux/ //realms//scnehaux "/realms/scnehaux;x=1" /REALMS/scnehaux /realms/%73cnehaux; do
+            status="$(curl -sk -o /dev/null -w '%{http_code}' "https://localhost$path")"
+            echo "$path -> $status"
+            [ "$status" = 404 ] || { echo "::error::$path answered $status through the proxy"; failed=1; }
+          done
+          curl -sfk https://localhost/realms/scnehaux/protocol/openid-connect/certs \
+            | jq -e --arg kid "$CEREMONY_KID" '[.keys[].kid] == [$kid]' \
+            || { echo "::error::the key set holds more than the ceremony's key"; failed=1; }
+          exit "$failed"
+
+      # Last, because it deletes the database (STD-GLB-002 §Restore Evidence): backup.sh, the volume
+      # deleted, restore.sh into an empty one, and the restored realm compared with the source and
+      # signing with the same keystore key (scripts/dev-restore-drill.sh).
+      - name: the restore drill
+        env:
+          COMPOSE_FILE: compose.yaml:compose.ci.yaml
+        run: bash ../../scripts/dev-restore-drill.sh "$RUNNER_TEMP/restore-drill"
+
+      # The evidence, never the backup: the dump and the roles file hold role password hashes.
+      - name: keep the restore evidence
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: restore-evidence
+          path: |
+            ${{ runner.temp }}/restore-drill/*.json
+            ${{ runner.temp }}/restore-drill/*.txt
+            ${{ runner.temp }}/restore-drill/*.sql
+            !${{ runner.temp }}/restore-drill/backup/**
+          if-no-files-found: ignore
+          retention-days: 90
 
       - name: stack logs
         if: failure()
@@ -192,6 +311,9 @@ jobs:
           done
           python3 ../../.github/scripts/pull-policy.py "${files[@]}"
 
+      - name: the signing-key ceremony
+        run: bash ../../scripts/signing-key-ceremony.sh ./keys "CI Operator" "CI Witness" "deploy-dev run $GITHUB_RUN_ID"
+
       - name: start the stack in tunnel mode, which applies the realm
         run: |
           docker compose -f compose.yaml -f compose.tunnel.yaml up -d --wait --wait-timeout 300 postgres keycloak caddy
@@ -239,7 +361,8 @@ jobs:
           export KEYCLOAK_ADMIN_CLIENT_KEY_FILE=deploy/dev/keys/realm-apply.pem
           # The master realm's frontend URL is now the private port, so the assertion's audience is
           # not the address realm-apply reaches Keycloak on. Discovery supplies it.
-          go run ./cmd/realm-apply -environment development -url http://localhost:8081 -require-in-sync
+          go run ./cmd/realm-apply -environment development -url http://localhost:8081 -require-in-sync \
+            -signing-certificate deploy/dev/keys/realm-signing.crt
 
       - name: the public port serves the realm on the tunnel's issuer
         run: |
@@ -266,6 +389,14 @@ jobs:
             fi
           done
           exit "$failed"
+
+      - name: the legacy realm endpoint is closed on the public port
+        run: |
+          for path in /realms/scnehaux /realms/scnehaux/ "/realms/scnehaux;x=1"; do
+            status="$(curl -s -o /dev/null -w '%{http_code}' "http://localhost:8080$path")"
+            echo "$path -> $status"
+            [ "$status" = 404 ] || { echo "::error::$path answered $status on the public port"; exit 1; }
+          done
 
       # The positive control for the step above: a 404 on every path would also be what a proxy that
       # served nothing returns. Here the console is served, and it points its login at the private

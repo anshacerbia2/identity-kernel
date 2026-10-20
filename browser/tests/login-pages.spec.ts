@@ -6,8 +6,10 @@
 // surface the sequence reaches is scanned by axe-core in both colour schemes, and no page may raise
 // a Content Security Policy violation: the realm's policy allows what the stock templates run, and
 // this is where that is proven (STD-IAM-001 §3.9). Beyond the sign-in, the same scan covers an account
-// under lockout, the logout confirmation and the page that follows it, and an error page. Every scan is
-// photographed in both schemes (TDD-identity-kernel-004 §Visual Language).
+// under lockout, the logout confirmation and the page that follows it, and an error page. An external
+// relying party's sign-in shows the consent page, which is scanned and answered from the keyboard, and
+// lists each scope the client receives; no first-party sign-in ever shows it (STD-IAM-002 §3.6). Every
+// scan is photographed in both schemes (TDD-identity-kernel-004 §Visual Language).
 import { expect, test, type Locator, type Page } from "@playwright/test";
 
 import {
@@ -30,12 +32,29 @@ type Surface =
   | "select-authenticator"
   | "recovery-code"
   | "webauthn-register"
-  | "webauthn";
+  | "webauthn"
+  | "consent";
+
+// The consent page's line for each scope an external client receives, in each locale: the realm's
+// consent texts as the theme's bundles word them (themes/scnehaux/login/messages).
+const consentLines: Record<string, string[]> = {
+  en: [
+    "Sign you in with your Scnehaux account",
+    "An identifier for your account, and when you signed in",
+    "How you signed in: with a password alone, or with a second factor",
+  ],
+  id: [
+    "Memasukkan Anda dengan akun Scnehaux Anda",
+    "Pengenal akun Anda, dan kapan Anda masuk",
+    "Cara Anda masuk: hanya dengan kata sandi, atau dengan faktor kedua",
+  ],
+};
 
 // surface names the page by what it asks for, as compat/levels_test.go does.
 async function surface(page: Page, redirect: string): Promise<Surface | "callback"> {
   if (page.url().startsWith(redirect)) return "callback";
   const present = async (selector: string) => (await page.locator(selector).count()) > 0;
+  if (await present("#kc-oauth")) return "consent";
   if (await present("#registerWebAuthn")) return "webauthn-register";
   if (await present("#authenticateWebAuthnButton")) return "webauthn";
   if (await present("#kcRecoveryCodesConfirmationCheck")) return "recovery-codes";
@@ -163,6 +182,14 @@ class Sequence {
         return submits(page, () => page.locator("#registerWebAuthn").click());
       case "webauthn":
         return submits(page, () => page.locator("#authenticateWebAuthnButton").click());
+      case "consent": {
+        for (const line of consentLines[this.locale]) {
+          await expect(page.locator("#kc-oauth"), "the consent page lists what the client receives").toContainText(line);
+        }
+        // "Yes" grants the client what it asked for, reached by Tab as a person without a pointer does.
+        await tabTo(page, "#kc-login[name=accept]");
+        return submits(page, () => page.keyboard.press("Enter"));
+      }
     }
   }
 }
@@ -242,6 +269,15 @@ for (const locale of ["en", "id"]) {
       await page.waitForTimeout(2_000); // max_age is measured in whole seconds
       const passkey = await sequence.signIn({ acr_values: "aal2", max_age: "0" });
       expect(passkey, "aal2 with a passkey").toEqual(["password", "webauthn"]);
+
+      // The consent page: an external relying party asks once, on its first sign-in, and never again.
+      // Every sign-in above was to a first-party client, which never asks.
+      expect(sequence.seen, "a first-party client asked for consent").not.toContain("consent");
+      const external = await fixtures.client(callback.redirect, { external: true });
+      const consenting = new Sequence(page, locale, external, callback.redirect, person);
+      const asked = await consenting.signIn();
+      expect(asked.at(-1), "an external client's first sign-in asks for consent").toBe("consent");
+      expect(await consenting.signIn(), "a consent given is not asked again").not.toContain("consent");
 
       // An error page: an authorization request from a client the realm does not hold.
       await page.goto(authorizationURL("browser-no-such-client", callback.redirect, { ui_locales: locale }));

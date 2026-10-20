@@ -1,7 +1,33 @@
 # CI only: publishes Keycloak on the runner's loopback so realm-apply can reach it without the
 # proxy, which in CI allowlists nobody -- the job asserts that administration is hidden from the
 # outside and reaches it directly. Never used on a server.
+#
+# It also gives a test run's kernel a signing keystore when ./keys holds none, so a stack another
+# repository's CI starts from this checkout signs as a server does, from a keystore the kernel loads
+# (identity-control, organization-control and organization-experience run it so). ADR-IAM-002 §5.3: "A
+# throwaway kernel, such as a test run's, may sign with a key it generated itself". It is made by the
+# ceremony's own generator, scripts/signing-keystore.sh, with --throwaway-if-absent, so a keystore the
+# ceremony already made (this repository's deploy-dev runs it first) is left as it is. A server never
+# reads this file: there, the ceremony makes the keystore, and the kernel refuses to start without it.
 services:
   keycloak:
     ports:
       - "127.0.0.1:8080:8080"
+    depends_on:
+      signing-keystore:
+        condition: service_completed_successfully
+
+  signing-keystore:
+    # The kernel image keycloak builds, so the keystore is written by the JDK that reads it, and the
+    # image the scan checks is the one that runs (scripts/image-scan.sh scans every image a compose file
+    # names by digest). Built by keycloak's build, never pulled: pull_policy never.
+    image: scnehaux/identity-kernel:dev
+    pull_policy: never
+    restart: "no"
+    user: "0:0"
+    network_mode: none
+    entrypoint: ["/bin/bash", "/opt/ceremony/signing-keystore.sh"]
+    command: ["/keys", "--throwaway-if-absent"]
+    volumes:
+      - ./keys:/keys
+      - ../../scripts/signing-keystore.sh:/opt/ceremony/signing-keystore.sh:ro

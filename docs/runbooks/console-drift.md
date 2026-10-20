@@ -1,6 +1,6 @@
 # Console drift
 
-Version 1.0.0. Last reviewed 2026-10-07.
+Version 1.0.1. Last reviewed 2026-10-20.
 
 A setting the realm definition (`realm/`) declares was changed outside `realm-apply`, usually in the
 Admin Console. `realm-apply` refuses to apply over it and changes nothing.
@@ -71,12 +71,11 @@ reconciled by identity-control (its ROADMAP §Proof B), not by `realm-apply`.
    Record the administrator (`authDetails`), the time and the representation. A change older than
    7 days has no event left: record it as unexplained.
 
-3. **Check the signing key first.** If a drift line names `signing key rsa-ps256-3072`, read
-   [Consumer reports an unknown `kid`](unknown-kid.md) before you act. Recreating the provider makes
-   a new key with a new `kid`, and so does changing its `keySize` either way: Keycloak generates a new
-   key whenever the size differs from the key it holds. Every token the old key signed then fails at
-   every consumer. While the key is disabled or gone, Keycloak signs with a 2048-bit `fallback-PS256`
-   key that no consumer accepts.
+3. **Check the signing key first.** If a drift line names `signing key realm-signing-ps256`, read
+   [Consumer reports an unknown `kid`](unknown-kid.md) before you act. The provider loads the keystore
+   the ceremony made, and its `kid` is set once, when it is created. While the key is disabled or does
+   not load, Keycloak signs with a 2048-bit `fallback-PS256` key that no consumer accepts, and every
+   `realm-apply` run refuses the realm ([Custody outage](custody-outage.md)).
 
 4. **Decide, then act.**
 

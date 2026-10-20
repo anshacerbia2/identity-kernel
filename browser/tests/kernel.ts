@@ -98,8 +98,10 @@ export class Fixtures {
   private clients: string[] = [];
   private users: string[] = [];
 
-  // A confidential client with the authorization code flow and PKCE, as compat's providerCaller.
-  async client(redirect: string): Promise<string> {
+  // A confidential client with the authorization code flow and PKCE, as compat's providerCaller. With
+  // external, it is registered as identity-control registers an external relying party: consent
+  // required, and the scnehaux-external scope beside the realm's defaults (STD-IAM-002 §3.6).
+  async client(redirect: string, options: { external?: boolean } = {}): Promise<string> {
     const clientId = `browser-${suffix()}`;
     const response = await call("POST", "/clients", {
       clientId,
@@ -109,10 +111,18 @@ export class Fixtures {
       standardFlowEnabled: true,
       directAccessGrantsEnabled: false,
       serviceAccountsEnabled: false,
+      consentRequired: options.external === true,
       redirectUris: [redirect],
       attributes: { "pkce.code.challenge.method": "S256", "access.token.signed.response.alg": "PS256" },
     });
-    this.clients.push(created(response));
+    const id = created(response);
+    this.clients.push(id);
+    if (options.external) {
+      const scopes = (await (await call("GET", "/client-scopes")).json()) as { id: string; name: string }[];
+      const external = scopes.find((scope) => scope.name === "scnehaux-external");
+      if (!external) throw new Error("the realm declares no scnehaux-external scope");
+      await call("PUT", `/clients/${id}/default-client-scopes/${external.id}`);
+    }
     return clientId;
   }
 

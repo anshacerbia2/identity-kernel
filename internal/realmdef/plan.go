@@ -217,6 +217,8 @@ const (
 	KindScope     = "client scope"
 	KindAttribute = "user-profile attribute"
 	KindDefaults  = "realm default client scopes"
+	// KindKeyProvider is a built-in key provider the definition declares disabled.
+	KindKeyProvider = "key provider"
 )
 
 func compare(d Definition, l *live) []Change {
@@ -224,6 +226,11 @@ func compare(d Definition, l *live) []Change {
 	if l.realm == nil {
 		changes = append(changes, Change{Kind: KindRealm, Name: d.Name(), Action: Create},
 			Change{Kind: KindKey, Name: name(d.Key), Action: Create})
+		// Keycloak creates its built-in providers with the realm, so each is an update of one it has
+		// just created.
+		for _, provider := range d.KeyProviders {
+			changes = append(changes, Change{Kind: KindKeyProvider, Name: name(provider), Action: Update})
+		}
 		for _, scope := range d.Scopes {
 			changes = append(changes, Change{Kind: KindScope, Name: name(scope), Action: Create})
 		}
@@ -252,6 +259,15 @@ func compare(d Definition, l *live) []Change {
 
 	changes = append(changes, compareObject(KindRealm, d.Name(), d.Realm, l.realm),
 		compareObject(KindKey, name(d.Key), d.Key, l.keys[name(d.Key)]))
+	for _, provider := range d.KeyProviders {
+		// A provider deleted is as absent from the key set as one disabled, so its absence is in sync:
+		// creating it again would generate a key only to disable it.
+		if l.keys[name(provider)] == nil {
+			changes = append(changes, Change{Kind: KindKeyProvider, Name: name(provider), Action: InSync})
+			continue
+		}
+		changes = append(changes, compareObject(KindKeyProvider, name(provider), provider, l.keys[name(provider)]))
+	}
 	for _, scope := range d.Scopes {
 		changes = append(changes, compareScope(scope, l.scopes[name(scope)]))
 	}

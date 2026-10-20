@@ -10,8 +10,8 @@ compare reads the two OCI archives the builds wrote, build-1.tar and build-2.tar
   2. requires the layers above them, the ones this repository adds, to hold only Keycloak's build
      output (lib/quarkus), this repository's theme, byte for byte as git holds it, and the pcre2
      upgrade image/Dockerfile makes (its libraries, licences and build-id links, and the rpm
-     database), and no file that could carry a key, a certificate, a realm export or an environment
-     file;
+     database), and the entrypoint image/start.sh, byte for byte as git holds it, and no file that
+     could carry a key, a certificate, a realm export or an environment file;
   3. compares the two builds file by file. Equal digests pass at once. Otherwise every difference
      outside Keycloak's build output fails, and the differences inside it are recorded: Quarkus writes
      its augmented classes with random names, which this repository cannot change.
@@ -39,8 +39,12 @@ PCRE2_PREFIXES = (
 )
 # Each entry here must be a link to one of the pcre2 libraries.
 BUILD_ID_PREFIX = "usr/lib/.build-id/"
+# The entrypoint that refuses to start without the realm signing keystore (TDD-identity-kernel-002
+# 1.2.0 §Startup as Built), and the file git holds it as.
+ENTRYPOINT = "opt/scnehaux/start.sh"
+ENTRYPOINT_SOURCE = "image/start.sh"
 ALLOWED_PREFIXES = (
-    "opt/keycloak/lib/quarkus/", "opt/keycloak/themes/scnehaux/", *PCRE2_PREFIXES, BUILD_ID_PREFIX,
+    "opt/keycloak/lib/quarkus/", "opt/keycloak/themes/scnehaux/", *PCRE2_PREFIXES, BUILD_ID_PREFIX, ENTRYPOINT,
 )
 THEME_PREFIX = "opt/keycloak/themes/scnehaux/"
 
@@ -117,6 +121,10 @@ def check_contents(errors, label, entries, theme_dir):
             continue
         if name.lower().endswith(FORBIDDEN_SUFFIXES):
             fail(errors, f"{label}: {name} could carry a key, a realm export or a credential")
+        if name == ENTRYPOINT:
+            with open(ENTRYPOINT_SOURCE, "rb") as source:
+                if content != source.read():
+                    fail(errors, f"{label}: {name} differs from {ENTRYPOINT_SOURCE} in git")
         if name.startswith(THEME_PREFIX) and content is not None:
             relative = "themes/scnehaux/" + name[len(THEME_PREFIX):]
             theme_files.add(relative)
@@ -246,8 +254,8 @@ def compare(out, theme_tree):
             for entry in classes[:5]:
                 lines.append(f"    - `{entry}`")
     lines.append("- **Failed:** " + "; ".join(errors) if errors else "- Contents: upstream layers unchanged; "
-                 "the kernel's layers hold only Keycloak's build output, the theme as git holds it, and the pcre2 "
-                 "upgrade.")
+                 "the kernel's layers hold only Keycloak's build output, the theme and the entrypoint as git holds "
+                 "them, and the pcre2 upgrade.")
     summary("\n".join(lines))
     return 1 if errors else 0
 

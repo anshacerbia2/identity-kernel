@@ -59,6 +59,22 @@ jobs:
       - name: unit tests
         run: go test ./internal/... -count=1
 
+      # The kernel loads its signing key from a keystore in every environment and refuses to start
+      # without one (TDD-identity-kernel-002 1.2.0 §Custody as Built). A test run's is a throwaway, made
+      # by the generator the ceremony runs, in the pinned upstream image with no network, and mounted
+      # read-only with its vault file as a server mounts them (deploy/dev/compose.yaml).
+      - name: a throwaway signing keystore
+        run: |
+          image="$(grep -v '^[[:space:]]*#' image/keycloak.ref | grep -v '^[[:space:]]*$' | head -n 1 | tr -d '[:space:]')"
+          keys="$RUNNER_TEMP/kernel-keys"
+          mkdir -p "$keys"
+          docker run --rm --network none --user 0:0 -v "$keys:/keys" \
+            -v "$PWD/scripts/signing-keystore.sh:/opt/ceremony/signing-keystore.sh:ro" \
+            --entrypoint /bin/bash "$image" /opt/ceremony/signing-keystore.sh /keys
+          echo "KERNEL_KEYS=$keys" >> "$GITHUB_ENV"
+          # realm-apply and compat/ read the kid from the certificate, the keystore's public half.
+          echo "KERNEL_SIGNING_CERTIFICATE=$keys/realm-signing.crt" >> "$GITHUB_ENV"
+
       # A step rather than a service container: services cannot be given a command, and Keycloak
       # needs one (start-dev). The reference is read from the file and checked for the digest form,
       # so a tag slipped into image/keycloak.ref fails here instead of being run.
@@ -72,11 +88,21 @@ jobs:
           # The kernel image: the pinned upstream with this repository's theme (TDD-identity-kernel-005).
           echo "building the kernel image from $image"
           docker build -q -f image/Dockerfile --build-arg KEYCLOAK_IMAGE="$image" -t identity-kernel:ci . >/dev/null
+          # Without its keystore the image refuses to start, before Keycloak runs, so it can never sign
+          # with a key it generated (image/start.sh, TDD-identity-kernel-002 1.2.0 §Startup as Built).
+          if docker run --rm identity-kernel:ci start-dev > "$RUNNER_TEMP/no-keystore.txt" 2>&1; then
+            echo "::error::the kernel image started without its signing keystore"
+            exit 1
+          fi
+          grep -F "refusing to start: the realm signing keystore" "$RUNNER_TEMP/no-keystore.txt"
           # start-dev builds again in development mode, on its own file database: the image's
           # postgres is named back to dev-file here, and health and metrics stay on.
           # host.docker.internal is the runner, where compat/back_channel_logout_test.go listens for the
           # logout tokens the kernel posts (ADR-IAM-009).
+          # start-dev builds again, so the file vault, a build option, is named here as the image names it.
           docker run -d --name keycloak -p 8080:8080 -p 9000:9000 --add-host host.docker.internal:host-gateway \
+            -v "$KERNEL_KEYS/signing:/opt/keycloak/data/scnehaux:ro" -v "$KERNEL_KEYS/vault:/opt/keycloak/vault:ro" \
+            -e KC_VAULT=file \
             -e KC_BOOTSTRAP_ADMIN_USERNAME="$KEYCLOAK_ADMIN_USER" \
             -e KC_BOOTSTRAP_ADMIN_PASSWORD="$KEYCLOAK_ADMIN_PASSWORD" \
             -e KC_DB=dev-file -e KC_HEALTH_ENABLED=true -e KC_METRICS_ENABLED=true \
@@ -165,13 +191,32 @@ jobs:
           pnpm install --frozen-lockfile
           pnpm exec playwright install --with-deps chromium
 
+      # The kernel loads its signing key from a keystore in every environment and refuses to start
+      # without one (TDD-identity-kernel-002 1.2.0 §Custody as Built). A test run's is a throwaway, made
+      # by the generator the ceremony runs, in the pinned upstream image with no network, and mounted
+      # read-only with its vault file as a server mounts them (deploy/dev/compose.yaml).
+      - name: a throwaway signing keystore
+        run: |
+          image="$(grep -v '^[[:space:]]*#' image/keycloak.ref | grep -v '^[[:space:]]*$' | head -n 1 | tr -d '[:space:]')"
+          keys="$RUNNER_TEMP/kernel-keys"
+          mkdir -p "$keys"
+          docker run --rm --network none --user 0:0 -v "$keys:/keys" \
+            -v "$PWD/scripts/signing-keystore.sh:/opt/ceremony/signing-keystore.sh:ro" \
+            --entrypoint /bin/bash "$image" /opt/ceremony/signing-keystore.sh /keys
+          echo "KERNEL_KEYS=$keys" >> "$GITHUB_ENV"
+          # realm-apply and compat/ read the kid from the certificate, the keystore's public half.
+          echo "KERNEL_SIGNING_CERTIFICATE=$keys/realm-signing.crt" >> "$GITHUB_ENV"
+
       - name: start the kernel image
         run: |
           image="$(grep -v '^[[:space:]]*#' image/keycloak.ref | grep -v '^[[:space:]]*$' | head -n 1 | tr -d '[:space:]')"
           docker build -q -f image/Dockerfile --build-arg KEYCLOAK_IMAGE="$image" -t identity-kernel:ci . >/dev/null
           # host.docker.internal is the runner, where compat/back_channel_logout_test.go listens for the
           # logout tokens the kernel posts (ADR-IAM-009).
+          # start-dev builds again, so the file vault, a build option, is named here as the image names it.
           docker run -d --name keycloak -p 8080:8080 -p 9000:9000 --add-host host.docker.internal:host-gateway \
+            -v "$KERNEL_KEYS/signing:/opt/keycloak/data/scnehaux:ro" -v "$KERNEL_KEYS/vault:/opt/keycloak/vault:ro" \
+            -e KC_VAULT=file \
             -e KC_BOOTSTRAP_ADMIN_USERNAME="$KEYCLOAK_ADMIN_USER" \
             -e KC_BOOTSTRAP_ADMIN_PASSWORD="$KEYCLOAK_ADMIN_PASSWORD" \
             -e KC_DB=dev-file -e KC_HEALTH_ENABLED=true -e KC_METRICS_ENABLED=true \
@@ -281,6 +326,22 @@ jobs:
           echo "CANDIDATE_UPSTREAM=$candidate" >> "$GITHUB_ENV"
           echo "PREVIOUS_UPSTREAM=$previous" >> "$GITHUB_ENV"
 
+      # The kernel loads its signing key from a keystore in every environment and refuses to start
+      # without one (TDD-identity-kernel-002 1.2.0 §Custody as Built). A test run's is a throwaway, made
+      # by the generator the ceremony runs, in the pinned upstream image with no network, and mounted
+      # read-only with its vault file as a server mounts them (deploy/dev/compose.yaml).
+      - name: a throwaway signing keystore
+        run: |
+          image="$(grep -v '^[[:space:]]*#' image/keycloak.ref | grep -v '^[[:space:]]*$' | head -n 1 | tr -d '[:space:]')"
+          keys="$RUNNER_TEMP/kernel-keys"
+          mkdir -p "$keys"
+          docker run --rm --network none --user 0:0 -v "$keys:/keys" \
+            -v "$PWD/scripts/signing-keystore.sh:/opt/ceremony/signing-keystore.sh:ro" \
+            --entrypoint /bin/bash "$image" /opt/ceremony/signing-keystore.sh /keys
+          echo "KERNEL_KEYS=$keys" >> "$GITHUB_ENV"
+          # realm-apply and compat/ read the kid from the certificate, the keystore's public half.
+          echo "KERNEL_SIGNING_CERTIFICATE=$keys/realm-signing.crt" >> "$GITHUB_ENV"
+
       # One Keycloak at a time, on the host network so it reaches the service's port. start-dev for
       # the reason the job above gives; the migrations a release applies are the same under start.
       - name: write the Keycloak helpers
@@ -288,6 +349,8 @@ jobs:
           cat > "$RUNNER_TEMP/keycloak.sh" <<'SH'
           start() {
             docker run -d --name keycloak --network host \
+              -v "$KERNEL_KEYS/signing:/opt/keycloak/data/scnehaux:ro" -v "$KERNEL_KEYS/vault:/opt/keycloak/vault:ro" \
+              -e KC_VAULT=file \
               -e KC_DB=postgres -e KC_DB_URL=jdbc:postgresql://localhost:5432/keycloak \
               -e KC_DB_USERNAME=keycloak -e KC_DB_PASSWORD=keycloak \
               -e KC_BOOTSTRAP_ADMIN_USERNAME="$KEYCLOAK_ADMIN_USER" \

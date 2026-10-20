@@ -54,6 +54,15 @@ services:
       KC_PROXY_HEADERS: xforwarded
       KC_BOOTSTRAP_ADMIN_USERNAME: ${KC_BOOTSTRAP_ADMIN_USERNAME:-admin}
       KC_BOOTSTRAP_ADMIN_PASSWORD: ${KC_BOOTSTRAP_ADMIN_PASSWORD:?set KC_BOOTSTRAP_ADMIN_PASSWORD in .env}
+    # The realm signing keystore and its password, both read-only (ADR-IAM-002 §5.3,
+    # TDD-identity-kernel-002 1.2.0 §Custody as Built). The signing-key ceremony makes them
+    # (README.md §Keys). The java-keystore provider reads realm-signing.p12 from the realm's keystore
+    # directory, and the file vault reads the password from KC_VAULT_DIR, /opt/keycloak/vault in the
+    # image. Without them the image's entrypoint refuses to start, so the kernel never signs with a key
+    # it generated. Neither is ever copied to a backup (README.md §Backups).
+    volumes:
+      - ./keys/signing:/opt/keycloak/data/scnehaux:ro
+      - ./keys/vault:/opt/keycloak/vault:ro
     depends_on:
       postgres:
         condition: service_healthy
@@ -123,6 +132,9 @@ services:
       - -environment=${REALM_ENVIRONMENT:-development}
       - -definition=/repo/realm
       - -url=http://keycloak:8080
+      # The keystore's certificate, its public half: the signing key provider is created with its kid,
+      # and every run checks the realm signs with that key and no other.
+      - -signing-certificate=/keys/realm-signing.crt
       - -apply
     environment:
       KEYCLOAK_ADMIN_CLIENT_ID: ${KEYCLOAK_ADMIN_CLIENT_ID:-}

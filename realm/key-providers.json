@@ -1,0 +1,20 @@
+[
+  {
+    "name": "rsa-generated",
+    "providerId": "rsa-generated",
+    "providerType": "org.keycloak.keys.KeyProvider",
+    "config": {
+      "enabled": ["false"],
+      "active": ["false"]
+    }
+  },
+  {
+    "name": "rsa-enc-generated",
+    "providerId": "rsa-enc-generated",
+    "providerType": "org.keycloak.keys.KeyProvider",
+    "config": {
+      "enabled": ["false"],
+      "active": ["false"]
+    }
+  }
+]

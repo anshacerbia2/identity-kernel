@@ -91,7 +91,8 @@ Realm configuration, extensions, theme, image
 | `themes/scnehaux/` | Hosted login, MFA, and recovery theme |
 | `image/` | Container build, digest pinning, extension packaging |
 | `compat/` | Upgrade compatibility suite |
-| `scripts/` | CI checks of the images: the vulnerability scan, and the two-build comparison with its bill of materials |
+| `scripts/` | The signing-key ceremony and its keystore generator, the database restore drill, and the CI checks of the images: the vulnerability scan, and the two-build comparison with its bill of materials |
+| `docs/production/` | Production artifacts written ahead of the environment, such as the signing keystore's `SecretProviderClass`; not deployed |
 | `docs/designs/` | Technical Design Documents |
 | `docs/runbooks/` | Operating procedures the production gate requires |
 
@@ -138,6 +139,15 @@ Credentials come from the environment, never from a flag:
 - **Bootstrap administrator:** `KEYCLOAK_ADMIN_USER` and `KEYCLOAK_ADMIN_PASSWORD`, for a
   throwaway instance such as CI's.
 
+The realm signs with a key the kernel loads from a keystore (TDD-identity-kernel-002 1.2.0 §Custody as
+Built). `-signing-certificate` (default `$KERNEL_SIGNING_CERTIFICATE`) names the keystore's
+certificate, its public half. The signing key provider is created with the certificate's RFC 7638
+thumbprint as its `kid`, which Keycloak would otherwise make up, so the flag is required when the
+provider is created. Every run then checks the key as it signs: the provider's one key is the realm's
+active `PS256` key, its `kid` is its own thumbprint, and the certificate's when given, no other
+`PS256` key exists, a `fallback-PS256` above all, and no other key is published. A run that fails the check exits 1, and an apply
+records nothing.
+
 ### Client keys: `cmd/client-key`
 
 Confidential clients created before identity-control can register them use this tool. That covers
@@ -146,8 +156,11 @@ realm-apply's account, identity-control's own clients, the development caller, a
 - `client-key new -out NAME.pem` makes a 3072-bit RSA pair. It writes the private key (mode 0600)
   and prints the public JWK beside it. The `kid` is the key's RFC 7638 thumbprint, so a deployable
   is configured with its key file and nothing else.
-- `client-key install` sets a client to authenticate with exactly the JWKs it is given: two during
-  a rotation. It regenerates the client's old secret without printing it.
+- `client-key install` sets a client to authenticate with exactly the JWKs it is given: two only
+  during one registration's rotation, never two devices' keys (STD-GLB-009 rule 15). It regenerates
+  the client's old secret without printing it.
+- `client-key kid -certificate FILE` prints the `kid` of the realm signing key a keystore's certificate
+  carries. The signing-key ceremony records it.
 
 `deploy/dev/new-client-key.sh` and `deploy/dev/set-client-key.sh` run the tool from the realm-apply
 image, so a server needs only Docker.
@@ -175,7 +188,9 @@ reproduce what it applied.
 
 | Rule | Why |
 | :-- | :-- |
-| Only `local`, `ci`, and `development` are accepted | `signing-key.generated.json` has Keycloak generate the signing key in-process, which TDD-identity-kernel-002 prohibits wherever real tokens are served. It is 3072-bit because `foundation-platform`'s verifier silently discards smaller keys |
+| Only `local`, `ci`, and `development` are accepted | A shared environment also needs the keystore delivered from its secret manager and key rotation, and neither is built (TDD-identity-kernel-002 §Custody as Built, §Rotation) |
+| Every other RSA key provider is declared disabled | `key-providers.json` disables Keycloak's RS256 and RSA-OAEP providers, so the key set holds the signing key alone (ADR-IAM-002 §5.1). Enabling one again is drift; a provider deleted instead is in sync |
+| The signing key is a `java-keystore` provider with vault passwords | `signing-key.json` is refused with another provider, a literal password, a `kid` of its own, or an algorithm other than `PS256` (ADR-IAM-002 §5.3). The key is RSA-3072, because `foundation-platform`'s verifier silently discards smaller keys |
 | A client scope's mapper set is closed | A mapper added by hand is how `principal_id` would reach an audience it is kept from, so an undeclared mapper is drift, and applying removes it |
 | Nothing else is deleted | Removing a user-profile attribute makes Keycloak discard its values from every user on their next write. Removing a client scope strips its claims from every client using it. Both are migrations, not configuration changes |
 | A declared attribute is laid over the live one | The definition governs the fields it names and Keycloak keeps the rest, the same rule the comparison follows. So one field of a built-in attribute can be governed without restating its validations. `firstName`'s `required: null` is the case in point, and a declared null removes the field |

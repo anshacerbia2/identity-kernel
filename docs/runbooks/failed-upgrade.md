@@ -1,6 +1,6 @@
 # Failed upgrade
 
-Version 1.0.0. Last reviewed 2026-10-07.
+Version 1.0.1. Last reviewed 2026-10-20.
 
 A Keycloak upgrade is a change to `image/keycloak.ref`, with `image/keycloak.previous.ref` and the
 digest in `deploy/dev/compose.yaml` moved in the same commit (TDD-identity-kernel-005). It can fail
@@ -15,8 +15,8 @@ The cheapest failed upgrade is one that can be undone. Before `git pull` on a se
    `irreversible-after-start`.
 2. **No drift.** The read-only plan shows no `DRIFT` ([Console drift](console-drift.md)). An upgrade
    over drift discards it (TDD-identity-kernel-005 §Drift Detection Before Upgrade).
-3. **A backup, taken now.** `deploy/dev/README.md` §Backups: `pg_dump`, the globals, `.env` and
-   `keys/`. Keycloak's own guide says to "Back up the database" before an upgrade, because "The
+3. **A backup, taken now.** `deploy/dev/README.md` §Backups: `./backup.sh`, then `.env` and `keys/`
+   without the signing keystore and its vault file, which are never copied. Keycloak's own guide says to "Back up the database" before an upgrade, because "The
    database schema will no longer be compatible with the old server after the upgrade" [R1].
 4. **What consumers depend on, written down.** Save the discovery document and the key set, so
    step 6 below can compare the `issuer` and every key's `kid`:
@@ -89,7 +89,7 @@ after it.
 4. **Restore from the backup**, when the record says `irreversible-after-start`, when the
    migration failed midway, or when step 3 did not work. Keycloak's guide: "first restore the old
    installation, and then restore the database from the backup copy" [R1]. Revert the upgrade
-   commit, then follow `deploy/dev/README.md` §Backups, "Restoring".
+   commit, then follow [Database restore](database-restore.md).
 
    Everything written after the backup is lost:
    - users created, credentials enrolled, and sessions. identity-control's Principal sweep records
@@ -98,8 +98,8 @@ after it.
      reconciler records a registered client absent from the kernel as `missing`, and a client whose
      keys differ from its registration as a finding;
    - realm changes applied after the backup. The next `realm-apply` applies them again;
-   - signing keys created after the backup. Tokens they signed are then unknown to every consumer
-     ([Consumer reports an unknown `kid`](unknown-kid.md)).
+   - nothing of the signing key. The keystore is a file outside the database, not in the backup, and
+     the restored realm loads it under the same `kid` ([Database restore](database-restore.md)).
 
    Tell the owners of identity-control and organization-control before they start, because both
    reconcile against the kernel.

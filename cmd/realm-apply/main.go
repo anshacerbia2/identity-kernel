@@ -14,6 +14,12 @@
 // tool -- console drift -- and the run refuses to apply over it (exit 2). Revert the change in
 // Keycloak, or commit it to realm/ and apply with -adopt.
 //
+// The realm signs with a key loaded from a keystore (TDD-identity-kernel-002 §Custody as Built).
+// -signing-certificate names the keystore's certificate, its public half: the provider is created
+// with the certificate's RFC 7638 thumbprint as its kid, and every run checks that the realm signs with
+// that key and no other. It is needed when the provider is created; without it, the check still holds
+// the realm's one PS256 key to a kid equal to its own thumbprint.
+//
 // Exit status: 0 success, 1 error, 2 refused (drift or an unmanaged realm), 3 changes pending
 // under -require-in-sync.
 package main
@@ -52,6 +58,8 @@ func run(args []string, stdout, stderr io.Writer) int {
 	apply := flags.Bool("apply", false, "apply the plan; without it the run only reads and reports")
 	adopt := flags.Bool("adopt", false, "accept the live realm as the baseline instead of refusing drift")
 	requireInSync := flags.Bool("require-in-sync", false, "exit 3 when the plan has changes pending")
+	certificate := flags.String("signing-certificate", os.Getenv("KERNEL_SIGNING_CERTIFICATE"),
+		"the realm signing keystore's certificate, PEM (default $KERNEL_SIGNING_CERTIFICATE)")
 	if err := flags.Parse(args); err != nil {
 		return exitError
 	}
@@ -75,6 +83,16 @@ func run(args []string, stdout, stderr io.Writer) int {
 	definition, err := realmdef.Load(*dir)
 	if err != nil {
 		return fail("%v", err)
+	}
+	kid := ""
+	if *certificate != "" {
+		content, err := os.ReadFile(*certificate)
+		if err != nil {
+			return fail("reading the signing certificate: %v", err)
+		}
+		if kid, err = realmdef.SigningKeyID(content); err != nil {
+			return fail("%s: %v", *certificate, err)
+		}
 	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), applyTimeout)
@@ -123,6 +141,13 @@ func run(args []string, stdout, stderr io.Writer) int {
 		return exitRefused
 	}
 	if !*apply {
+		if recorded.RealmExists {
+			signing, err := realmdef.VerifySigningKey(ctx, client, definition, kid)
+			if err != nil {
+				return fail("the signing key: %v", err)
+			}
+			fmt.Fprintf(stdout, "\nthe realm signs with the keystore's key, kid %s\n", signing)
+		}
 		if *requireInSync && !plan.InSync() {
 			return exitPending
 		}
@@ -133,7 +158,8 @@ func run(args []string, stdout, stderr io.Writer) int {
 	if err != nil {
 		return fail("%v", err)
 	}
-	err = realmdef.Apply(ctx, client, plan, realmdef.Options{Environment: environment, Revision: revision, Adopt: *adopt})
+	err = realmdef.Apply(ctx, client, plan, realmdef.Options{Environment: environment, Revision: revision,
+		Adopt: *adopt, SigningKeyID: kid})
 	switch {
 	case errors.Is(err, realmdef.ErrDrift), errors.Is(err, realmdef.ErrUnmanaged):
 		fmt.Fprintf(stderr, "realm-apply: refusing: %v\n", err)
@@ -141,7 +167,8 @@ func run(args []string, stdout, stderr io.Writer) int {
 	case err != nil:
 		return fail("%v", err)
 	}
-	fmt.Fprintf(stdout, "\napplied revision %s to realm %s; the live realm matches the definition\n", revision, plan.Realm)
+	fmt.Fprintf(stdout, "\napplied revision %s to realm %s; the live realm matches the definition and signs with "+
+		"the keystore's key\n", revision, plan.Realm)
 	return 0
 }
 
