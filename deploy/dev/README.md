@@ -384,21 +384,6 @@ The step makes `dev-reporter-provisioning` and one `dev-reporter-obligation-<dom
 external system gets a workload of its own the same way. Its keys then change through identity-control,
 like every registered client (below), never through `set-client-key.sh`.
 
-**Moving an existing client from a secret to a key.** This applies to a server set up before keys:
-
-1. Make the key where the client runs.
-2. Run `./set-client-key.sh`.
-3. Point the client at its key and restart it.
-
-The client cannot authenticate between steps 2 and 3, so run them together. For realm-apply:
-
-```sh
-./new-client-key.sh realm-apply
-./set-client-key.sh master realm-apply keys/realm-apply.jwk.json
-# .env: keep KEYCLOAK_ADMIN_CLIENT_ID=realm-apply, delete KEYCLOAK_ADMIN_CLIENT_SECRET
-docker compose up -d
-```
-
 **Rotating a key.** Make the new pair and install both public keys, so the old and the new key
 are accepted together. Move the client to the new private key. Then install the new public key
 alone.
