@@ -144,8 +144,8 @@ Built). `-signing-certificate` (default `$KERNEL_SIGNING_CERTIFICATE`) names the
 certificate, its public half. The signing key provider is created with the certificate's RFC 7638
 thumbprint as its `kid`, which Keycloak would otherwise make up, so the flag is required when the
 provider is created. Every run then checks the key as it signs: the provider's one key is the realm's
-active `PS256` key, its `kid` is its own thumbprint, and the certificate's when given, and no other
-`PS256` key exists, a `fallback-PS256` above all. A run that fails the check exits 1, and an apply
+active `PS256` key, its `kid` is its own thumbprint, and the certificate's when given, no other
+`PS256` key exists, a `fallback-PS256` above all, and no other key is published. A run that fails the check exits 1, and an apply
 records nothing.
 
 ### Client keys: `cmd/client-key`
@@ -189,6 +189,7 @@ reproduce what it applied.
 | Rule | Why |
 | :-- | :-- |
 | Only `local`, `ci`, and `development` are accepted | A shared environment also needs the keystore delivered from its secret manager and key rotation, and neither is built (TDD-identity-kernel-002 §Custody as Built, §Rotation) |
+| Every other RSA key provider is declared disabled | `key-providers.json` disables Keycloak's RS256 and RSA-OAEP providers, so the key set holds the signing key alone (ADR-IAM-002 §5.1). Enabling one again is drift; a provider deleted instead is in sync |
 | The signing key is a `java-keystore` provider with vault passwords | `signing-key.json` is refused with another provider, a literal password, a `kid` of its own, or an algorithm other than `PS256` (ADR-IAM-002 §5.3). The key is RSA-3072, because `foundation-platform`'s verifier silently discards smaller keys |
 | A client scope's mapper set is closed | A mapper added by hand is how `principal_id` would reach an audience it is kept from, so an undeclared mapper is drift, and applying removes it |
 | Nothing else is deleted | Removing a user-profile attribute makes Keycloak discard its values from every user on their next write. Removing a client scope strips its claims from every client using it. Both are migrations, not configuration changes |

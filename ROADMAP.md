@@ -580,8 +580,12 @@ key, one per environment and realm, delivered by the AWS Secrets and Configurati
 - `deploy/dev/compose.yaml` mounts `keys/signing` and `keys/vault` read-only. `compose.ci.yaml` gives a
   test run's kernel a throwaway keystore made by the same generator, so the stacks identity-control,
   organization-control and organization-experience start from this checkout keep working unchanged.
-- Proved: `compat/signing_key_test.go` (the key, its `kid` and two tokens, against a throwaway
-  keystore), the `contract` job's start without a keystore, and `deploy-dev`, which runs the ceremony
+- The published key set holds the keystore's key alone (ADR-IAM-002 §5.1): `realm/key-providers.json`
+  disables Keycloak's RS256 and RSA-OAEP providers and keeps the HMAC and AES keys its internal tokens and
+  restart cookie need, which have no public half. The proxy closes the legacy `GET /realms/scnehaux`,
+  which would generate an RS256 key in-process, and `realm-apply` refuses any other published key.
+- Proved: `compat/signing_key_test.go` (the key, its `kid`, two tokens, and a key set of one, against a
+  throwaway keystore, and what the legacy endpoint does, recorded), the `contract` job's start without a keystore, and `deploy-dev`, which runs the ceremony
   and checks the key set and a token against its record.
 - Runbooks: [signing-key ceremony](docs/runbooks/signing-key-ceremony.md),
   [custody outage](docs/runbooks/custody-outage.md), [database restore](docs/runbooks/database-restore.md).

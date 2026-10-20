@@ -31,6 +31,7 @@ development server runbook (`docs/runbooks/dev-server.md`). This stack comes fir
 | Path | Reachable from |
 | :-- | :-- |
 | `/realms/scnehaux/...`: discovery, JWKS, token, login | anywhere |
+| `/realms/scnehaux`, the legacy realm endpoint, in any spelling | no one: `404` in both modes. Keycloak would answer it with an RS256 key it generates in-process, now that the realm's RS256 provider is disabled (TDD-identity-kernel-002 §The Published Key Set) |
 | `/admin/...` (console and REST API), `/realms/master/...` | `ADMIN_ALLOW_CIDRS` only; everyone else gets `404` |
 | management port `9000` (`/health/started`, `/health/live`, `/health/ready`, `/metrics`) | the container only: the healthcheck reads `/health/ready`; in production the orchestrator and monitoring reach it internally (TDD-005 1.5.0) |
 

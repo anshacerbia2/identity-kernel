@@ -150,7 +150,8 @@ environment and realm. The secret holds the sealed keystore, and the kernel load
 - **Every run checks the key as it signs** (`realmdef.VerifySigningKey`). The declared provider
   serves exactly one key: an active RSA `PS256` key of at least 3072 bits, the realm's active
   `PS256` key, with a `kid` equal to its own thumbprint, and, with the certificate given, equal to
-  the certificate's. No other `PS256` key may exist. An apply that fails the check records nothing.
+  the certificate's. No other `PS256` key may exist, and no other key may be published
+  (§The Published Key Set). An apply that fails the check records nothing.
   This is §Startup's thumbprint assertion, made against the live realm.
 - **Keycloak would otherwise fall back silently.** When no active `PS256` key loads, the next token
   makes the pinned release create a `fallback-PS256` provider, a key it generates in-process and
@@ -170,6 +171,42 @@ environment and realm. The secret holds the sealed keystore, and the kernel load
   (`--secret-binary`, "max 65536") [R7]; the keystore is about 3.5 KB. No CI job calls AWS. The
   artifact is reviewed with this design, and deployed when a production environment exists
   (STD-GLB-009 rule 12 keeps `deploy/` to environments that exist).
+
+### The Published Key Set (1.2.0)
+
+ADR-IAM-002 §5.1 item 2: "the enterprise JWKS advertises `PS256` keys only". The realm's JWKS therefore
+holds one key, the keystore's. Keycloak creates four other providers with every realm, and each is
+decided by what depends on it:
+
+| Provider | Key | In the JWKS when enabled | Decision | Why |
+| :-- | :-- | :-- | :-- | :-- |
+| `rsa-generated` | RS256, generated in-process | yes | **disabled** | No client signs RS256: the realm's default is PS256 and identity-control registers every client with `PS256` |
+| `rsa-enc-generated` | RSA-OAEP, for content sent to the realm encrypted | yes | **disabled** | No client sends an encrypted request object or assertion, and the realm accepts no brokering or SAML |
+| `hmac-generated-hs512` | HS512 secret | no, it has no public key | kept | The realm signs its internal tokens, refresh tokens among them, with it: `Constants.INTERNAL_SIGNATURE_ALGORITHM` is HS512 (ADR-IAM-002 [R12]) [R4] |
+| `aes-generated` | AES secret | no | kept | The login's restart cookie is encrypted with it: `cekManagementAlgorithm(INTERNAL)` is `AES` (`RestartLoginCookie.encodeAndEncrypt`) [R4] |
+
+- The JWKS publishes a key when "`k.getStatus().isEnabled() && k.getPublicKey() != null`"
+  (`JWKSServerUtils.getRealmJwks`) [R4], so a disabled provider leaves it, and the two secret keys
+  never enter it. `realm/key-providers.json` declares the two RSA providers disabled. A provider the
+  definition declares is compared like every other object, so a console change that enables one again
+  is drift. A provider deleted instead is equally out of the JWKS, so its absence is in sync.
+- **A disabled RS256 provider is not the end of RS256.** The pinned release still asks for an active
+  RS256 key in one place an anonymous request reaches: the legacy realm endpoint `GET
+  /realms/{realm}`, which returns the realm's public key through `getActiveRsaKey`
+  (`PublicRealmResource.getRealm`) [R4]. With no active RS256 key, that request makes Keycloak
+  generate `fallback-RS256` in-process and publish it (`DefaultKeyManager.getActiveKey`). The SAML
+  descriptor lists RS256 keys without asking for one, and every other caller needs a SAML client, the
+  disabled Docker protocol, or an administrator. So:
+  - the proxy closes the legacy endpoint on every listener, `(?i)^/+realms/+[^/]+/*$`, which Caddy runs
+    "against the URI-decoded/unescaped path" [R9]. No client of the estate calls it: discovery,
+    the key set and the token endpoint are all below it;
+  - `VerifySigningKey` refuses any enabled key with a public key other than the keystore's, so a
+    `fallback-RS256` made by a caller on the internal network fails the next `realm-apply` run;
+  - `compat/signing_key_test.go` asks the pinned image what the legacy endpoint does with the RS256
+    provider disabled, records it, and removes any fallback key it made.
+- An external registration's RS256 exception (STD-IAM-002 §3.2.2) needs its own RS256 key from custody,
+  loaded the way the PS256 key is. Until one exists, identity-control registers none, and a client
+  configured for RS256 would make Keycloak generate `fallback-RS256`, which the checks above refuse.
 
 ### Startup as Built (1.2.0)
 
@@ -427,8 +464,9 @@ control, in a log, or in an event.
 ## Testing Strategy
 
 **As built (1.2.0).** `compat/signing_key_test.go` runs against a throwaway keystore made by the
-ceremony's generator and asserts the first four lines of §Identity and Custody, the absence of any
-other `PS256` key, and that an access token and an ID token carry the keystore's `kid` and verify with
+ceremony's generator and asserts the first four lines of §Identity and Custody, that the published key
+set holds the keystore's key and nothing else (§The Published Key Set), the absence of any other
+`PS256` key, and that an access token and an ID token carry the keystore's `kid` and verify with
 the certificate's key alone. The `contract` job also starts the image without a keystore and requires
 the refusal. `deploy-dev` proves the server's path: the kernel refuses to start before the ceremony,
 the ceremony refuses a witness equal to the operator and a second key, and after it the key set and a
@@ -579,8 +617,9 @@ Accessed 2026-10-20. Each quote was read on the page or in the source file named
 | R1 | Keycloak, *Server Administration Guide* 26.7.5, "Loading keys from a Java Keystore", <https://www.keycloak.org/docs/26.7.5/server_admin/index.html>: "The keystore should be located inside a folder named like the realm name inside the main keystores directory (by default data directory under Keycloak's installation folder)"; "Enter the Keystore Password. The option can refer a value from an external vault."; "Enter a value for Keystore Type (JKS, PKCS12 or BCFKS)."; "Enter the Key Password. The option can refer a value from an external vault." |
 | R2 | Keycloak, *Using a vault*, <https://www.keycloak.org/server/vault>: "For enabling the file-based vault you need to build Keycloak first using the following build option"; the file is named `${vault.<realmname>_<secretname>}`, and "To process the secret correctly, you double all underscores in the <secretname>"; "The file-based vault implementation is especially useful for Kubernetes/OpenShift secrets." |
 | R3 | Oracle, *The keytool Command*, JDK 21, <https://docs.oracle.com/en/java/javase/21/docs/specs/man/keytool.html>: for `-keypass`, "If you press the Return key at the prompt, then the key password is set to the same password as the keystore password"; "file: Retrieve the password from the file named argument"; "In JDK 9 and later, the default keystore implementation is PKCS12." |
-| R4 | Keycloak 26.7.5 source, <https://github.com/keycloak/keycloak/tree/26.7.5>: `services/.../keys/JavaKeystoreKeyProviderFactory.java`, `validateConfiguration`: `if (kid == null) { kid = KeycloakModelUtils.generateId(); model.put(KID_KEY, kid); }`; `server-spi-private/.../models/utils/StripSecretsUtils.java`, `stripComponentConfigMap`, which removes every configuration key that is not a declared property; `RepresentationToModel.updateComponent`, which skips such a key (`if (!internal && !providerConfiguration.containsKey(k)) { continue; }`); `services/.../keys/DefaultKeyManager.java`, `getActiveKey`, which on no active key creates fallback keys and logs "No keys found for realm={0} and algorithm={1} for use={2}. Generating keys." |
+| R4 | Keycloak 26.7.5 source, <https://github.com/keycloak/keycloak/tree/26.7.5>: `services/.../keys/JavaKeystoreKeyProviderFactory.java`, `validateConfiguration`: `if (kid == null) { kid = KeycloakModelUtils.generateId(); model.put(KID_KEY, kid); }`; `server-spi-private/.../models/utils/StripSecretsUtils.java`, `stripComponentConfigMap`, which removes every configuration key that is not a declared property; `RepresentationToModel.updateComponent`, which skips such a key (`if (!internal && !providerConfiguration.containsKey(k)) { continue; }`); `services/.../keys/DefaultKeyManager.java`, `getActiveKey`, which on no active key creates fallback keys and logs "No keys found for realm={0} and algorithm={1} for use={2}. Generating keys.", and `getActiveRsaKey`, `getActiveKey(realm, KeyUse.SIG, Algorithm.RS256)`; `services/.../resources/PublicRealmResource.java`, `rep.setPublicKeyPem(PemUtils.encodeKey(session.keys().getActiveRsaKey(realm).getPublicKey()))`; `services/.../protocol/oidc/utils/JWKSServerUtils.java`, `getRealmJwks`, `.filter(k -> k.getStatus().isEnabled() && k.getPublicKey() != null)`; `server-spi-private/.../models/Constants.java`, `INTERNAL_SIGNATURE_ALGORITHM = Algorithm.HS512`; `services/.../jose/jws/DefaultTokenManager.java`, `cekManagementAlgorithm`, `case INTERNAL: return Algorithm.AES`; `services/.../protocol/RestartLoginCookie.java`, `encodeAndEncrypt`, `getActiveKey(..., KeyUse.ENC, algAlgorithm)`. |
 | R5 | AWS, *Use AWS Secrets and Configuration Provider CSI with IAM Roles for Service Accounts (IRSA)*, <https://docs.aws.amazon.com/secretsmanager/latest/userguide/integrating_csi_driver.html>: "To determine which secrets the ASCP mounts in Amazon EKS as files on the filesystem, you create a SecretProviderClass YAML file"; and *AWS Secrets and Configuration Provider code examples*, <https://docs.aws.amazon.com/secretsmanager/latest/userguide/ascp-examples.html>: `objectAlias`, "The file name of the secret in the Amazon EKS Pod"; `filePermission`, "If you don't specify this field it will default to "0644"". |
 | R6 | AWS, `secrets-store-csi-driver-provider-aws`, `provider/secrets_manager_provider.go` at a8f9f58, <https://github.com/aws/secrets-store-csi-driver-provider-aws/blob/a8f9f58f9dc951766134cc60a04c00b2c1a67a6a/provider/secrets_manager_provider.go>: "// Use either secret string or secret binary.", then `sValue = rsp.SecretBinary` when the secret has no string. |
 | R7 | AWS CLI, `secretsmanager create-secret`, <https://docs.aws.amazon.com/cli/latest/reference/secretsmanager/create-secret.html>: `--secret-binary`, "We recommend that you store your binary data in a file and then pass the contents of the file as a parameter", "Constraints: min 1, max 65536"; `--kms-key-id`, "If you don't specify this value, then Secrets Manager uses the key aws/secretsmanager"; `fileb://` "will always be treated as binary and use the file contents directly". |
 | R8 | Kubernetes SIG Auth, *Secrets Store CSI Driver*, Troubleshooting, <https://secrets-store-csi-driver.sigs.k8s.io/troubleshooting.html>: "If the pod fails to start because of the inline volume mount", with the event "MountVolume.SetUp failed for volume "secrets-store-inline"". |
+| R9 | Caddy, *Request matchers*, <https://caddyserver.com/docs/caddyfile/matchers>: `path_regexp`, "Like path, but supports regular expressions. Runs against the URI-decoded/unescaped path." |

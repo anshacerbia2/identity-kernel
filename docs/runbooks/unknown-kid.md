@@ -29,8 +29,11 @@ That is `ErrUnknownKey`. Two other errors look alike and have other causes:
 TDD-identity-kernel-002 1.2.0 §Custody as Built). Its `kid` is the RFC 7638 thumbprint of the key, set
 when the provider is created. Its JWKS, `/realms/scnehaux/protocol/openid-connect/certs`, publishes
 every key whose status is `ACTIVE` or `PASSIVE`. A `DISABLED` or deleted key leaves it at once [R1].
-The realm also keeps Keycloak's built-in providers beside it, so the JWKS carries keys for other
-algorithms and for encryption.
+Keycloak's built-in RS256 and RSA-OAEP providers are declared disabled
+(`realm/key-providers.json`), so the JWKS carries the keystore's key alone, and its HMAC and AES keys
+have no public half (TDD-identity-kernel-002 §The Published Key Set). A `fallback-RS256` in the realm
+came from the legacy endpoint `GET /realms/scnehaux` reached past the proxy: delete it, and find the
+caller on the internal network.
 
 **Keycloak replaces a missing signing key by itself.** When no active PS256 key exists, the next
 token issued makes Keycloak create a provider named `fallback-PS256`, at priority -100, and log "No
