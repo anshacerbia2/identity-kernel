@@ -67,10 +67,12 @@ func TestTheRealmMustSignWithTheKeystoreKeyAlone(t *testing.T) {
 	kid := admin.Thumbprint(&key.PublicKey)
 	ours := realmKey{Kid: kid, ProviderID: "provider", Algorithm: "PS256", Type: "RSA", Status: "ACTIVE",
 		PublicKey: publicKeyB64(t, key)}
-	rs256 := realmKey{Kid: "rs", ProviderID: "rsa-default", Algorithm: "RS256", Type: "RSA", Status: "ACTIVE"}
+	rs256 := realmKey{Kid: "rs", ProviderID: "rsa-default", Algorithm: "RS256", Type: "RSA", Status: "DISABLED",
+		PublicKey: "MIIB"}
+	hs512 := realmKey{Kid: "hs", ProviderID: "hmac", Algorithm: "HS512", Type: "OCT", Status: "ACTIVE"}
 	active := map[string]string{"PS256": kid, "RS256": "rs"}
 
-	if got, err := checkSigningKey("provider", "realm-signing-ps256", active, []realmKey{ours, rs256}, kid); err != nil ||
+	if got, err := checkSigningKey("provider", "realm-signing-ps256", active, []realmKey{ours, rs256, hs512}, kid); err != nil ||
 		got != kid {
 		t.Fatalf("the keystore's key alone: %q, %v", got, err)
 	}
@@ -88,6 +90,8 @@ func TestTheRealmMustSignWithTheKeystoreKeyAlone(t *testing.T) {
 			active: map[string]string{"PS256": "uuid"}, says: "thumbprint"},
 		"another keystore than the ceremony's": {keys: []realmKey{ours}, active: active, want: "other", says: "another keystore"},
 		"not the active key":                   {keys: []realmKey{ours}, active: map[string]string{"PS256": "x"}, says: "active"},
+		"an RS256 key still published": {keys: []realmKey{ours, func() realmKey { k := rs256; k.Status = "ACTIVE"; return k }()},
+			active: active, says: "publishes keys other than"},
 		"a disabled key": {keys: []realmKey{func() realmKey { k := ours; k.Status = "DISABLED"; return k }()},
 			active: active, says: "ACTIVE"},
 	}
@@ -119,5 +123,47 @@ func TestTheDefinedKeyIsAKeystoreWithVaultPasswords(t *testing.T) {
 	generated.Key["providerId"] = "rsa-generated"
 	if err := generated.validateSigningKey(); err == nil {
 		t.Error("a key Keycloak generates was accepted")
+	}
+}
+
+func TestEveryOtherKeyProviderIsDeclaredDisabled(t *testing.T) {
+	d := definition(t)
+	if len(d.KeyProviders) == 0 {
+		t.Fatal("the definition declares no key provider besides the signing key")
+	}
+	if err := d.validateKeyProviders(); err != nil {
+		t.Fatalf("the committed definition: %v", err)
+	}
+	enabled := d.Clone()
+	enabled.KeyProviders[0]["config"].(map[string]any)["enabled"] = []any{"true"}
+	if err := enabled.validateKeyProviders(); err == nil {
+		t.Error("a key provider declared enabled was accepted")
+	}
+}
+
+func TestAKeyProviderEnabledAgainIsAChangeAndAbsentIsInSync(t *testing.T) {
+	d := definition(t)
+	l := liveFrom(d)
+	for _, change := range compare(d, l) {
+		if change.Kind == KindKeyProvider && change.Action != InSync {
+			t.Fatalf("a disabled provider reads as %s: %v", change.Action, change.Diffs)
+		}
+	}
+	providerName := name(d.KeyProviders[0])
+	l.keys[providerName]["config"].(map[string]any)["enabled"] = []any{"true"}
+	found := false
+	for _, change := range compare(d, l) {
+		if change.Kind == KindKeyProvider && change.Name == providerName {
+			found = change.Action == Update
+		}
+	}
+	if !found {
+		t.Errorf("%s enabled again is not a change", providerName)
+	}
+	delete(l.keys, providerName)
+	for _, change := range compare(d, l) {
+		if change.Kind == KindKeyProvider && change.Name == providerName && change.Action != InSync {
+			t.Errorf("%s absent reads as %s; absent is as good as disabled", providerName, change.Action)
+		}
 	}
 }

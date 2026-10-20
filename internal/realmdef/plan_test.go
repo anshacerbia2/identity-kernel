@@ -28,6 +28,11 @@ func liveFrom(d Definition) *live {
 	key := overlay(map[string]any{"id": "key-id", "parentId": "realm-id"}, c.Key)
 	key["config"].(map[string]any)["certificate"] = []any{"MIIC..."}
 	l.keys[name(key)] = key
+	for _, provider := range c.KeyProviders {
+		live := overlay(map[string]any{"id": "id-" + name(provider), "parentId": "realm-id"}, provider)
+		live["config"].(map[string]any)["priority"] = []any{"100"}
+		l.keys[name(live)] = live
+	}
 	for _, scope := range c.Scopes {
 		live := overlay(map[string]any{"id": "scope-" + name(scope)}, scope)
 		for _, mapper := range listOfMaps(live["protocolMappers"]) {
@@ -97,11 +102,12 @@ func TestAnAbsentRealmCreatesEverything(t *testing.T) {
 			bindings++
 		}
 	}
-	if want := 3 + len(d.Scopes) + len(d.Profile) + len(d.Flows) + bindings + len(d.RequiredActions); len(changes) != want {
+	if want := 3 + len(d.Scopes) + len(d.Profile) + len(d.Flows) + bindings + len(d.RequiredActions) +
+		len(d.KeyProviders); len(changes) != want {
 		t.Fatalf("%d changes for an absent realm, want %d", len(changes), want)
 	}
 	for _, change := range changes {
-		if change.Kind == KindBinding || change.Kind == KindRequiredAction {
+		if change.Kind == KindBinding || change.Kind == KindRequiredAction || change.Kind == KindKeyProvider {
 			if change.Action != Update {
 				t.Errorf("binding %s: %s, want update", change.Name, change.Action)
 			}

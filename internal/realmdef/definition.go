@@ -59,7 +59,8 @@ var Files = []string{"scnehaux.json", "signing-key.json", "client-scopes.json", 
 
 // OptionalFiles are sources a definition may lack. A revision from before one was added is still a
 // definition, so the drift check can judge the live realm against it.
-var OptionalFiles = []string{"default-client-scopes.json", "authentication-flows.json", "required-actions.json"}
+var OptionalFiles = []string{"default-client-scopes.json", "authentication-flows.json", "required-actions.json",
+	"key-providers.json"}
 
 // Definition is the declared state of one realm.
 type Definition struct {
@@ -77,6 +78,11 @@ type Definition struct {
 	// RequiredActions are the fields the definition governs on the kernel's required actions, by
 	// alias. Nil when it declares none, and omitted from the digest then.
 	RequiredActions []map[string]any `json:"requiredActions,omitempty"`
+	// KeyProviders are Keycloak's built-in key providers the definition governs besides the signing
+	// key, by name: the ones whose keys would enter the published key set, declared disabled
+	// (TDD-identity-kernel-002 §The Published Key Set). Nil when it declares none, and omitted from the
+	// digest then.
+	KeyProviders []map[string]any `json:"keyProviders,omitempty"`
 }
 
 // DefaultScopes are the client scopes a new client holds as default and as optional scopes, by name.
@@ -195,6 +201,11 @@ func decode(files map[string][]byte) (Definition, error) {
 			return Definition{}, fmt.Errorf("parsing required-actions.json: %w", err)
 		}
 	}
+	if content, ok := files["key-providers.json"]; ok {
+		if err := json.Unmarshal(content, &d.KeyProviders); err != nil {
+			return Definition{}, fmt.Errorf("parsing key-providers.json: %w", err)
+		}
+	}
 	return d, nil
 }
 
@@ -216,6 +227,9 @@ func (d Definition) validate() error {
 		return err
 	}
 	if err := d.validateSigningKey(); err != nil {
+		return err
+	}
+	if err := d.validateKeyProviders(); err != nil {
 		return err
 	}
 	return d.validateStructure()
@@ -288,6 +302,15 @@ func (d Definition) validateStructure() error {
 	}
 	if err := validateRequiredActions(d.RequiredActions); err != nil {
 		return err
+	}
+	providers := map[string]bool{name(d.Key): true}
+	for _, provider := range d.KeyProviders {
+		providerName := name(provider)
+		if providerName == "" || providers[providerName] || provider["providerId"] == nil {
+			return fmt.Errorf("key-providers.json declares a provider with an empty or repeated name %q, or no "+
+				"providerId", providerName)
+		}
+		providers[providerName] = true
 	}
 	attributes := map[string]bool{}
 	for _, attribute := range d.Profile {

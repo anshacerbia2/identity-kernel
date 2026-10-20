@@ -225,6 +225,22 @@ jobs:
           done
           exit "$failed"
 
+      # The legacy realm endpoint makes Keycloak generate an RS256 key in-process once the realm's RS256
+      # provider is disabled, so the proxy closes it to everyone, in any spelling (TDD-identity-kernel-002
+      # §The Published Key Set). The key set it would have joined still holds the keystore's key alone.
+      - name: the legacy realm endpoint is closed, and the key set holds one key
+        run: |
+          failed=0
+          for path in /realms/scnehaux /realms/scnehaux/ //realms//scnehaux "/realms/scnehaux;x=1" /REALMS/scnehaux /realms/%73cnehaux; do
+            status="$(curl -sk -o /dev/null -w '%{http_code}' "https://localhost$path")"
+            echo "$path -> $status"
+            [ "$status" = 404 ] || { echo "::error::$path answered $status through the proxy"; failed=1; }
+          done
+          curl -sfk https://localhost/realms/scnehaux/protocol/openid-connect/certs \
+            | jq -e --arg kid "$CEREMONY_KID" '[.keys[].kid] == [$kid]' \
+            || { echo "::error::the key set holds more than the ceremony's key"; failed=1; }
+          exit "$failed"
+
       # Last, because it deletes the database (STD-GLB-002 §Restore Evidence): backup.sh, the volume
       # deleted, restore.sh into an empty one, and the restored realm compared with the source and
       # signing with the same keystore key (scripts/dev-restore-drill.sh).
@@ -373,6 +389,14 @@ jobs:
             fi
           done
           exit "$failed"
+
+      - name: the legacy realm endpoint is closed on the public port
+        run: |
+          for path in /realms/scnehaux /realms/scnehaux/ "/realms/scnehaux;x=1"; do
+            status="$(curl -s -o /dev/null -w '%{http_code}' "http://localhost:8080$path")"
+            echo "$path -> $status"
+            [ "$status" = 404 ] || { echo "::error::$path answered $status on the public port"; exit 1; }
+          done
 
       # The positive control for the step above: a 404 on every path would also be what a proxy that
       # served nothing returns. Here the console is served, and it points its login at the private

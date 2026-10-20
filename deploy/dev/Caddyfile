@@ -7,6 +7,8 @@
 # is not something to leave open to the internet on a development server either. Everything a
 # relying party or a developer's local application needs lives under /realms/scnehaux.
 #
+# The legacy realm endpoint answers 404 to everyone (below).
+#
 # Anything else answers 404 rather than 403, so the path does not confirm it exists.
 #
 # Caddy replaces incoming X-Forwarded-* headers from any client it does not trust, and trusts none
@@ -18,6 +20,16 @@
 		not remote_ip {$ADMIN_ALLOW_CIDRS}
 	}
 	respond @administration 404
+
+	# The legacy realm endpoint, GET /realms/<realm>, closed to everyone. Keycloak 26.7.5 answers it with
+	# the realm's active RS256 key, and generates one in-process when none is active, which the realm's
+	# disabled RS256 provider makes the case (TDD-identity-kernel-002 §The Published Key Set). No client
+	# needs it: discovery, the key set and the token endpoint are below it. Matched on the unescaped path,
+	# with any case, repeated slashes and matrix parameters.
+	@legacy_realm {
+		path_regexp (?i)^/+realms/+[^/]+/*$
+	}
+	respond @legacy_realm 404
 
 	reverse_proxy keycloak:8080
 }

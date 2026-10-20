@@ -106,15 +106,20 @@ func VerifySigningKey(ctx context.Context, c *admin.Client, d Definition, want s
 func checkSigningKey(providerID, providerName string, active map[string]string, keys []realmKey,
 	want string) (string, error) {
 	var ours []realmKey
-	var others []string
+	var others, published []string
 	for _, key := range keys {
 		switch {
 		case key.ProviderID == providerID:
 			ours = append(ours, key)
 		case key.Algorithm == SigningAlgorithm:
 			others = append(others, fmt.Sprintf("kid %s from provider %s (%s)", key.Kid, key.ProviderID, key.Status))
+		case key.PublicKey != "" && key.Status != "DISABLED":
+			// The key set publishes every enabled key with a public key (JWKSServerUtils.getRealmJwks).
+			published = append(published, fmt.Sprintf("%s kid %s from provider %s (%s)", key.Algorithm, key.Kid,
+				key.ProviderID, key.Status))
 		}
 	}
+	sort.Strings(published)
 	sort.Strings(others)
 	if len(ours) != 1 {
 		return "", fmt.Errorf("the key provider %s serves %d keys, want 1: its keystore did not load. The kernel "+
@@ -155,6 +160,11 @@ func checkSigningKey(providerID, providerName string, active map[string]string, 
 			"Keycloak generated in-process because the keystore did not load; see docs/runbooks/custody-outage.md",
 			SigningAlgorithm, strings.Join(others, "; "))
 	}
+	if len(published) > 0 {
+		return "", fmt.Errorf("the realm publishes keys other than the keystore's: %s. ADR-IAM-002 §5.1 allows PS256 "+
+			"alone; a fallback-RS256 is a key Keycloak generated in-process for the legacy realm endpoint "+
+			"(TDD-identity-kernel-002 §The Published Key Set)", strings.Join(published, "; "))
+	}
 	return key.Kid, nil
 }
 
@@ -179,6 +189,20 @@ func (d Definition) validateSigningKey() error {
 		if !strings.HasPrefix(value, "${vault.") || !strings.HasSuffix(value, "}") {
 			return fmt.Errorf("signing-key.json sets %s to a literal value; it must be a vault reference, "+
 				"${vault.<name>} (ADR-IAM-002 §5.3)", field)
+		}
+	}
+	return nil
+}
+
+// validateKeyProviders holds every other declared key provider to ADR-IAM-002 §5.1, "the enterprise JWKS
+// advertises PS256 keys only": each is declared disabled, so its key leaves the published key set.
+func (d Definition) validateKeyProviders() error {
+	for _, provider := range d.KeyProviders {
+		config, _ := provider["config"].(map[string]any)
+		if single(config["enabled"]) != "false" || single(config["active"]) != "false" {
+			return fmt.Errorf("key-providers.json declares %s enabled or active; a key provider other than the "+
+				"signing key is declared disabled, so the key set holds the keystore's key alone (ADR-IAM-002 §5.1)",
+				name(provider))
 		}
 	}
 	return nil

@@ -9,7 +9,13 @@ package compat
 //     vault references, and is the certificate's key;
 //   - its kid is the RFC 7638 thumbprint of that key, in the Admin API and in the published key set;
 //   - an access token and an ID token carry that kid, and verify with the certificate's key alone;
-//   - no other PS256 key exists, so nothing was generated in-process as a fallback.
+//   - no other PS256 key exists, so nothing was generated in-process as a fallback;
+//   - the published key set holds the keystore's key and nothing else: Keycloak's RS256 and RSA-OAEP
+//     providers are disabled by realm/key-providers.json (ADR-IAM-002 §5.1, TDD-identity-kernel-002
+//     §The Published Key Set).
+//
+// TestTheLegacyRealmEndpointAsksForAnRS256Key records what the pinned image does when a request reaches
+// GET /realms/{realm} with no RS256 key active, which is why the proxy closes that endpoint.
 
 import (
 	"crypto"
@@ -19,6 +25,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"encoding/pem"
+	"fmt"
 	"net/http"
 	"os"
 	"strings"
@@ -122,10 +129,34 @@ func TestTokensAreSignedByTheKeystoreKeyUnderItsThumbprint(t *testing.T) {
 		case key.Algorithm == "PS256":
 			t.Errorf("the realm holds another PS256 key, kid %s from provider %s: a fallback generated in-process",
 				key.Kid, key.ProviderID)
+		case key.PublicKey != "" && key.Status != "DISABLED":
+			t.Errorf("the realm publishes a %s key, kid %s from provider %s (%s); ADR-IAM-002 §5.1 allows PS256 alone",
+				key.Algorithm, key.Kid, key.ProviderID, key.Status)
 		}
 	}
 	if !found {
 		t.Fatal("the java-keystore provider serves no key: the keystore did not load")
+	}
+
+	// The key set, as published: the keystore's key and nothing else.
+	response, err := a.http.Get(a.realmURL("/certs"))
+	if err != nil {
+		t.Fatalf("GET certs: %v", err)
+	}
+	var set struct {
+		Keys []struct {
+			Kid string `json:"kid"`
+			Alg string `json:"alg"`
+			Use string `json:"use"`
+		} `json:"keys"`
+	}
+	err = json.NewDecoder(response.Body).Decode(&set)
+	_ = response.Body.Close()
+	if err != nil {
+		t.Fatalf("decoding certs: %v", err)
+	}
+	if len(set.Keys) != 1 || set.Keys[0].Kid != kid || set.Keys[0].Alg != "PS256" || set.Keys[0].Use != "sig" {
+		t.Errorf("the key set publishes %+v; want the keystore's PS256 signing key %s alone", set.Keys, kid)
 	}
 
 	// The key, as published.
@@ -176,4 +207,50 @@ func verifyWith(public *rsa.PublicKey, token string) error {
 	}
 	digest := sha256.Sum256([]byte(parts[0] + "." + parts[1]))
 	return rsa.VerifyPSS(public, crypto.SHA256, digest[:], signature, &rsa.PSSOptions{SaltLength: rsa.PSSSaltLengthAuto})
+}
+
+// TestTheLegacyRealmEndpointAsksForAnRS256Key asks the pinned image what GET /realms/{realm} does when no
+// RS256 key is active, as with the realm's RS256 provider disabled. 26.7.5's PublicRealmResource returns
+// the realm's public key through getActiveRsaKey, and DefaultKeyManager.getActiveKey generates a
+// fallback key when none is active. A fallback-RS256 made so is a key generated in-process and
+// published, which is why the proxy closes the endpoint and realm-apply refuses such a key
+// (TDD-identity-kernel-002 §The Published Key Set). The answer is recorded, not required, and any
+// fallback key the request made is removed again.
+func TestTheLegacyRealmEndpointAsksForAnRS256Key(t *testing.T) {
+	a := requireKeycloak(t)
+	fallbacks := func() []string {
+		var components []struct {
+			ID   string `json:"id"`
+			Name string `json:"name"`
+		}
+		if err := a.getJSON("/admin/realms/"+realmName+"/components?type=org.keycloak.keys.KeyProvider", &components); err != nil {
+			t.Fatalf("listing the key providers: %v", err)
+		}
+		var ids []string
+		for _, component := range components {
+			if strings.HasPrefix(component.Name, "fallback-") {
+				ids = append(ids, component.ID)
+			}
+		}
+		return ids
+	}
+	if before := fallbacks(); len(before) != 0 {
+		t.Fatalf("the realm already holds %d fallback key providers", len(before))
+	}
+	t.Cleanup(func() {
+		for _, id := range fallbacks() {
+			_, _ = a.call(http.MethodDelete, "/admin/realms/"+realmName+"/components/"+id, nil, http.StatusNoContent)
+		}
+	})
+	response, err := a.http.Get(a.base + "/realms/" + realmName)
+	if err != nil {
+		t.Fatalf("GET the legacy realm endpoint: %v", err)
+	}
+	_ = response.Body.Close()
+	made := len(fallbacks())
+	t.Logf("GET /realms/%s with no active RS256 key answered %d and made %d fallback key providers", realmName,
+		response.StatusCode, made)
+	publish(t, fmt.Sprintf("### The legacy realm endpoint, with RS256 disabled\n\n`GET /realms/%s` answered %d "+
+		"and made **%d** fallback key provider(s) in-process. The proxy closes the endpoint "+
+		"(TDD-identity-kernel-002 §The Published Key Set).\n", realmName, response.StatusCode, made))
 }

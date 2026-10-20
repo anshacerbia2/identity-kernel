@@ -86,6 +86,8 @@ func Apply(ctx context.Context, c *admin.Client, plan Plan, options Options) err
 			err = applyKey(ctx, c, base, d.Key, plan.live, change.Action, options.SigningKeyID)
 		case KindScope:
 			err = applyScope(ctx, c, base, scopeNamed(d, change.Name), plan.live, change.Action)
+		case KindKeyProvider:
+			err = applyKeyProvider(ctx, c, base, keyProviderNamed(d, change.Name), plan.live)
 		case KindAttribute:
 			profileChanged = true
 		case KindDefaults:
@@ -193,6 +195,28 @@ func applyKey(ctx context.Context, c *admin.Client, base string, key map[string]
 	_, err := c.Call(ctx, http.MethodPut, base+"/components/"+url.PathEscape(id), overlay(observed, key),
 		http.StatusNoContent)
 	return err
+}
+
+// applyKeyProvider lays the declared fields over a built-in key provider, which leaves its key in place
+// and only disables it. A provider absent from the realm is left absent.
+func applyKeyProvider(ctx context.Context, c *admin.Client, base string, provider map[string]any, l *live) error {
+	observed := l.keys[name(provider)]
+	if observed == nil {
+		return nil
+	}
+	id, _ := observed["id"].(string)
+	_, err := c.Call(ctx, http.MethodPut, base+"/components/"+url.PathEscape(id), overlay(observed, provider),
+		http.StatusNoContent)
+	return err
+}
+
+func keyProviderNamed(d Definition, providerName string) map[string]any {
+	for _, provider := range d.KeyProviders {
+		if name(provider) == providerName {
+			return provider
+		}
+	}
+	return nil
 }
 
 func applyScope(ctx context.Context, c *admin.Client, base string, scope map[string]any, l *live, action Action) error {
