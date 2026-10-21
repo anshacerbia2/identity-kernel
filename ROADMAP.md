@@ -933,6 +933,13 @@ are internal in every environment, and the Admin Console, kept in the one image 
 not an operating surface. `compat/management_test.go` asserts the probes and metrics on 9000 and
 their absence on 8080.
 
+✅ The build context excludes secrets and local state (TDD-005 1.12.0, STD-GLB-009 3.0.0 §Container Images
+rule 12 and §5 item 9, ADR-GLB-020). The repository had no `.dockerignore`, so a broad `COPY` or a build
+from the root could send `deploy/dev/keys/`, a `.env` or `.git` to the builder. The root file now excludes
+the three kinds of path, nothing the Dockerfile copies (`themes/scnehaux`, `image/start.sh`) is excluded,
+and the image builds from it. `scripts/check-dockerignore.sh` and the `dockerignore` job of
+`image-build.yml` fail on a missing file or an unmatched path of those kinds.
+
 ## Development server
 
 ✅ A long-lived development Keycloak, so local applications have a real issuer to develop against.

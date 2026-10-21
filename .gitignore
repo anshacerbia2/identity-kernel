@@ -28,3 +28,6 @@ browser/screenshots/
 
 # The image scan's database and archives, when scripts/image-scan.sh runs outside CI.
 .image-scan/
+
+# The scratch build context of scripts/check-dockerignore.sh, removed when it exits.
+.dockerignore-check.*/

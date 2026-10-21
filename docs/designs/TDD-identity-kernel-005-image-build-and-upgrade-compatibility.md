@@ -3,12 +3,12 @@ doc_meta:
   id: TDD-identity-kernel-005
   title: Image Build, Digest Pinning, and Upgrade Compatibility
   owner: Identity Platform Team
-  version: 1.11.0
+  version: 1.12.0
   status: approved
   classification: restricted
   review_cycle_days: 90
   created_date: 2026-08-11
-  last_reviewed: 2026-10-20
+  last_reviewed: 2026-10-21
   parent_sad: SAD-001
 ---
 
@@ -376,6 +376,23 @@ detected …: <images>: <statement>` with `affected` or one of the three justifi
 on a review date that has passed, is more than 90 days ahead, or, for `affected`, is more than 90 days
 after detection. Whether a statement is true, and whether Table 1 was read correctly, is left to review.
 
+### The Build Context (1.12.0)
+
+STD-GLB-009 3.0.0 §Container Images rule 12 (`ADR-GLB-020`) requires each image build to carry a
+`.dockerignore` that excludes secrets and key material, local state, and `.git` and `.github`.
+
+- The kernel image's build context is the repository root (`docker build -f image/Dockerfile .`). The
+  root `.dockerignore` excludes every `keys/` directory (the realm keystore lives under
+  `deploy/dev/keys/`), `.env` files, `*.pem`, a Compose override and a local token file; the sibling
+  checkouts and working directories workflows place here (`.kernel/`, `.identity/`, `.experience/`,
+  `.image-scan/`); coverage, test and build output; and `.git` and `.github`.
+- The Dockerfile copies `themes/scnehaux` and `image/start.sh`. Neither is excluded, and the image was
+  built from the root with the file in place.
+- `scripts/check-dockerignore.sh` is STD-GLB-009 §5 item 9: it builds a scratch context that holds the
+  `.dockerignore` and a probe file of each kind, and fails when the file is missing or a probe reaches
+  the context. It applies Docker's own matching. The `dockerignore` job of `image-build.yml` runs it. The
+  file is byte-identical in identity-control and organization-control.
+
 ## Data Model
 
 ### Release Record
@@ -661,6 +678,13 @@ bill of materials for one commit agree.
   fail first when any compose file set names an image without a digest and its service is not
   `pull_policy: build` or `never` (STD-GLB-009 1.8.0 rule 11).
 
+### Build Context (1.12.0)
+
+- `scripts/check-dockerignore.sh` fails when `.dockerignore` is missing, or when `keys/probe`,
+  `deploy/dev/keys/probe`, `.env`, `deploy/dev/.env`, `probe.pem`, `deploy/dev/compose.override.yaml`,
+  `.token`, `.kernel/probe`, `coverage/probe`, `.git/probe` or `.github/probe` reaches the build
+  context. A control file no rule names must reach it, or the check fails as broken.
+
 ### Promotion
 
 - The digest promoted to production equals the digest evaluated by the suite.
@@ -780,6 +804,7 @@ so the backup is part of the upgrade path. On the development server it follows 
 | Conforms to | STD-GLB-009 1.8.0 §Container Images, rules 4, 5, 7, 8, 9, 10 and 11 (lands with scnehaux-architecture #86) — §Images the Stack Runs |
 | Consumed by | `TDD-identity-control-002`, `TDD-identity-control-005` — a session removed through the Admin API stays removed (§Session Store) |
 | Conforms to | STD-GLB-009 §Development Server Deployment rule 9 (1.10.0, in 2.0.0) — backups, 14 sets by count, no keystore copied, off-host before production (§Backups and the Restore Drill) |
+| Conforms to | STD-GLB-009 3.0.0 §Container Images rule 12 and §5 item 9, authorized by ADR-GLB-020 (§The Build Context) |
 | Conforms to | STD-GLB-002 §Restore Evidence — the drill, on a schedule (§Backups and the Restore Drill) |
 | Enterprise constraint | PAD-PLT-001 §6.2 — RTO 15 minutes, checked; RPO 1 minute, not met (§Backups and the Restore Drill) |
 
