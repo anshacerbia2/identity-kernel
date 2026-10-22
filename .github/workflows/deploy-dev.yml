@@ -25,6 +25,13 @@ env:
 jobs:
   stack:
     runs-on: ubuntu-latest
+    env:
+      # The commit under test: the images are built with it as their revision label and the
+      # check reads it back from the image the running container uses.
+      BUILD_REVISION: ${{ github.sha }}
+      # No default provenance attestation: it records build timestamps, so every rebuild of the same
+      # source made a new image and compose recreated keycloak (TDD-identity-kernel-005 §Images the Stack Runs).
+      BUILDX_NO_DEFAULT_ATTESTATIONS: "1"
     defaults:
       run:
         working-directory: deploy/dev
@@ -125,14 +132,9 @@ jobs:
           docker compose -f compose.yaml -f compose.ci.yaml logs --no-color realm-apply
           [ "$code" = "0" ] || { echo "::error::the realm-apply job exited $code"; exit 1; }
 
-      - name: the kernel image was built here, not pulled
+      - name: the kernel image runs the commit built here
         run: |
-          digests="$(docker image inspect -f '{{len .RepoDigests}}' scnehaux/identity-kernel:dev)"
-          if [ "$digests" != 0 ]; then
-            echo "::error::scnehaux/identity-kernel:dev carries a registry digest: it was pulled, not built"
-            exit 1
-          fi
-          echo "scnehaux/identity-kernel:dev has no registry digest: built here"
+          COMPOSE_FILE=compose.yaml:compose.ci.yaml bash ../../.github/scripts/built-here.sh keycloak "$GITHUB_SHA"
 
       # The key is owned by the runner here, because the check below runs realm-apply on the runner
       # rather than in its container. On a server it belongs to the container's user, the default.
@@ -274,6 +276,13 @@ jobs:
   # port.
   tunnel:
     runs-on: ubuntu-latest
+    env:
+      # The commit under test: the images are built with it as their revision label and the
+      # check reads it back from the image the running container uses.
+      BUILD_REVISION: ${{ github.sha }}
+      # No default provenance attestation: it records build timestamps, so every rebuild of the same
+      # source made a new image and compose recreated keycloak (TDD-identity-kernel-005 §Images the Stack Runs).
+      BUILDX_NO_DEFAULT_ATTESTATIONS: "1"
     defaults:
       run:
         working-directory: deploy/dev
@@ -323,14 +332,9 @@ jobs:
           docker compose -f compose.yaml -f compose.tunnel.yaml logs --no-color realm-apply
           [ "$code" = "0" ] || { echo "::error::the realm-apply job exited $code"; exit 1; }
 
-      - name: the kernel image was built here, not pulled
+      - name: the kernel image runs the commit built here
         run: |
-          digests="$(docker image inspect -f '{{len .RepoDigests}}' scnehaux/identity-kernel:dev)"
-          if [ "$digests" != 0 ]; then
-            echo "::error::scnehaux/identity-kernel:dev carries a registry digest: it was pulled, not built"
-            exit 1
-          fi
-          echo "scnehaux/identity-kernel:dev has no registry digest: built here"
+          COMPOSE_FILE=compose.yaml:compose.tunnel.yaml bash ../../.github/scripts/built-here.sh keycloak "$GITHUB_SHA"
 
       - name: create the realm-apply service account, with its key
         run: |

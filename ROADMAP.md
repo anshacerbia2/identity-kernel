@@ -995,6 +995,15 @@ off the host, required before production. The server's cron line becomes
   production system's workload, key and owner, registered when that system exists. No date can be
   set until one does.
 
+- ✅ **`deploy-dev` proves the kernel image was built from the commit under test (2026-10-22, TDD-005
+  1.13.0 §Images the Stack Runs; STD-GLB-009 1.8.0 rule 11).** Reason: identity-control's `deploy-dev`
+  run 39735938275 failed on the runner image `ubuntu-26.04`, where a local build carries a registry
+  digest, so "no registry digest" no longer proves "built here". The proof is the
+  `org.opencontainers.image.revision` label, set by compose `build.labels` from `GITHUB_SHA` and read
+  back from the image ID the `keycloak` container runs (`.github/scripts/built-here.sh`).
+  `pull_policy` stays asserted. The jobs also set `BUILDX_NO_DEFAULT_ATTESTATIONS=1` (TDD-005 1.13.0): on 26.04 a
+  rebuild was a new image and compose recreated `keycloak` in the console-drift step.
+
 ## Sender constraint, the recorded gap
 
 STD-IAM-002 §3.8 records that the baseline's access tokens are bearer tokens, although RFC 9700

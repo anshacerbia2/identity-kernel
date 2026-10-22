@@ -271,7 +271,7 @@ See the repository README.
 The kernel image is built from `image/Dockerfile`: the upstream digest, which must equal
 `image/keycloak.ref` (CI fails when they differ), plus this repository's login theme and, until the pin
 moves to a Keycloak image that carries it, `pcre2` 10.40-7.el9_8 from a digest-pinned ubi9 stage
-(TDD-identity-kernel-005 §Images the Stack Runs). `docker compose up -d --build` rebuilds it. Upgrade
+(TDD-identity-kernel-005 §Images the Stack Runs). `docker compose up -d --build` rebuilds it. Set `BUILD_REVISION=$(git rev-parse HEAD)` for that build to record the commit as the image's `org.opencontainers.image.revision` label (`unknown` without it); `deploy-dev` sets it and checks it. Upgrade 
 both together, only after `compat/` passes against the new digest and the `upgrade` job has
 written its release record, which says whether the previous release still starts on the
 migrated database (TDD-identity-kernel-005 §Determining the Rollback Boundary). Then:

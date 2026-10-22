@@ -3,12 +3,12 @@ doc_meta:
   id: TDD-identity-kernel-005
   title: Image Build, Digest Pinning, and Upgrade Compatibility
   owner: Identity Platform Team
-  version: 1.12.0
+  version: 1.13.0
   status: approved
   classification: restricted
   review_cycle_days: 90
   created_date: 2026-08-11
-  last_reviewed: 2026-10-21
+  last_reviewed: 2026-10-22
   parent_sad: SAD-001
 ---
 
@@ -365,8 +365,41 @@ platform cached image. If there is no cached image, a failure is reported" [R27]
 fails on any image name without a digest whose service is neither. Both jobs run
 `.github/scripts/pull-policy.py` on the configuration compose resolves for each file set this stack
 runs (`compose.yaml` alone, with `compose.tunnel.yaml`, and with `compose.ci.yaml`) before anything
-is pulled, and after `up` require `scnehaux/identity-kernel:dev` to carry no registry digest: it was
-built on the runner, not pulled.
+is pulled. After `up`, `.github/scripts/built-here.sh` requires the image the running `keycloak`
+container uses to carry the commit under test (1.13.0).
+
+The check on the image itself is positive since 1.13.0. It reads the commit under test back from the
+image the running keycloak container uses. Compose sets the label: "`labels` add metadata to the
+resulting image" [R31], here `org.opencontainers.image.revision`, fed from `GITHUB_SHA` in CI and
+from `git rev-parse HEAD` on a server (`BUILD_REVISION`). The OCI Image Specification defines it:
+"**org.opencontainers.image.revision** Source control revision identifier for the packaged
+software", in the namespace that "is reserved for use in the OCI Image Specification" [R32].
+`deploy-dev` takes the image ID of the keycloak container, not a tag, and requires that image's
+label to equal `GITHUB_SHA`. An image pulled under the same name would not carry the revision of a
+commit that did not exist when it was published.
+
+Until 1.13.0 the check required the image to carry no registry digest. It failed on 2026-10-22 in
+identity-control's `deploy-dev`, run 39735938275, on the runner image `ubuntu-26.04` (its last pass,
+run 39651327871, ran on `ubuntu-24.04`): the log shows the image built, not pulled, with its
+"exporting attestation manifest" and "exporting manifest list" lines, and the same check then
+reported a registry digest. Docker's containerd image store is "the default storage backend for
+Docker Engine 29.0 and later on fresh installations", and it is the store that handles "images that
+include attestations (provenance, SBOM)", which "use image indices that the classic store doesn't
+support" [R33]. The explanation is that a locally built image in that store carries a digest too, so
+an absent digest no longer shows that an image was built here. The log does not print the digests,
+so the check now prints them. The runner image is not pinned to dodge it.
+
+The same store changed a second thing on `ubuntu-26.04`: `deploy-dev` run 39744739466 passed this
+check, and then failed in "console drift makes the next up fail, and changes nothing" because `up -d
+--force-recreate realm-apply` recreated `keycloak`, which loses the `kcadm` login kept in its
+container (on `ubuntu-24.04`, run 39587863669, it did not). BuildKit adds provenance attestations to
+the images it builds: "By default, BuildKit v0.11 and later adds provenance attestations to images
+you build", and they "include facts about the build process, including details such as: Build
+timestamps" [R34]. The classic store dropped them on load, and the containerd store keeps them in
+the image, so a rebuild of unchanged source is a new image. The deploy-dev jobs set
+`BUILDX_NO_DEFAULT_ATTESTATIONS=1`: "Set `BUILDX_NO_DEFAULT_ATTESTATIONS=1` to disable the default
+provenance attestations" [R34]. The development stack ships no image, and the `scan` job scans the
+image archive, not these attestations. The next run shows whether this was the cause.
 
 **How exceptions are checked.** `scripts/image-scan-rules.py` runs before every scan (§5 Enforcement
 item 4). It fails on a rule without vulnerability, package name, version or type; on a package found
@@ -848,3 +881,7 @@ so the backup is part of the upgrade path. On the development server it follows 
 | R28 | Keycloak, *Running Keycloak in a container*, "Installing additional RPM packages", accessed 2026-10-18. <https://www.keycloak.org/server/containers>. "If you try to install new software in a stage FROM quay.io/keycloak/keycloak, you will notice that microdnf, dnf, and even rpm are not installed"; "It is possible to install new RPMs if absolutely required, following this two-stage pattern established by ubi-micro: FROM registry.access.redhat.com/ubi9 AS ubi-micro-build RUN mkdir -p /mnt/rootfs RUN dnf install --installroot /mnt/rootfs <package names go here> --releasever 9 --setopt install_weak_deps=false --nodocs -y && dnf --installroot /mnt/rootfs clean all && rpm --root /mnt/rootfs -e --nodeps setup FROM quay.io/keycloak/keycloak COPY --from=ubi-micro-build /mnt/rootfs /"; "This approach uses a chroot, /mnt/rootfs, so that only the packages you specify and their dependencies are installed, and so can be easily copied into the second stage without guesswork." |
 | R29 | DNF, *Command Reference*, `--installroot`, accessed 2026-10-18. <https://dnf.readthedocs.io/en/latest/command_ref.html>. "cachedir, log files, releasever, and gpgkey are taken from or stored in the installroot. Gpgkeys are imported into the installroot from a path relative to the host which can be specified in the repository section of configuration files. configuration file and reposdir are searched inside the installroot first. If they are not present, they are taken from the host system." |
 | R30 | Red Hat, RHSA-2026:81532, released 2026-10-12, severity "important", accessed 2026-10-18. <https://access.redhat.com/errata/RHSA-2026:81532>; Red Hat Security Data API, <https://access.redhat.com/hydra/rest/securitydata/csaf.json?rhsa_ids=RHSA-2026:81532>: CVEs "CVE-2026-86145", "CVE-2026-89156", "CVE-2026-89157", "CVE-2026-89158", "CVE-2026-89160", "CVE-2026-89161", "CVE-2026-103111"; released package "pcre2-0:10.40-7.el9_8". CVE pages: CVE-2026-86145 "PCRE2: Out-of-bounds write allows arbitrary code execution via crafted regular expressions"; CVE-2026-89161 "PCRE2: Memory corruption vulnerability in pcre2_jit_match"; CVE-2026-103111 "pcre2: Out-of-bounds write via crafted regular expression". The 10.40-7 changelog: "Backport multiple CVE fixes - CVE-2026-86145, CVE-2026-89156, CVE-2026-89157, CVE-2026-89158, CVE-2026-89160, CVE-2026-89161". |
+| R31 | Docker, _Compose Build Specification_, `labels`, <https://docs.docker.com/reference/compose-file/build/#labels>, accessed 2026-10-22. "`labels` add metadata to the resulting image." |
+| R32 | Open Container Initiative, _Image Format Specification: Annotations_, <https://github.com/opencontainers/image-spec/blob/main/annotations.md>, accessed 2026-10-22. "**org.opencontainers.image.revision** Source control revision identifier for the packaged software." "Keys using the `org.opencontainers.image` namespace are reserved for use in the OCI Image Specification and MUST NOT be used by other specifications and extensions, including other OCI specifications." The page defines annotations; that the same key is set as an image label is Compose's `labels` [R31]. |
+| R33 | Docker, _containerd image store_, <https://docs.docker.com/engine/storage/containerd/>, accessed 2026-10-22. "The containerd image store is the default storage backend for Docker Engine 29.0 and later on fresh installations." "Working with images that include attestations (provenance, SBOM). These use image indices that the classic store doesn't support." |
+| R34 | Docker, *Build variables*, §BUILDX_NO_DEFAULT_ATTESTATIONS, <https://docs.docker.com/build/building/variables/#buildx_no_default_attestations>, accessed 2026-10-22: "By default, BuildKit v0.11 and later adds provenance attestations to images you build. Set `BUILDX_NO_DEFAULT_ATTESTATIONS=1` to disable the default provenance attestations." Docker, *Provenance attestations*, <https://docs.docker.com/build/metadata/attestations/slsa-provenance/>, accessed 2026-10-22: "The provenance attestations include facts about the build process, including details such as: Build timestamps". |
