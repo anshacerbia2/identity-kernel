@@ -1001,7 +1001,8 @@ off the host, required before production. The server's cron line becomes
   digest, so "no registry digest" no longer proves "built here". The proof is the
   `org.opencontainers.image.revision` label, set by compose `build.labels` from `GITHUB_SHA` and read
   back from the image ID the `keycloak` container runs (`.github/scripts/built-here.sh`).
-  `pull_policy` stays asserted.
+  `pull_policy` stays asserted. The jobs also set `BUILDX_NO_DEFAULT_ATTESTATIONS=1` (TDD-005 1.13.0): on 26.04 a
+  rebuild was a new image and compose recreated `keycloak` in the console-drift step.
 
 ## Sender constraint, the recorded gap
 

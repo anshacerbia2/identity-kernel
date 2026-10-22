@@ -29,6 +29,9 @@ jobs:
       # The commit under test: the images are built with it as their revision label and the
       # check reads it back from the image the running container uses.
       BUILD_REVISION: ${{ github.sha }}
+      # No default provenance attestation: it records build timestamps, so every rebuild of the same
+      # source made a new image and compose recreated keycloak (TDD-identity-kernel-005 §Images the Stack Runs).
+      BUILDX_NO_DEFAULT_ATTESTATIONS: "1"
     defaults:
       run:
         working-directory: deploy/dev
@@ -277,6 +280,9 @@ jobs:
       # The commit under test: the images are built with it as their revision label and the
       # check reads it back from the image the running container uses.
       BUILD_REVISION: ${{ github.sha }}
+      # No default provenance attestation: it records build timestamps, so every rebuild of the same
+      # source made a new image and compose recreated keycloak (TDD-identity-kernel-005 §Images the Stack Runs).
+      BUILDX_NO_DEFAULT_ATTESTATIONS: "1"
     defaults:
       run:
         working-directory: deploy/dev

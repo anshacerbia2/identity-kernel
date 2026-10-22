@@ -389,6 +389,18 @@ support" [R33]. The explanation is that a locally built image in that store carr
 an absent digest no longer shows that an image was built here. The log does not print the digests,
 so the check now prints them. The runner image is not pinned to dodge it.
 
+The same store changed a second thing on `ubuntu-26.04`: `deploy-dev` run 39744739466 passed this
+check, and then failed in "console drift makes the next up fail, and changes nothing" because `up -d
+--force-recreate realm-apply` recreated `keycloak`, which loses the `kcadm` login kept in its
+container (on `ubuntu-24.04`, run 39587863669, it did not). BuildKit adds provenance attestations to
+the images it builds: "By default, BuildKit v0.11 and later adds provenance attestations to images
+you build", and they "include facts about the build process, including details such as: Build
+timestamps" [R34]. The classic store dropped them on load, and the containerd store keeps them in
+the image, so a rebuild of unchanged source is a new image. The deploy-dev jobs set
+`BUILDX_NO_DEFAULT_ATTESTATIONS=1`: "Set `BUILDX_NO_DEFAULT_ATTESTATIONS=1` to disable the default
+provenance attestations" [R34]. The development stack ships no image, and the `scan` job scans the
+image archive, not these attestations. The next run shows whether this was the cause.
+
 **How exceptions are checked.** `scripts/image-scan-rules.py` runs before every scan (§5 Enforcement
 item 4). It fails on a rule without vulnerability, package name, version or type; on a package found
 inside a file (any type but `apk`, `deb`, `rpm`) without a full `package.location`, or on any location
@@ -872,3 +884,4 @@ so the backup is part of the upgrade path. On the development server it follows 
 | R31 | Docker, _Compose Build Specification_, `labels`, <https://docs.docker.com/reference/compose-file/build/#labels>, accessed 2026-10-22. "`labels` add metadata to the resulting image." |
 | R32 | Open Container Initiative, _Image Format Specification: Annotations_, <https://github.com/opencontainers/image-spec/blob/main/annotations.md>, accessed 2026-10-22. "**org.opencontainers.image.revision** Source control revision identifier for the packaged software." "Keys using the `org.opencontainers.image` namespace are reserved for use in the OCI Image Specification and MUST NOT be used by other specifications and extensions, including other OCI specifications." The page defines annotations; that the same key is set as an image label is Compose's `labels` [R31]. |
 | R33 | Docker, _containerd image store_, <https://docs.docker.com/engine/storage/containerd/>, accessed 2026-10-22. "The containerd image store is the default storage backend for Docker Engine 29.0 and later on fresh installations." "Working with images that include attestations (provenance, SBOM). These use image indices that the classic store doesn't support." |
+| R34 | Docker, *Build variables*, §BUILDX_NO_DEFAULT_ATTESTATIONS, <https://docs.docker.com/build/building/variables/#buildx_no_default_attestations>, accessed 2026-10-22: "By default, BuildKit v0.11 and later adds provenance attestations to images you build. Set `BUILDX_NO_DEFAULT_ATTESTATIONS=1` to disable the default provenance attestations." Docker, *Provenance attestations*, <https://docs.docker.com/build/metadata/attestations/slsa-provenance/>, accessed 2026-10-22: "The provenance attestations include facts about the build process, including details such as: Build timestamps". |
