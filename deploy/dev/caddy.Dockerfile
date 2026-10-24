@@ -33,8 +33,9 @@ RUN go version -m /usr/bin/caddy | awk ' \
 
 # caddy:2.11.7-alpine, resolved 2026-10-07
 FROM caddy@sha256:d8542f48d34a9cf4e4c11a478865229840e87e4c96ea3f439101f31a5d35f75f
-# CVE-2026-85091: the pinned image carries zlib 1.3.2-r0, and Alpine ships the fix as 1.3.2-r1. The
-# constraint fails the build when no repository has it. The line goes when the pin moves to an image
-# that carries the fix.
-RUN apk add --no-cache 'zlib>=1.3.2-r1'
+# CVE-2026-85091: the pinned image carries zlib 1.3.2-r0, and Alpine ships the fix as 1.3.2-r1.
+# CVE-2026-111497 (Critical, found 2026-10-24): it carries brotli-libs 1.2.0-r0, and Alpine 3.23 ships
+# the fix as 1.2.1-r0. A constraint fails the build when no repository has it. Each goes when the pin
+# moves to an image that carries its fix.
+RUN apk add --no-cache 'zlib>=1.3.2-r1' 'brotli-libs>=1.2.1-r0'
 COPY --from=build /usr/bin/caddy /usr/bin/caddy

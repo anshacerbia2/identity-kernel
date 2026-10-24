@@ -8,9 +8,10 @@ compare reads the two OCI archives the builds wrote, build-1.tar and build-2.tar
 
   1. requires the pinned upstream image's layers, unchanged, at the bottom of both;
   2. requires the layers above them, the ones this repository adds, to hold only Keycloak's build
-     output (lib/quarkus), this repository's theme, byte for byte as git holds it, and the pcre2
-     upgrade image/Dockerfile makes (its libraries, licences and build-id links, and the rpm
-     database), and the entrypoint image/start.sh, byte for byte as git holds it, and no file that
+     output (lib/quarkus), this repository's theme, byte for byte as git holds it, the pcre2 and
+     ca-certificates upgrades image/Dockerfile makes (pcre2's libraries, licences and build-id links;
+     ca-certificates' public trust anchors, the trust store extracted from them, and its links; and
+     the rpm database), and the entrypoint image/start.sh, byte for byte as git holds it, and no file that
      could carry a key, a certificate, a realm export or an environment file;
   3. compares the two builds file by file. Equal digests pass at once. Otherwise every difference
      outside Keycloak's build output fails, and the differences inside it are recorded: Quarkus writes
@@ -39,12 +40,25 @@ PCRE2_PREFIXES = (
 )
 # Each entry here must be a link to one of the pcre2 libraries.
 BUILD_ID_PREFIX = "usr/lib/.build-id/"
+# The ca-certificates upgrade in image/Dockerfile (CVE-2026-114406, found 2026-10-24) adds the package's
+# files and the trust store extracted from them; it goes with the pcre2 prefixes' rule. They are public
+# trust anchors, so the key and certificate suffixes below do not apply to them; a private key in any of
+# them fails instead.
+CA_CERTIFICATES_PREFIXES = (
+    "etc/pki/ca-trust/", "usr/share/pki/ca-trust-source/", "usr/share/pki/ca-trust-legacy/",
+)
+CA_CERTIFICATES_FILES = (
+    "etc/pki/java/cacerts", "etc/pki/tls/cert.pem", "etc/pki/tls/certs/ca-bundle.crt",
+    "etc/pki/tls/certs/ca-bundle.trust.crt", "etc/ssl/cert.pem", "etc/ssl/certs", "etc/ssl/ct_log_list.cnf",
+    "etc/ssl/openssl.cnf", "usr/bin/ca-legacy", "usr/bin/update-ca-trust",
+)
 # The entrypoint that refuses to start without the realm signing keystore (TDD-identity-kernel-002
 # 1.2.0 §Startup as Built), and the file git holds it as.
 ENTRYPOINT = "opt/scnehaux/start.sh"
 ENTRYPOINT_SOURCE = "image/start.sh"
 ALLOWED_PREFIXES = (
     "opt/keycloak/lib/quarkus/", "opt/keycloak/themes/scnehaux/", *PCRE2_PREFIXES, BUILD_ID_PREFIX, ENTRYPOINT,
+    *CA_CERTIFICATES_PREFIXES,
 )
 THEME_PREFIX = "opt/keycloak/themes/scnehaux/"
 
@@ -112,14 +126,19 @@ def check_contents(errors, label, entries, theme_dir):
         if os.path.basename(name).startswith(".wh."):
             fail(errors, f"{label}: the kernel's layers delete {name}; they may only add")
             continue
-        if not name.startswith(ALLOWED_PREFIXES) and not any(p.startswith(name.rstrip("/") + "/") for p in ALLOWED_PREFIXES):
+        trust = name.startswith(CA_CERTIFICATES_PREFIXES) or name in CA_CERTIFICATES_FILES
+        if not trust and not name.startswith(ALLOWED_PREFIXES) and not any(
+                p.startswith(name.rstrip("/") + "/") for p in ALLOWED_PREFIXES + CA_CERTIFICATES_FILES):
             fail(errors, f"{label}: {name} is outside Keycloak's build output and the theme")
             continue
         if name.startswith(BUILD_ID_PREFIX) and meta[0] != tarfile.DIRTYPE and not (
                 meta[0] == tarfile.SYMTYPE and "/usr/lib64/libpcre2-" in meta[5]):
             fail(errors, f"{label}: {name} is not a build-id link to a pcre2 library")
             continue
-        if name.lower().endswith(FORBIDDEN_SUFFIXES):
+        if trust:
+            if content is not None and b"PRIVATE KEY" in content:
+                fail(errors, f"{label}: {name} carries a private key")
+        elif name.lower().endswith(FORBIDDEN_SUFFIXES):
             fail(errors, f"{label}: {name} could carry a key, a realm export or a credential")
         if name == ENTRYPOINT:
             with open(ENTRYPOINT_SOURCE, "rb") as source:
@@ -255,7 +274,7 @@ def compare(out, theme_tree):
                 lines.append(f"    - `{entry}`")
     lines.append("- **Failed:** " + "; ".join(errors) if errors else "- Contents: upstream layers unchanged; "
                  "the kernel's layers hold only Keycloak's build output, the theme and the entrypoint as git holds "
-                 "them, and the pcre2 upgrade.")
+                 "them, and the pcre2 and ca-certificates upgrades.")
     summary("\n".join(lines))
     return 1 if errors else 0
 

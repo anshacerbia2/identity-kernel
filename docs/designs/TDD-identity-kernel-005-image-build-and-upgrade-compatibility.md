@@ -3,12 +3,12 @@ doc_meta:
   id: TDD-identity-kernel-005
   title: Image Build, Digest Pinning, and Upgrade Compatibility
   owner: Identity Platform Team
-  version: 1.13.0
+  version: 1.14.0
   status: approved
   classification: restricted
   review_cycle_days: 90
   created_date: 2026-08-11
-  last_reviewed: 2026-10-22
+  last_reviewed: 2026-10-24
   parent_sad: SAD-001
 ---
 
@@ -219,8 +219,8 @@ daily.
 
 | Image | Source | Publicly exposed (rule 8) | Remedy in 1.8.0 |
 | :-- | :-- | :-- | :-- |
-| kernel | `image/Dockerfile` on `image/keycloak.ref` | no: reached only through the proxy | none needed in 1.8.0; since 1.9.0 `pcre2` upgraded where it is built (rule 10) |
-| `caddy` | `deploy/dev/caddy.Dockerfile`: Caddy 2.11.7 built from source on `caddy:2.11.7-builder-alpine`, overlaid on `caddy:2.11.7-alpine`, both by digest | **yes**: ports 80 and 443, or the tunnel's anonymous port | rebuilt from source (rule 9); `zlib` upgraded (rule 10) |
+| kernel | `image/Dockerfile` on `image/keycloak.ref` | no: reached only through the proxy | none needed in 1.8.0; since 1.9.0 `pcre2`, and since 1.14.0 `ca-certificates`, upgraded where it is built (rule 10) |
+| `caddy` | `deploy/dev/caddy.Dockerfile`: Caddy 2.11.7 built from source on `caddy:2.11.7-builder-alpine`, overlaid on `caddy:2.11.7-alpine`, both by digest | **yes**: ports 80 and 443, or the tunnel's anonymous port | rebuilt from source (rule 9); `zlib`, and since 1.14.0 `brotli-libs`, upgraded (rule 10) |
 | `realm-apply` | `deploy/dev/realm-apply.Dockerfile`: `alpine:3.24` by digest with `git`, binaries from `golang:1.26.9-alpine` by digest | no: a one-shot job on the internal network | base replaced (rule 10); `zlib` upgraded |
 | `postgres` | `postgres:17.11-alpine`, pulled by digest | no: the internal network, no published port | `affected` exception until the upstream rebuild (rules 5, 8, 10) |
 
@@ -319,6 +319,39 @@ same `pcre2` layer, byte for byte. rpm 4.16.1.3 takes the install time from `SOU
 `scripts/image-build-check.sh` passes, so the database does not carry the build date. The stage, its
 `COPY` and the allowance in `scripts/image-build-compare.py` go when `image/keycloak.ref` moves to a
 Keycloak image that carries 10.40-7.el9_8 or later, which 26.8.1 already does.
+
+**The kernel's `ca-certificates` and the proxy's `brotli-libs` are upgraded where they are built (rule
+10, 1.14.0).** The scan of 2026-10-24 (run 40140571183 on main) failed on two images, with nothing in
+this repository changed:
+
+| Image | Package | Installed | Fixed in | Finding | Exposed (rule 8) | Vulnrichment, KEV [R35] | Fixed within |
+| :-- | :-- | :-- | :-- | :-- | :-- | :-- | :-- |
+| kernel | `ca-certificates` | 2025.2.80_v9.0.305-91.el9 | 2026.2.92_v9.0.319-90.3.el9_8 | CVE-2026-114406, Critical | no | no record on 2026-10-24; not in the KEV | at most 60 days (2026-12-23), whatever its two values |
+| `caddy` | `brotli-libs` | 1.2.0-r0 | 1.2.1-r0 | CVE-2026-111497, Critical | **yes** | Automatable no, Technical Impact total; not in the KEV | 14 days (2026-11-07) |
+
+Both are fixed now, by rebuild, not by exception. The same scan reports `java-21-openjdk-headless`
+(CVE-2026-91403, Critical; CVE-2026-91415, High) in the kernel and `libcrypto3`/`libssl3` 3.5.8-r0
+(four High) in realm-apply and Postgres with no fix, so the gate does not fail on them and no rebuild
+can remove them yet.
+
+- **The proxy** adds `'brotli-libs>=1.2.1-r0'` to its `zlib` line. Measured on 2026-10-24 in the
+  pinned `caddy:2.11.7-alpine` (Alpine 3.23.6): `apk` upgrades `brotli-libs` 1.2.0-r0 to 1.2.1-r0 and
+  `zlib` to 1.3.2-r1, and nothing else.
+- **The kernel** adds `ca-certificates >= 2026.2.92_v9.0.319-90.3.el9_8` to the `pcre2` stage. Its
+  scriptlets regenerate the extracted trust store, and they cannot run in the micro root: it has no
+  coreutils, and its `trust` binary has no `libp11-kit`. The stage therefore upgrades its own
+  `ca-certificates` to the same version, requires its trust sources (`/usr/share/pki/ca-trust-source`,
+  `/etc/pki/ca-trust/source`) to equal the micro root's file for file, and runs `update-ca-trust
+  extract -o` into the micro root's `extracted` directory. The `COPY` adds and replaces files and
+  cannot remove one, so a new store that drops an entry the old one had fails the build.
+  `scripts/image-build-compare.py` allows the package's files and that store, which hold public trust
+  anchors only, and fails on a private key in any of them.
+
+Measured on 2026-10-24: the build changes `pcre2`, `pcre2-syntax` and `ca-certificates` and nothing
+else; two `--no-cache` builds of one commit write the same patch files, byte for byte, because
+`update-ca-trust` honours `SOURCE_DATE_EPOCH`; the Java trust store (`/etc/pki/java/cacerts`) holds 118
+CA certificates in place of 146, the anchors the new package keeps, and the OpenSSL hash directory
+loses none of its 335 entries. Both lines go when their pins move to images that carry the fixes.
 
 **The trade-off of an upgrade line.** apk resolves `git` and the `zlib` constraint against Alpine's
 index on the day of the build, not against the digest. apk keeps the installed version "unless an
@@ -593,7 +626,7 @@ defer yet. Its release record is the `upgrade` job's summary, which every run wr
 | Reverse proxy (1.8.0) | Caddy 2.11.7 built from source, x/net v0.60.0, Go 1.27.2 | §Images the Stack Runs; until a Caddy release carries the fix |
 | realm-apply base (1.8.0) | `alpine:3.24` by digest, with `git` | Only what the job runs (§Images the Stack Runs) |
 | Built images and the registry (1.8.0) | `pull_policy: build` on every service with `build:` and an `image:` name | A built image is never pulled under its name (§Images the Stack Runs) |
-| Upgrade lines (1.8.0) | `apk add --no-cache 'zlib>=1.3.2-r1'` in the proxy and realm-apply | CVE-2026-85091; goes when the pin moves |
+| Upgrade lines (1.8.0) | `apk add --no-cache 'zlib>=1.3.2-r1'` in the proxy and realm-apply; since 1.14.0 `'brotli-libs>=1.2.1-r0'` in the proxy and `ca-certificates` in the kernel's ubi9 stage | CVE-2026-85091, CVE-2026-111497, CVE-2026-114406; each goes when its pin moves |
 
 The database credential, the administration client's credential, and the signing keystore
 are resolved at runtime from the approved secret manager and are never present in the
@@ -885,3 +918,4 @@ so the backup is part of the upgrade path. On the development server it follows 
 | R32 | Open Container Initiative, _Image Format Specification: Annotations_, <https://github.com/opencontainers/image-spec/blob/main/annotations.md>, accessed 2026-10-22. "**org.opencontainers.image.revision** Source control revision identifier for the packaged software." "Keys using the `org.opencontainers.image` namespace are reserved for use in the OCI Image Specification and MUST NOT be used by other specifications and extensions, including other OCI specifications." The page defines annotations; that the same key is set as an image label is Compose's `labels` [R31]. |
 | R33 | Docker, _containerd image store_, <https://docs.docker.com/engine/storage/containerd/>, accessed 2026-10-22. "The containerd image store is the default storage backend for Docker Engine 29.0 and later on fresh installations." "Working with images that include attestations (provenance, SBOM). These use image indices that the classic store doesn't support." |
 | R34 | Docker, *Build variables*, §BUILDX_NO_DEFAULT_ATTESTATIONS, <https://docs.docker.com/build/building/variables/#buildx_no_default_attestations>, accessed 2026-10-22: "By default, BuildKit v0.11 and later adds provenance attestations to images you build. Set `BUILDX_NO_DEFAULT_ATTESTATIONS=1` to disable the default provenance attestations." Docker, *Provenance attestations*, <https://docs.docker.com/build/metadata/attestations/slsa-provenance/>, accessed 2026-10-22: "The provenance attestations include facts about the build process, including details such as: Build timestamps". |
+| R35 | CISA, *Vulnrichment*, `cisagov/vulnrichment`, branch `develop`, accessed 2026-10-24, ADP "CISA-ADP" SSVC options: CVE-2026-111497 (2026-10-23T13:25Z) Exploitation none, Automatable no, Technical Impact total; no record for CVE-2026-114406. <https://github.com/cisagov/vulnrichment/tree/develop/2026>. CISA, *Known Exploited Vulnerabilities Catalog*, version 2026.10.23, <https://www.cisa.gov/sites/default/files/feeds/known_exploited_vulnerabilities.json>: neither is listed. |

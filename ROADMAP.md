@@ -82,6 +82,18 @@ and context switch mechanism — are exercised here but decided in `identity-con
 - ⏳ **The `pcre2` stage ends with the Keycloak pin.** No 26.7 release carries the fix; 26.8.1 does.
   When `image/keycloak.ref` moves to an image with 10.40-7.el9_8 or later, the ubi9 stage, its `COPY`
   and the allowance in `scripts/image-build-compare.py` go
+- ✅ **Two Critical findings with a fix, rebuilt the day they were found** (added 2026-10-24;
+  TDD-005 1.14.0 §Images the Stack Runs; STD-GLB-009 §Container Images rules 4, 8 and 10). The scan
+  of 2026-10-24 (run 40140571183 on main) failed with nothing here changed:
+  - the proxy's `brotli-libs` 1.2.0-r0, CVE-2026-111497, fixed in 1.2.1-r0. The proxy is publicly
+    exposed; not in the KEV, Automatable no, Technical Impact total: BOD 26-04 gives 14 days, by
+    2026-11-07. `caddy.Dockerfile` upgrades it beside `zlib`;
+  - the kernel's `ca-certificates` 2025.2.80, CVE-2026-114406, fixed in 2026.2.92_v9.0.319-90.3.el9_8.
+    Not exposed, not in the KEV, no Vulnrichment record yet: at most 60 days, by 2026-12-23. The `pcre2`
+    stage upgrades it and extracts the trust store the micro root cannot, and the reproducibility check
+    allows the package's public anchors;
+  - not fixable by rebuild yet, so not in the gate: `java-21-openjdk-headless` (CVE-2026-91403,
+    CVE-2026-91415) and `libcrypto3`/`libssl3` 3.5.8-r0 (four High), which have no fixed version
 - ⏳ **Caddy's source build ends with a release.** caddyserver/caddy#8179 moved x/net to v0.60.0 on
   2026-10-09; no release carries it yet (v2.11.7 is the latest). When one does, built with Go 1.26.9 or
   later, compose pulls it by digest again and `caddy.Dockerfile` goes, through `deploy-dev`'s `stack`
