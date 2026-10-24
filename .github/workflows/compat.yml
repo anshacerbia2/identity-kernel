@@ -75,6 +75,27 @@ jobs:
           # realm-apply and compat/ read the kid from the certificate, the keystore's public half.
           echo "KERNEL_SIGNING_CERTIFICATE=$keys/realm-signing.crt" >> "$GITHUB_ENV"
 
+      # compat/key_rotation_test.go asks the pinned image what the key states rely on (TDD-identity-kernel-002
+      # 1.4.0 §Rotation as Built). It needs a second key the kernel can load: a test fixture beside the
+      # realm's keystore, under its own alias, with the realm keystore's password. A fixture, never a
+      # custody layout; the test removes its provider again.
+      - name: a second throwaway key, for the key-state test
+        run: |
+          image="$(grep -v '^[[:space:]]*#' image/keycloak.ref | grep -v '^[[:space:]]*$' | head -n 1 | tr -d '[:space:]')"
+          docker run --rm --network none --user 0:0 -v "$KERNEL_KEYS:/keys" --entrypoint /bin/bash "$image" -c '
+            set -euo pipefail
+            password=/keys/vault/scnehaux_realm-signing-password
+            keytool -genkeypair -alias rotation-fixture -keyalg RSA -keysize 3072 -sigalg SHA256withRSA -validity 1 \
+              -dname "CN=rotation fixture" -storetype PKCS12 -keystore /tmp/rotation-fixture.p12 \
+              -storepass:file "$password" >/dev/null 2>&1
+            keytool -exportcert -rfc -alias rotation-fixture -storetype PKCS12 -keystore /tmp/rotation-fixture.p12 \
+              -storepass:file "$password" -file /keys/rotation-fixture.crt >/dev/null 2>&1
+            chmod u+w /keys/signing
+            install -m 0400 -o 1000 -g 0 /tmp/rotation-fixture.p12 /keys/signing/rotation-fixture.p12
+            chmod 0500 /keys/signing
+            chmod 0644 /keys/rotation-fixture.crt'
+          echo "KERNEL_ROTATION_FIXTURE_CERTIFICATE=$KERNEL_KEYS/rotation-fixture.crt" >> "$GITHUB_ENV"
+
       # A step rather than a service container: services cannot be given a command, and Keycloak
       # needs one (start-dev). The reference is read from the file and checked for the digest form,
       # so a tag slipped into image/keycloak.ref fails here instead of being run.

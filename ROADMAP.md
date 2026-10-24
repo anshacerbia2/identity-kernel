@@ -205,9 +205,21 @@ unused.
 - ✅ `kid` derived as the RFC 7638 thumbprint, set when the provider is created and checked by every
   `realm-apply` run
 - ✅ Startup refuses to serve when custody is unreachable — the image's entrypoint, before Keycloak runs
-- ⏳ Rotation through the five states of TDD-identity-kernel-002 1.3.0 §Rotation State Machine
+- ⏳ Rotation through the five states of TDD-identity-kernel-002 1.4.0 §Rotation State Machine
   (ADR-IAM-002 §5.2, NIST SP 800-57): a staged key is published before it signs, and its private material is destroyed when it
   leaves the JWKS, every stored version of the sealed keystore included. No retention period
+  - ✅ The pinned release's mechanism under each state, proved (2026-10-24; TDD-identity-kernel-002
+    1.4.0 §Rotation as Built): `compat/key_rotation_test.go` shows a passive key published and signing
+    nothing, new tokens under the newly active `kid`, the previous key's tokens verifying while it is
+    retiring, a key leaving the key set only when its provider is removed, and no RS256 or fallback key
+    at any step
+  - ✅ The retirement floor computed from the live token lifetimes on every `realm-apply` run, which
+    fails when it exceeds the 7-day window (§Retirement Window)
+  - ⏳ The ceremony and script steps (stage, activate, demote, retire, revoke) and their custody
+    half: stopped on TDD-identity-kernel-002 1.4.0 Open Questions 3 to 9 (added 2026-10-24: custody of
+    more than one key, who owns the providers' state, the registry's home, rollback, activation after a
+    compromise, destroying stored secret versions, approvals and events). The ceremony still refuses
+    a second key
 - ✅ Question 4 executed and recorded — **path form retained**. `iss` is
   `{frontend URL}/realms/{realm name}`, and a realm rename moves it too (compat run 36113564506).
   The production hostname and realm name are therefore fixed together before the first token.
@@ -592,7 +604,7 @@ key, one per environment and realm, delivered by the AWS Secrets and Configurati
 - Runbooks: [signing-key ceremony](docs/runbooks/signing-key-ceremony.md),
   [custody outage](docs/runbooks/custody-outage.md), [database restore](docs/runbooks/database-restore.md).
 
-**Not yet:** rotation through the five states, which the ceremony refuses until it is built; the
+**Not yet:** the rotation steps, which wait on TDD-identity-kernel-002 1.4.0 Open Questions 3 to 9 and which the ceremony refuses until they are built (the mechanism and the retirement floor are, §Rotation as Built); the
 production delivery, which waits on a production environment; replica consistency, which needs a
 second replica.
 

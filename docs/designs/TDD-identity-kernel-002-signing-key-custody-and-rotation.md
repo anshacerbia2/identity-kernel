@@ -3,12 +3,12 @@ doc_meta:
   id: TDD-identity-kernel-002
   title: Signing Key Custody, Identity, and Rotation
   owner: Identity Platform Team
-  version: 1.3.0
+  version: 1.4.0
   status: approved
   classification: restricted
   review_cycle_days: 90
   created_date: 2026-08-11
-  last_reviewed: 2026-10-20
+  last_reviewed: 2026-10-24
   parent_sad: SAD-001
 ---
 
@@ -258,7 +258,8 @@ The ceremony that generates a key follows STD-IAM-001 2.9.0 §3.10. The runbook,
 - The key is generated once, by the JDK that will read it: `keytool -genkeypair` in the pinned
   upstream image, as root, with `--network none` (`scripts/signing-keystore.sh`).
 - The script refuses a keys directory that already holds a keystore. A second key in a realm is a
-  rotation (§Rotation), which is not built.
+  rotation (§Rotation). Its steps are not built; they wait on Open Questions 3 to 9 (§Rotation as
+  Built, 1.4.0).
 - It reads the `kid` from the new certificate with `client-key kid -certificate realm-signing.crt`
   (1.3.0): the RFC 7638 thumbprint of the public key (§Key Identity). The command ships in the
   realm-apply image, which the ceremony builds and then runs with `--network none`. realm-apply later
@@ -365,6 +366,69 @@ failure on a valid token.
 Raising any token lifetime class raises this minimum. The rotation job recomputes it
 from the live class configuration rather than reading a constant, so a lifetime change
 cannot silently shorten the window below its own requirement.
+
+### Rotation as Built (1.4.0)
+
+What is built is the part every open question below leaves fixed: the pinned release's mechanism for
+each state, proved against the image, and the retirement floor, computed from the live realm. The
+ceremony and script steps that move a key from one state to the next are **not built**. Each needs
+an answer this design does not give yet (Open Questions 3 to 9), and none is invented in code.
+
+**The states on Keycloak 26.7.5.** A state is two flags of a `java-keystore` provider, plus the
+provider's presence. The Server Administration Guide: "Keycloak has a single active key pair at a
+time, but can have several passive keys as well. The active key pair is used to create new
+signatures, while the passive key pair can be used to verify previous signatures" [R10]. The key set
+publishes every enabled key with a public key (`JWKSServerUtils.getRealmJwks`) [R4].
+
+| State | `enabled` | `active` | Provider | In the key set | Signs |
+| :-- | :-- | :-- | :-- | :-- | :-- |
+| `staged` | true | false | present | yes | no |
+| `active` | true | true | present, the highest priority among active keys | yes | yes |
+| `retiring` | true | false | present | yes | no |
+| `retired` | — | — | removed | no | no |
+| `revoked` | — | — | removed | no | no |
+
+- **Which active key signs is the priority.** The guide: "The highest number makes the key pair
+  active" [R10]. So the key that becomes `active` carries a higher priority than the one it replaces.
+- **No moment may have no active key.** With none, the next token makes the pinned release generate
+  `fallback-PS256` (§Custody as Built), which STD-IAM-001 §3.5 prohibits. So an activation activates
+  the new key first, at the higher priority, and demotes the previous one after. Between the two
+  calls the new key already signs, because of its priority.
+- **Removing the provider takes the key out of the key set at once**, for `retired` and `revoked`
+  alike. The private material's destruction is the custody half of the same step, and is not built.
+
+**Proved.** `compat/key_rotation_test.go`, in the `contract` job, against a second throwaway key the
+job makes beside the realm's (a test fixture, not a custody layout). A staged key is published and
+signs nothing. Once active, new tokens carry its `kid`, and a token the previous key signed still
+verifies against the published key set while that key is retiring. A key leaves the key set when its
+provider is removed and not before, and a token it signed then fails verification against the key
+set. At every step the key set holds RSA `PS256` keys alone, and no step makes a fallback or an RS256
+key. To leave the realm as the definition describes it, the test rotates back to the realm's key and
+removes the fixture's provider; that cleanup is not a transition this design defines.
+
+**The retirement floor is computed on every `realm-apply` run** (`realmdef.VerifyRetirementWindow`).
+The longest access token lifetime is the largest of the realm's `accessTokenLifespan`, every
+client's `access.token.lifespan` override, which identity-control sets from the client's lifetime
+class (STD-IAM-002 §3.3), and, for a client with the implicit flow enabled, the realm's
+`accessTokenLifespanForImplicitFlow`. The floor adds the 10-minute consumer cache and the 60-second
+skew allowance (§Configuration). The run fails when the floor exceeds the 7-day window, and prints
+the floor and the lifetime that sets it otherwise. Unit tests in
+`internal/realmdef/retirement_test.go` cover this section's own example (L2 at 15 minutes gives 26
+minutes), a raised lifetime raising the floor, and a floor past the window failing. The retire step
+that holds a key for the window is not built, so the check guards the configuration until it is.
+
+**Not built,** each waiting on its open question:
+
+| Step | Waits on |
+| :-- | :-- |
+| Generate and stage: a second key into custody, its provider created passive, its registry record | Questions 3, 4, 5 |
+| Activate, after the consumer cache window, approved by someone other than the generating operator | Questions 4, 9 |
+| Demote the previous key to `retiring` | Question 4 |
+| Retire after the window: remove the provider and destroy the private material, every stored version included | Questions 3, 4, 8, 9 |
+| Revoke on compromise | Questions 4, 7, 8, 9 |
+| Any backward step | Question 6 |
+
+So the ceremony still refuses a second key, and the realm still signs with one key.
 
 ## API / Interface
 
@@ -492,6 +556,14 @@ backup holds neither the keystore, nor its password, nor a private key. Unit tes
 `internal/realmdef/signingkey_test.go` cover the `kid` derivation and each refusal of
 `VerifySigningKey`. Not built: replica consistency, which needs more than one replica, and everything
 under §Rotation and §Separation of Duties beyond the ceremony.
+
+**As built (1.4.0).** `compat/key_rotation_test.go` proves the pinned release's mechanism under each
+state, and `internal/realmdef/retirement_test.go` the floor's computation and its failure
+(§Rotation as Built). Of §Rotation below, these hold: a token issued before a rotation verifies while
+its key is retiring, a staged key is published and signs nothing, a key leaves the key set only when
+its provider is removed, and a raised lifetime raises the floor and a floor past the window fails.
+The timings (staged for the cache window, retiring for the computed window), the destruction of
+private material, and §Separation of Duties wait on the steps.
 
 ### Identity and Custody
 
@@ -626,6 +698,45 @@ exercised.
    has no retention period. It is destroyed when the key leaves JWKS, and the evidence kept
    is the public key and the record, which NIST SP 800-57 Part 1 permits.
 
+Questions 3 to 9 were found building rotation (1.4.0). Each stops a step of §Rotation as Built.
+
+3. **Custody of more than one key** (§Custody as Built, §Rotation, §Configuration; ADR-IAM-002
+   §5.3). From staging to retirement, two keys are in custody at once, and three when a key is staged
+   while another is retiring. §Custody as Built has one keystore holding one pair under the alias
+   `realm-signing`, and ADR-IAM-002 §5.3 one secret per environment and realm, sized for "one
+   RSA-3072 pair". §Rotation removes a retired key "from the keystore", which reads as one keystore
+   with an entry per key. Is that the layout, and what alias does each entry carry (the image's start
+   check requires `realm-signing`)? Or is it a keystore per key, which needs a secret per key?
+4. **Who owns the signing providers' state** (§Custody as Built; `realm/signing-key.json`,
+   `realmdef.VerifySigningKey`). The realm definition declares one provider with `active: true`;
+   `realm-apply` treats any other value as drift and refuses a second `PS256` key. A rotated realm
+   holds a provider per key, with flags that depend on its state and differ per environment. Does the
+   definition keep declaring the providers, and from what per-environment source? Or do the rotation
+   steps own them, and `realm-apply` checks only the invariants: exactly one active `PS256` key, every
+   published key a custody key in a published state, no other key?
+5. **Where the registry lives** (§Key Registry; §Rotation, "register it staged"). Today the ceremony
+   record is a file in the keys directory, which is never backed up, and an entry on the change
+   ticket. Is the registry those records, or a store of its own? Where are `public_jwk` and the record
+   kept as evidence after retirement?
+6. **Rollback** (§Rotation State Machine; ADR-IAM-002 §5.2). The machine has no backward transition.
+   May a staged key that never signed be abandoned, leaving the key set with its material destroyed,
+   and is it then `retired`, `revoked`, or a state of its own? May a `retiring` key be activated again
+   within its window when the new key fails?
+7. **Activation after a compromise** (§Compromise). Does the replacement wait the 10-minute consumer
+   cache window as a scheduled activation does, while the compromised key keeps signing, or activate
+   at once, relying on consumers refetching on an unknown `kid` (ADR-IAM-002 §5.2)?
+8. **Destroying every stored version in production** (§Rotation, "every stored version of the
+   sealed keystore in the secret manager"). AWS: "Secrets Manager never removes labeled versions, but
+   unlabeled versions are considered deprecated. Secrets Manager removes deprecated versions when there
+   are more than 100. Secrets Manager doesn't remove versions created less than 24 hours ago" [R11].
+   Which procedure destroys the versions that carry a retired key: deleting the secret without
+   recovery and creating it again, which gives it a new ARN [R11], or another?
+9. **The approval and the event** (§Separation of Duties). Activation needs an approver other than
+   the generating operator, and retirement or revocation an approver other than the operator who
+   performs it. Every key operation "is emitted as a privileged-administration event". Where is an
+   approval recorded (the ceremony keeps its review on the change ticket), and which channel carries
+   the event for a step that runs outside Keycloak?
+
 ## References
 
 Accessed 2026-10-20. Each quote was read on the page or in the source file named.
@@ -641,3 +752,5 @@ Accessed 2026-10-20. Each quote was read on the page or in the source file named
 | R7 | AWS CLI, `secretsmanager create-secret`, <https://docs.aws.amazon.com/cli/latest/reference/secretsmanager/create-secret.html>: `--secret-binary`, "We recommend that you store your binary data in a file and then pass the contents of the file as a parameter", "Constraints: min 1, max 65536"; `--kms-key-id`, "If you don't specify this value, then Secrets Manager uses the key aws/secretsmanager"; `fileb://` "will always be treated as binary and use the file contents directly". |
 | R8 | Kubernetes SIG Auth, *Secrets Store CSI Driver*, Troubleshooting, <https://secrets-store-csi-driver.sigs.k8s.io/troubleshooting.html>: "If the pod fails to start because of the inline volume mount", with the event "MountVolume.SetUp failed for volume "secrets-store-inline"". |
 | R9 | Caddy, *Request matchers*, <https://caddyserver.com/docs/caddyfile/matchers>: `path_regexp`, "Like path, but supports regular expressions. Runs against the URI-decoded/unescaped path." |
+| R10 | Keycloak, *Server Administration Guide* 26.7.5, "Configuring realm keys" and "Rotating keys", <https://www.keycloak.org/docs/26.7.5/server_admin/index.html>, accessed 2026-10-24: "Keycloak has a single active key pair at a time, but can have several passive keys as well."; "The active key pair is used to create new signatures, while the passive key pair can be used to verify previous signatures."; "The highest number makes the key pair active."; "Once new keys are available, all new tokens and cookies will be signed with the new keys." |
+| R11 | AWS, *What's in a Secrets Manager secret?*, <https://docs.aws.amazon.com/secretsmanager/latest/userguide/whats-in-a-secret.html>, accessed 2026-10-24: "Secrets Manager never removes labeled versions, but unlabeled versions are considered deprecated. Secrets Manager removes deprecated versions when there are more than 100. Secrets Manager doesn't remove versions created less than 24 hours ago."; "If the original secret is deleted, and then a new secret is created with the same name, the two secrets have different ARNs". |
