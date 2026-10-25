@@ -18,7 +18,9 @@
 // -signing-certificate names the keystore's certificate, its public half: the provider is created
 // with the certificate's RFC 7638 thumbprint as its kid, and every run checks that the realm signs with
 // that key and no other. It is needed when the provider is created; without it, the check still holds
-// the realm's one PS256 key to a kid equal to its own thumbprint.
+// the realm's one PS256 key to a kid equal to its own thumbprint. Every run also computes the key
+// retirement floor from the live token lifetimes and fails when it exceeds the 7-day retirement window
+// (TDD-identity-kernel-002 §Retirement Window).
 //
 // Exit status: 0 success, 1 error, 2 refused (drift or an unmanaged realm), 3 changes pending
 // under -require-in-sync.
@@ -147,6 +149,12 @@ func run(args []string, stdout, stderr io.Writer) int {
 				return fail("the signing key: %v", err)
 			}
 			fmt.Fprintf(stdout, "\nthe realm signs with the keystore's key, kid %s\n", signing)
+			floor, err := realmdef.VerifyRetirementWindow(ctx, client, definition)
+			if err != nil {
+				return fail("the retirement window: %v", err)
+			}
+			fmt.Fprintf(stdout, "the retirement floor is %s (%s is %s), within the %s window\n", floor.Floor,
+				floor.From, floor.LongestAccessToken, realmdef.RetirementWindow)
 		}
 		if *requireInSync && !plan.InSync() {
 			return exitPending

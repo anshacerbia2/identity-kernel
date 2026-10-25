@@ -22,19 +22,30 @@ ENV KC_VAULT=file
 COPY --chown=1000:0 themes/scnehaux /opt/keycloak/themes/scnehaux
 RUN /opt/keycloak/bin/kc.sh build
 
-# pcre2 upgraded where the image is built (STD-GLB-009 1.8.0 §Container Images rule 10;
-# TDD-identity-kernel-005 §Images the Stack Runs). Keycloak 26.7.5's ubi9-micro base carries pcre2 and
-# pcre2-syntax 10.40-6.el9; RHEL 9 ships 10.40-7.el9_8, which fixes CVE-2026-103111, CVE-2026-86145
-# and CVE-2026-89161 (High). Remove this stage and its COPY below when image/keycloak.ref moves to a
-# Keycloak image that carries pcre2 10.40-7.el9_8 or later.
+# pcre2 and ca-certificates upgraded where the image is built (STD-GLB-009 1.8.0 §Container Images
+# rule 10; TDD-identity-kernel-005 §Images the Stack Runs).
+#   - Keycloak 26.7.5's ubi9-micro base carries pcre2 and pcre2-syntax 10.40-6.el9; RHEL 9 ships
+#     10.40-7.el9_8, which fixes CVE-2026-103111, CVE-2026-86145 and CVE-2026-89161 (High).
+#   - It carries ca-certificates 2025.2.80_v9.0.305-91.el9; RHEL 9 ships 2026.2.92_v9.0.319-90.3.el9_8,
+#     which fixes CVE-2026-114406 (Critical), found by the scan of 2026-10-24.
+# Remove a package from this stage when image/keycloak.ref moves to a Keycloak image that carries its
+# fixed version, and the stage and its COPY below when none is left.
 #
 # The image has no package manager. Keycloak's container guide installs RPMs "following this
 # two-stage pattern established by ubi-micro": dnf --installroot in a registry.access.redhat.com/ubi9
 # stage, then a COPY into the Keycloak stage. Here the root is the pinned Keycloak image itself, so
-# dnf upgrades the two packages in the image's own rpm database, and only their files and that
+# dnf upgrades the named packages in the image's own rpm database, and only their files and that
 # database are copied: a root holding only the new packages would replace the database and hide every
-# other package from the scan. The build fails if no repository offers the constraint, or if anything
-# but pcre2 and pcre2-syntax changes; the signing key dnf imports to check them is removed again.
+# other package from the scan. The build fails if no repository offers a constraint, or if anything
+# but the named packages changes; the signing key dnf imports to check them is removed again.
+#
+# ca-certificates' scriptlets regenerate the extracted trust store, Java's cacerts among them, and
+# cannot run in the micro root: it has no coreutils, and its trust binary lacks libp11-kit. So this
+# stage upgrades its own ca-certificates to the same version, requires its trust sources to equal the
+# micro root's, file for file, and runs update-ca-trust here with the micro root's extracted directory
+# as the output. A store that drops an entry fails the build, because the COPY below adds and
+# replaces files and cannot remove one. SOURCE_DATE_EPOCH makes the extraction byte-for-byte
+# repeatable.
 # SOURCE_DATE_EPOCH, which scripts/image-build-check.sh passes, sets rpm's install time, so two builds
 # of one commit write the same database.
 #
@@ -46,19 +57,36 @@ SHELL ["/bin/bash", "-o", "pipefail", "-c"]
 RUN set -eu; \
     rpm --root /mnt/rootfs -qa --qf '%{NAME} %{EVR}\n' | sort >/tmp/rpm-before; \
     dnf install --installroot /mnt/rootfs --releasever 9 --setopt install_weak_deps=false --nodocs -y \
-      'pcre2 >= 10.40-7.el9_8' 'pcre2-syntax >= 10.40-7.el9_8'; \
+      'pcre2 >= 10.40-7.el9_8' 'pcre2-syntax >= 10.40-7.el9_8' \
+      'ca-certificates >= 2026.2.92_v9.0.319-90.3.el9_8'; \
     dnf --installroot /mnt/rootfs clean all; \
     comm -13 /tmp/rpm-before <(rpm --root /mnt/rootfs -qa --qf '%{NAME} %{EVR}\n' | sort) | \
       awk '$1 == "gpg-pubkey" {print "gpg-pubkey-" $2}' | xargs -r rpm --root /mnt/rootfs -e; \
     rpm --root /mnt/rootfs -qa --qf '%{NAME} %{EVR}\n' | sort >/tmp/rpm-after; \
-    changed="$(comm -3 /tmp/rpm-before /tmp/rpm-after | awk '{print $1}' | sort -u | grep -Ev '^(pcre2|pcre2-syntax)$' || true)"; \
-    if [ -n "$changed" ]; then echo "the pcre2 upgrade changed other packages: $changed" >&2; exit 1; fi; \
-    rpm --root /mnt/rootfs -q pcre2 pcre2-syntax; \
+    changed="$(comm -3 /tmp/rpm-before /tmp/rpm-after | awk '{print $1}' | sort -u | grep -Ev '^(pcre2|pcre2-syntax|ca-certificates)$' || true)"; \
+    if [ -n "$changed" ]; then echo "the package upgrade changed other packages: $changed" >&2; exit 1; fi; \
+    rpm --root /mnt/rootfs -q pcre2 pcre2-syntax ca-certificates; \
+    dnf upgrade -y --setopt install_weak_deps=false --nodocs 'ca-certificates >= 2026.2.92_v9.0.319-90.3.el9_8'; \
+    dnf clean all; \
+    [ "$(rpm -q ca-certificates)" = "$(rpm --root /mnt/rootfs -q ca-certificates)" ]; \
+    sources() { (cd "$1" && find . -printf '%p %y %l\n' | sort && find . -type f | sort | xargs sha256sum); }; \
+    for d in usr/share/pki/ca-trust-source etc/pki/ca-trust/source; do \
+      if [ "$(sources "/$d")" != "$(sources "/mnt/rootfs/$d")" ]; then \
+        echo "the trust sources in /$d differ from the micro root's" >&2; exit 1; fi; done; \
+    extracted=/mnt/rootfs/etc/pki/ca-trust/extracted; \
+    P11_KIT_NO_USER_CONFIG=1 update-ca-trust extract -o /tmp/extracted; \
+    dropped="$(comm -23 <(cd "$extracted" && find . | sort) <(cd /tmp/extracted && find . | sort) | grep -v '/README$' || true)"; \
+    if [ -n "$dropped" ]; then echo "the new trust store drops entries a COPY cannot remove: $dropped" >&2; exit 1; fi; \
+    chmod -R u+w "$extracted"; \
+    cp -a /tmp/extracted/. "$extracted/"; \
+    chmod u-w "$extracted/pem/directory-hash"; \
     mkdir -p /mnt/patch; \
     cd /mnt/rootfs; \
-    { rpm --root /mnt/rootfs -ql pcre2 pcre2-syntax | sed 's|^/||' | while read -r f; do \
+    { rpm --root /mnt/rootfs -ql pcre2 pcre2-syntax ca-certificates | sed 's|^/||' | while read -r f; do \
         if [ -L "$f" ] || [ -f "$f" ]; then echo "$f"; fi; done; \
-      ls var/lib/rpm/rpmdb.sqlite*; } | tar -cf - --no-recursion -T - | tar -xf - -C /mnt/patch
+      echo etc/pki/ca-trust/extracted/pem/directory-hash; \
+      find etc/pki/ca-trust/extracted \( -type f -o -type l \); \
+      ls var/lib/rpm/rpmdb.sqlite*; } | sort -u | tar -cf - --no-recursion -T - | tar -xf - -C /mnt/patch
 
 FROM ${KEYCLOAK_IMAGE}
 COPY --from=builder /opt/keycloak/ /opt/keycloak/

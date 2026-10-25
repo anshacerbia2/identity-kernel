@@ -143,6 +143,9 @@ func Apply(ctx context.Context, c *admin.Client, plan Plan, options Options) err
 	if _, err := VerifySigningKey(ctx, c, d, options.SigningKeyID); err != nil {
 		return fmt.Errorf("verifying the signing key: %w", err)
 	}
+	if _, err := VerifyRetirementWindow(ctx, c, d); err != nil {
+		return fmt.Errorf("verifying the retirement window: %w", err)
+	}
 	return record(ctx, c, base, d, options.Revision)
 }
 

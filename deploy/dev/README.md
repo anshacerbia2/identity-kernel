@@ -270,7 +270,7 @@ See the repository README.
 
 The kernel image is built from `image/Dockerfile`: the upstream digest, which must equal
 `image/keycloak.ref` (CI fails when they differ), plus this repository's login theme and, until the pin
-moves to a Keycloak image that carries it, `pcre2` 10.40-7.el9_8 from a digest-pinned ubi9 stage
+moves to a Keycloak image that carries them, `pcre2` 10.40-7.el9_8 and `ca-certificates` 2026.2.92 from a digest-pinned ubi9 stage
 (TDD-identity-kernel-005 §Images the Stack Runs). `docker compose up -d --build` rebuilds it. Set `BUILD_REVISION=$(git rev-parse HEAD)` for that build to record the commit as the image's `org.opencontainers.image.revision` label (`unknown` without it); `deploy-dev` sets it and checks it. Upgrade 
 both together, only after `compat/` passes against the new digest and the `upgrade` job has
 written its release record, which says whether the previous release still starts on the
@@ -521,7 +521,7 @@ Five mistakes to avoid in tunnel mode:
 | `backup.sh` exits non-zero | `postgres` is not running, or the dump did not read back | Nothing was deleted, and the previous sets are intact. Fix the cause and run it again |
 | Every apply is refused with "scnehaux.json must set eventsEnabled true", on a realm applied at an older revision | realm-apply parsed the recorded baseline by today's policy | Fixed in identity-kernel#58: `git pull && docker compose up -d --build` |
 | `docker compose up` fails building `caddy`, at `xcaddy build`, with a TLS or `proxy.golang.org` error | The network intercepts TLS to the Go module proxy | `GOPROXY=direct` in `.env`, then `docker compose up -d --build` again |
-| A build fails at `apk add` with "unable to select packages" for `zlib>=1.3.2-r1` | Alpine's index was unreachable, or no longer offers the fixed package | Retry once the mirror answers. The constraint is the floor CVE-2026-85091 needs, so it is never removed to make a build pass |
+| A build fails at `apk add` with "unable to select packages" for `zlib>=1.3.2-r1` or `brotli-libs>=1.2.1-r0` | Alpine's index was unreachable, or no longer offers the fixed package | Retry once the mirror answers. Each constraint is the floor a CVE needs (CVE-2026-85091, CVE-2026-111497), so it is never removed to make a build pass |
 | A setting in `.env` has no effect | Compose passes a container only the variables `compose.yaml` lists | Check `compose.yaml` for it. Behind a tunnel, check the command used the tunnel file (`COMPOSE_FILE`, or `-f compose.yaml -f compose.tunnel.yaml`) |
 | Containers cannot reach a host network, or a VPN drops, after `up` | A Docker network took a range the host uses | Pin the subnets ([A local override](#a-local-override)) |
 | An account cannot sign in after failed passwords | Brute-force detection locked it; see below | Below |
