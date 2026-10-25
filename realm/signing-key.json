@@ -1,16 +1,16 @@
 {
-  "name": "realm-signing-ps256",
+  "name": "realm-signing-{kid}",
   "providerId": "java-keystore",
   "providerType": "org.keycloak.keys.KeyProvider",
   "config": {
-    "priority": ["200"],
+    "priority": ["100"],
     "algorithm": ["PS256"],
     "active": ["true"],
     "enabled": ["true"],
-    "keystore": ["realm-signing.p12"],
+    "keystore": ["realm-signing-{kid}.p12"],
     "keystoreType": ["PKCS12"],
     "keyAlias": ["realm-signing"],
-    "keystorePassword": ["${vault.realm-signing-password}"],
-    "keyPassword": ["${vault.realm-signing-password}"]
+    "keystorePassword": ["${vault.realm-signing-{kid}}"],
+    "keyPassword": ["${vault.realm-signing-{kid}}"]
   }
 }

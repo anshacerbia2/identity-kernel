@@ -8,6 +8,9 @@ import (
 	"encoding/base64"
 	"encoding/pem"
 	"math/big"
+	"os"
+	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -62,44 +65,125 @@ func publicKeyB64(t *testing.T, key *rsa.PrivateKey) string {
 	return base64.StdEncoding.EncodeToString(der)
 }
 
-func TestTheRealmMustSignWithTheKeystoreKeyAlone(t *testing.T) {
-	key := rsaKey(t, 3072)
-	kid := admin.Thumbprint(&key.PublicKey)
-	ours := realmKey{Kid: kid, ProviderID: "provider", Algorithm: "PS256", Type: "RSA", Status: "ACTIVE",
-		PublicKey: publicKeyB64(t, key)}
+func provider(id, kid string, active bool) map[string]any {
+	return map[string]any{"id": id, "name": SigningKeyName(kid), "providerId": "java-keystore",
+		"config": map[string]any{"active": []any{strconv.FormatBool(active)}, "enabled": []any{"true"}}}
+}
+
+func TestTheRealmPublishesCustodyKeysAloneOneActive(t *testing.T) {
+	oldKey, newKey := rsaKey(t, 3072), rsaKey(t, 3072)
+	oldKid, newKid := admin.Thumbprint(&oldKey.PublicKey), admin.Thumbprint(&newKey.PublicKey)
+	active := realmKey{Kid: newKid, ProviderID: "p-new", Algorithm: "PS256", Type: "RSA", Status: "ACTIVE",
+		PublicKey: publicKeyB64(t, newKey)}
+	retiring := realmKey{Kid: oldKid, ProviderID: "p-old", Algorithm: "PS256", Type: "RSA", Status: "PASSIVE",
+		PublicKey: publicKeyB64(t, oldKey)}
 	rs256 := realmKey{Kid: "rs", ProviderID: "rsa-default", Algorithm: "RS256", Type: "RSA", Status: "DISABLED",
 		PublicKey: "MIIB"}
 	hs512 := realmKey{Kid: "hs", ProviderID: "hmac", Algorithm: "HS512", Type: "OCT", Status: "ACTIVE"}
-	active := map[string]string{"PS256": kid, "RS256": "rs"}
+	components := []map[string]any{provider("p-new", newKid, true), provider("p-old", oldKid, false)}
+	custody := map[string]string{oldKid: "old.crt", newKid: "new.crt"}
+	actives := map[string]string{"PS256": newKid, "RS256": "rs"}
 
-	if got, err := checkSigningKey("provider", "realm-signing-ps256", active, []realmKey{ours, rs256, hs512}, kid); err != nil ||
-		got != kid {
-		t.Fatalf("the keystore's key alone: %q, %v", got, err)
+	if got, err := checkSigningKey(components, actives, []realmKey{active, retiring, rs256, hs512}, custody); err != nil ||
+		got != newKid {
+		t.Fatalf("an active key and a retiring one: %q, %v", got, err)
+	}
+	if got, err := checkSigningKey(components[:1], actives, []realmKey{active}, nil); err != nil || got != newKid {
+		t.Fatalf("one key, no custody given: %q, %v", got, err)
 	}
 
+	with := func(k realmKey, edit func(*realmKey)) realmKey { edit(&k); return k }
 	cases := map[string]struct {
-		keys   []realmKey
-		active map[string]string
-		want   string
-		says   string
+		components []map[string]any
+		keys       []realmKey
+		active     map[string]string
+		custody    map[string]string
+		says       string
 	}{
-		"the keystore did not load": {keys: []realmKey{rs256}, active: active, says: "did not load"},
-		"a fallback key beside it": {keys: []realmKey{ours, {Kid: "fb", ProviderID: "fallback", Algorithm: "PS256",
-			Type: "RSA", Status: "ACTIVE"}}, active: active, says: "fallback-PS256"},
-		"a kid that is not the thumbprint": {keys: []realmKey{func() realmKey { k := ours; k.Kid = "uuid"; return k }()},
-			active: map[string]string{"PS256": "uuid"}, says: "thumbprint"},
-		"another keystore than the ceremony's": {keys: []realmKey{ours}, active: active, want: "other", says: "another keystore"},
-		"not the active key":                   {keys: []realmKey{ours}, active: map[string]string{"PS256": "x"}, says: "active"},
-		"an RS256 key still published": {keys: []realmKey{ours, func() realmKey { k := rs256; k.Status = "ACTIVE"; return k }()},
-			active: active, says: "publishes keys other than"},
-		"a disabled key": {keys: []realmKey{func() realmKey { k := ours; k.Status = "DISABLED"; return k }()},
-			active: active, says: "ACTIVE"},
+		"no signing provider":          {nil, []realmKey{rs256}, actives, custody, "no signing key provider"},
+		"a keystore that did not load": {components, []realmKey{active}, actives, custody, "did not load"},
+		"two active keys": {components, []realmKey{active, with(retiring, func(k *realmKey) { k.Status = "ACTIVE" })},
+			actives, custody, "2 active"},
+		"no active key": {components, []realmKey{with(active, func(k *realmKey) { k.Status = "PASSIVE" }), retiring},
+			actives, custody, "0 active"},
+		"a fallback key beside them": {components, []realmKey{active, retiring, {Kid: "fb", ProviderID: "fallback",
+			Algorithm: "PS256", Type: "RSA", Status: "ACTIVE"}}, actives, custody, "fallback-PS256"},
+		"an RS256 key still published": {components, []realmKey{active, retiring,
+			with(rs256, func(k *realmKey) { k.Status = "ACTIVE" })}, actives, custody, "publishes keys other than"},
+		"a key not in custody": {components, []realmKey{active, retiring}, actives,
+			map[string]string{newKid: "new.crt"}, "not in custody"},
+		"a kid that is not the thumbprint": {components, []realmKey{with(active, func(k *realmKey) { k.Kid = "uuid" }),
+			retiring}, map[string]string{"PS256": "uuid"}, custody, "thumbprint"},
+		"a provider not named by its key": {[]map[string]any{provider("p-new", oldKid, true), provider("p-old", newKid, false)},
+			[]realmKey{active, retiring}, actives, custody, "name is not its kid"},
+		"a disabled signing key": {components, []realmKey{active, with(retiring, func(k *realmKey) { k.Status = "DISABLED" })},
+			actives, custody, "DISABLED"},
+		"the realm's active key is another": {components, []realmKey{active, retiring},
+			map[string]string{"PS256": oldKid}, custody, "not its one active"},
 	}
 	for name, c := range cases {
-		_, err := checkSigningKey("provider", "realm-signing-ps256", c.active, c.keys, c.want)
+		_, err := checkSigningKey(c.components, c.active, c.keys, c.custody)
 		if err == nil || !strings.Contains(err.Error(), c.says) {
 			t.Errorf("%s: got %v, want an error saying %q", name, err, c.says)
 		}
+	}
+}
+
+func TestEachKeysProviderIsRenderedFromTheTemplate(t *testing.T) {
+	d := definition(t)
+	rendered := RenderSigningKey(d.Key, "KID_x-1")
+	config := rendered["config"].(map[string]any)
+	for field, want := range map[string]string{"keystore": "realm-signing-KID_x-1.p12",
+		"keystorePassword": "${vault.realm-signing-KID_x-1}", "keyPassword": "${vault.realm-signing-KID_x-1}",
+		"keyAlias": "realm-signing", "kid": "KID_x-1"} {
+		if got := single(config[field]); got != want {
+			t.Errorf("%s is %q, want %q", field, got, want)
+		}
+	}
+	if name(rendered) != "realm-signing-KID_x-1" {
+		t.Errorf("the provider is named %q", name(rendered))
+	}
+	if single(d.Key["config"].(map[string]any)["keystore"]) != "realm-signing-{kid}.p12" {
+		t.Error("rendering changed the template")
+	}
+}
+
+func TestCustodyIsTheCertificatesNamedByTheirKids(t *testing.T) {
+	dir := t.TempDir()
+	key := rsaKey(t, 3072)
+	kid := admin.Thumbprint(&key.PublicKey)
+	if err := os.WriteFile(filepath.Join(dir, SigningKeyName(kid)+".crt"), certificateFor(t, key), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	custody, err := ReadCustody(dir)
+	if err != nil || len(custody) != 1 || custody[kid] == "" {
+		t.Fatalf("custody %v, %v", custody, err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, SigningKeyName("another")+".crt"), certificateFor(t, rsaKey(t, 3072)),
+		0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := ReadCustody(dir); err == nil || !strings.Contains(err.Error(), "not its kid") {
+		t.Errorf("a certificate named by another kid: %v", err)
+	}
+}
+
+func TestOnlyAThrowawayEnvironmentShortensTheWindows(t *testing.T) {
+	none := func(string) string { return "" }
+	set := func(name string) string {
+		return map[string]string{CacheWindowVariable: "5s", RetirementWindowVariable: "7s"}[name]
+	}
+	if w, err := StepWindows(Development, none); err != nil || w.Cache != ConsumerKeySetCache || w.Retirement != RetirementWindow {
+		t.Errorf("development: %+v, %v", w, err)
+	}
+	if w, err := StepWindows(CI, set); err != nil || w.Cache != 5*time.Second || w.Retirement != 7*time.Second {
+		t.Errorf("ci with both set: %+v, %v", w, err)
+	}
+	if _, err := StepWindows(Development, set); err == nil {
+		t.Error("development accepted a shortened window")
+	}
+	if _, err := StepWindows(Local, func(string) string { return "soon" }); err == nil {
+		t.Error("a window that is not a duration was accepted")
 	}
 }
 

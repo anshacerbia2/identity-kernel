@@ -30,10 +30,10 @@ type Options struct {
 	// accepting a console change after committing it to realm/ -- and it is the one way to
 	// overwrite a change nobody recorded, so it is never a default.
 	Adopt bool
-	// SigningKeyID is the kid the signing key provider is created with: the RFC 7638 thumbprint of
-	// the keystore's certificate (SigningKeyID). Required when the provider is created, and checked
-	// against the key the realm serves after every apply.
-	SigningKeyID string
+	// Custody is the keys in custody, by kid (ReadCustody). The first signing key provider is created
+	// from the one key there, when the realm has none, and every key the realm publishes must be one of
+	// them (ADR-IAM-002 §5.5 Q4).
+	Custody map[string]string
 }
 
 // Apply converges the live realm to the plan's definition, verifies that it did, and records the
@@ -83,7 +83,7 @@ func Apply(ctx context.Context, c *admin.Client, plan Plan, options Options) err
 		case KindRealm:
 			err = applyRealm(ctx, c, d, plan.live, change.Action)
 		case KindKey:
-			err = applyKey(ctx, c, base, d.Key, plan.live, change.Action, options.SigningKeyID)
+			err = applyKey(ctx, c, base, d.Key, change.Action, options.Custody)
 		case KindScope:
 			err = applyScope(ctx, c, base, scopeNamed(d, change.Name), plan.live, change.Action)
 		case KindKeyProvider:
@@ -140,7 +140,7 @@ func Apply(ctx context.Context, c *admin.Client, plan Plan, options Options) err
 	}
 	// The key is checked as it signs, not as it is configured: a keystore that did not load is a
 	// configuration in sync and a realm that signs with nothing, or with a fallback key.
-	if _, err := VerifySigningKey(ctx, c, d, options.SigningKeyID); err != nil {
+	if _, err := VerifySigningKey(ctx, c, d, options.Custody); err != nil {
 		return fmt.Errorf("verifying the signing key: %w", err)
 	}
 	if _, err := VerifyRetirementWindow(ctx, c, d); err != nil {
@@ -167,36 +167,32 @@ func applyRealm(ctx context.Context, c *admin.Client, d Definition, l *live, act
 	return err
 }
 
-func applyKey(ctx context.Context, c *admin.Client, base string, key map[string]any, l *live, action Action,
-	kid string) error {
-	if action == Create {
-		// Without a kid, Keycloak makes one up (signingkey.go), so the provider is never created
-		// without the certificate's thumbprint.
-		if kid == "" {
-			return errors.New("creating the signing key provider needs its kid: pass the keystore's certificate " +
-				"with -signing-certificate")
-		}
-		var realm struct {
-			ID string `json:"id"`
-		}
-		if err := c.GetJSON(ctx, base, &realm); err != nil {
-			return err
-		}
-		body := overlay(nil, key)
-		body["parentId"] = realm.ID
-		config, _ := body["config"].(map[string]any)
-		if config == nil {
-			config = map[string]any{}
-		}
-		config["kid"] = []any{kid}
-		body["config"] = config
-		_, err := c.Call(ctx, http.MethodPost, base+"/components", body, http.StatusCreated)
+func applyKey(ctx context.Context, c *admin.Client, base string, template map[string]any, action Action,
+	custody map[string]string) error {
+	if action != Create {
+		return nil
+	}
+	// The first key alone, and only from custody: the rotation steps own every provider after it
+	// (ADR-IAM-002 §5.5 Q4). Without a kid, Keycloak makes one up, so the provider is never created
+	// without the certificate's thumbprint.
+	if len(custody) != 1 {
+		return fmt.Errorf("the realm has no signing key provider, and custody holds %d keys; realm-apply creates "+
+			"the first from exactly one (ADR-IAM-002 §5.5 Q4). Pass the certificates with -signing-certificates",
+			len(custody))
+	}
+	var kid string
+	for held := range custody {
+		kid = held
+	}
+	var realm struct {
+		ID string `json:"id"`
+	}
+	if err := c.GetJSON(ctx, base, &realm); err != nil {
 		return err
 	}
-	observed := l.keys[name(key)]
-	id, _ := observed["id"].(string)
-	_, err := c.Call(ctx, http.MethodPut, base+"/components/"+url.PathEscape(id), overlay(observed, key),
-		http.StatusNoContent)
+	body := RenderSigningKey(template, kid)
+	body["parentId"] = realm.ID
+	_, err := c.Call(ctx, http.MethodPost, base+"/components", body, http.StatusCreated)
 	return err
 }
 

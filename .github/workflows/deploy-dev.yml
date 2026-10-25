@@ -106,7 +106,7 @@ jobs:
           [ "$refused" = 1 ] || { echo "::error::the kernel did not refuse to start without its keystore"; exit 1; }
 
       # The ceremony as the runbook runs it (docs/runbooks/signing-key-ceremony.md): an operator and a
-      # witness, never the same person, and never a second key over the first.
+      # witness, never the same person. The key is named by its kid (ADR-IAM-002 §5.5 Q3).
       - name: the signing-key ceremony
         run: |
           if bash ../../scripts/signing-key-ceremony.sh ./keys "CI Operator" " ci  operator " "deploy-dev run $GITHUB_RUN_ID" 2>"$RUNNER_TEMP/same.txt"; then
@@ -116,11 +116,8 @@ jobs:
           grep -F "the witness is the operator" "$RUNNER_TEMP/same.txt"
           bash ../../scripts/signing-key-ceremony.sh ./keys "CI Operator" "CI Witness" "deploy-dev run $GITHUB_RUN_ID" \
             | tee "$RUNNER_TEMP/ceremony.txt"
-          if bash ../../scripts/signing-key-ceremony.sh ./keys "CI Operator" "CI Witness" "a second key" >/dev/null 2>&1; then
-            echo "::error::a second ceremony replaced the keystore"
-            exit 1
-          fi
-          kid="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["key"]["kid"])' keys/realm-signing.ceremony.json)"
+          kid="$(python3 -c 'import glob,json; [f] = glob.glob("keys/realm-signing-*.ceremony.json"); print(json.load(open(f))["key"]["kid"])')"
+          [ -f "keys/realm-signing-$kid.crt" ] || { echo "::error::the ceremony's certificate is not named by its kid"; exit 1; }
           echo "CEREMONY_KID=$kid" >> "$GITHUB_ENV"
 
       - name: start the stack, which applies the realm
@@ -150,7 +147,7 @@ jobs:
           export KEYCLOAK_ADMIN_CLIENT_KEY_FILE=deploy/dev/keys/realm-apply.pem
           # With the ceremony's certificate: the realm signs with the keystore the ceremony made.
           go run ./cmd/realm-apply -environment development -url http://localhost:8080 -require-in-sync \
-            -signing-certificate deploy/dev/keys/realm-signing.crt
+            -signing-certificates deploy/dev/keys
 
       # The witness's check, step 5 of the ceremony runbook: the kid the ceremony recorded is the one the
       # key set publishes through the proxy, and a token the realm issues carries it.
@@ -366,7 +363,7 @@ jobs:
           # The master realm's frontend URL is now the private port, so the assertion's audience is
           # not the address realm-apply reaches Keycloak on. Discovery supplies it.
           go run ./cmd/realm-apply -environment development -url http://localhost:8081 -require-in-sync \
-            -signing-certificate deploy/dev/keys/realm-signing.crt
+            -signing-certificates deploy/dev/keys
 
       - name: the public port serves the realm on the tunnel's issuer
         run: |

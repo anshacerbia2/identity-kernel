@@ -23,10 +23,11 @@ That is `ErrUnknownKey`. Two other errors look alike and have other causes:
 
 ## What the code does
 
-**The kernel.** The realm signs with one declared key provider, `realm-signing-ps256`: Keycloak's
-`java-keystore`, PS256, loading the RSA-3072 key the signing-key ceremony made, from
-`realm-signing.p12`, with its password from the file vault (`realm/signing-key.json`,
-TDD-identity-kernel-002 1.2.0 §Custody as Built). Its `kid` is the RFC 7638 thumbprint of the key, set
+**The kernel.** The realm signs with one active key provider of its own, `realm-signing-<kid>`:
+Keycloak's `java-keystore`, PS256, loading the RSA-3072 key a signing-key ceremony made, from
+`realm-signing-<kid>.p12`, with its password from the file vault (`realm/signing-key.json` is the
+template, TDD-identity-kernel-002 1.5.0 §Custody as Built). During a rotation a staged or a retiring
+key is published beside it, passive (§Rotation as Built). Its `kid` is the RFC 7638 thumbprint of the key, set
 when the provider is created. Its JWKS, `/realms/scnehaux/protocol/openid-connect/certs`, publishes
 every key whose status is `ACTIVE` or `PASSIVE`. A `DISABLED` or deleted key leaves it at once [R1].
 Keycloak's built-in RS256 and RSA-OAEP providers are declared disabled
@@ -83,28 +84,28 @@ jwks_uri location to re-retrieve the keys when it sees an unfamiliar kid value" 
    | What you find | Cause | Action |
    | :-- | :-- | :-- |
    | The token's `iss` is not the issuer the consumer is configured for | A token from another environment or realm, such as a development token sent to another stack. The kernel is fine | The client must obtain tokens from the consumer's issuer. Close as a client fault |
-   | The `kid` belongs to the provider `fallback-PS256` | The declared key `realm-signing-ps256` was disabled or deleted, or its keystore did not load, and Keycloak generated a 2048-bit replacement | [Custody outage](custody-outage.md), or step 5 or 6 for the declared key, then delete `fallback-PS256`. No consumer ever verified a token it signed |
+   | The `kid` belongs to the provider `fallback-PS256` | The active key's provider was disabled or deleted, or its keystore did not load, and Keycloak generated a 2048-bit replacement | [Custody outage](custody-outage.md), or step 5 or 6 for the declared key, then delete `fallback-PS256`. No consumer ever verified a token it signed |
    | The `kid` is in the JWKS now, of a 3072-bit PS256 key | The consumer has not refetched yet, or fetches another URL | Wait one `MinRefetchInterval` and retry. If it persists, the consumer's JWKS URL is wrong: compare it with the discovery document's `jwks_uri` |
-   | The `kid` is in the realm as `DISABLED` | Someone disabled the key provider. `realm-apply` reports it as drift on `signing key realm-signing-ps256` | Step 5 |
+   | The `kid` is in the realm as `DISABLED` | Someone disabled the key provider. `realm-apply` refuses the realm: a signing key is active or passive, and leaves only by its provider's removal | Step 5 |
    | The `kid` is nowhere in the realm | The key was deleted, the database was restored to a point before the key existed, or the realm was recreated (`docker compose down -v`) | Step 6 |
    | The `kid` was never issued by this kernel | A forged or corrupt token | Rejection is correct. Treat a burst as a security signal; the rate limit already protects the kernel |
 
 5. **A disabled key.** First find out why, from the admin events
    ([Console drift](console-drift.md), step 2).
-   - **Disabled by mistake, and not suspected compromised.** If it is `realm-signing-ps256`, the
-     declared key, revert the drift: enabled and active, as `realm/signing-key.json` declares
-     ([Console drift](console-drift.md), step 4a). At priority 200 it signs again ahead of any
-     fallback key. If it is another key, enable it with `active` false. A passive key is published and
-     verifies, and signs nothing [R1]. Disable it again once every token it signed has expired.
+   - **Disabled by mistake, and not suspected compromised.** Enable it again, as it was: active if
+     `scripts/signing-key-rotation.sh state` shows it `active` in the registry, passive if `staged` or
+     `retiring`. A passive key is published and verifies, and signs nothing [R1]. A key leaves the key
+     set only by its retirement ([Signing-key rotation](signing-key-rotation.md)).
    - **Suspected compromised:** do not enable it. Every token it signed must fail. That failure is
      the containment, not an incident to suppress (TDD-identity-kernel-002 §Compromise). Tell every
      consumer owner why their users must sign in again.
 
-6. **A key that is gone.** It cannot come back. If it was `realm-signing-ps256`, `realm-apply` reports
-   the provider "removed from the live realm" and refuses. Applying with `-adopt` and the keystore's
-   certificate (`-signing-certificate`) creates the provider again over the same keystore, with the
-   same `kid`, because the `kid` is the key's thumbprint. If the keystore itself is lost, the key is
-   gone: a new ceremony makes a new key with a new `kid`, from zero ([Signing-key
+6. **A key that is gone.** If its provider was deleted and its keystore is still in custody, the
+   provider is made again over the same keystore, with the same `kid`, because the `kid` is the key's
+   thumbprint: `docker compose run --rm signing-key stage -kid <kid>`, and, for the
+   key the registry records `active`, `… signing-key activate -kid <kid>`. Then delete `fallback-PS256`.
+   The registry already holds the key's state, so nothing is recorded again. If the keystore itself is
+   lost, the key is gone: a new ceremony makes a new key with a new `kid`, from zero ([Signing-key
    ceremony](signing-key-ceremony.md)). Tokens the old key signed fail until their `exp`.
    Sessions continue through a refresh, which issues tokens under the current key. After a database
    restore, find out from [Failed upgrade](failed-upgrade.md) §B step 4 what else the restore took
@@ -119,19 +120,17 @@ jwks_uri location to re-retrieve the keys when it sees an unfamiliar kid value" 
 A key made by hand signs at once. Keycloak has no staged state: "Once new keys are available, all new
 tokens and cookies will be signed with the new keys" [R1]. Every consumer that has not refetched
 then sees an unknown `kid`. That is the outage TDD-identity-kernel-002 §Rotation prevents by
-publishing a key before it signs. Rotation is not built. If a key must be replaced before it is,
-keep the old key passive for at least the longest access-token lifetime, plus the consumer cache, plus clock skew
+publishing a key before it signs. Replace a key with the steps of [Signing-key
+rotation](signing-key-rotation.md), which keep the old key passive for the retirement window
 (TDD-identity-kernel-002 §Retirement Window). OpenID Connect Core: the JWKS "SHOULD retain recently
 decommissioned signing keys for a reasonable period of time to facilitate a smooth transition" [R2].
 
 ## Gaps
 
-- **Rotation is not built** (ROADMAP Week 2). Custody is: the `kid` is the RFC 7638 thumbprint
-  TDD-identity-kernel-002 requires. Keys still have no `staged` state.
 - **No alert.** Nothing watches the consumers' `ErrUnknownKey` rate or compares the JWKS across
   replicas (TDD-identity-kernel-002 §Operational Notes). A report from a consumer is the signal.
-- **Production.** TDD-identity-kernel-002 also requires runbooks for scheduled and emergency
-  rotation. They wait on rotation.
+- **Production.** Scheduled and emergency rotation are [Signing-key rotation](signing-key-rotation.md);
+  its production section has never run.
 
 ## References
 

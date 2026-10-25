@@ -13,7 +13,7 @@
 // authenticator is switched back in the console. install takes the administrator from the
 // environment, as realm-apply does.
 //
-//	client-key kid -certificate keys/realm-signing.crt
+//	client-key kid -certificate keys/realm-signing-<kid>.crt
 //
 // kid prints the kid of the realm signing key a keystore's certificate carries: the RFC 7638
 // thumbprint of its public key (TDD-identity-kernel-002 §Key Identity). The signing-key ceremony

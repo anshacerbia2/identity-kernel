@@ -217,21 +217,25 @@ unused.
 - ✅ `kid` derived as the RFC 7638 thumbprint, set when the provider is created and checked by every
   `realm-apply` run
 - ✅ Startup refuses to serve when custody is unreachable — the image's entrypoint, before Keycloak runs
-- ⏳ Rotation through the five states of TDD-identity-kernel-002 1.4.0 §Rotation State Machine
-  (ADR-IAM-002 §5.2, NIST SP 800-57): a staged key is published before it signs, and its private material is destroyed when it
-  leaves the JWKS, every stored version of the sealed keystore included. No retention period
-  - ✅ The pinned release's mechanism under each state, proved (2026-10-24; TDD-identity-kernel-002
-    1.4.0 §Rotation as Built): `compat/key_rotation_test.go` shows a passive key published and signing
-    nothing, new tokens under the newly active `kid`, the previous key's tokens verifying while it is
-    retiring, a key leaving the key set only when its provider is removed, and no RS256 or fallback key
-    at any step
-  - ✅ The retirement floor computed from the live token lifetimes on every `realm-apply` run, which
-    fails when it exceeds the 7-day window (§Retirement Window)
-  - ⏳ The ceremony and script steps (stage, activate, demote, retire, revoke) and their custody
-    half: stopped on TDD-identity-kernel-002 1.4.0 Open Questions 3 to 9 (added 2026-10-24: custody of
-    more than one key, who owns the providers' state, the registry's home, rollback, activation after a
-    compromise, destroying stored secret versions, approvals and events). The ceremony still refuses
-    a second key
+- ✅ Rotation through the five states of TDD-identity-kernel-002 1.5.0 §Rotation State Machine and
+  §Rotation as Built (ADR-IAM-002 §5.2 and §5.5, amended 2026-10-24; NIST SP 800-57): a staged key is
+  published before it signs, and its private material is destroyed when it leaves the JWKS. No
+  retention period. Built 2026-10-25
+  - ✅ The pinned release's mechanism under each state (2026-10-24, 1.4.0), and the retirement floor
+    computed from the live token lifetimes on every `realm-apply` run (§Retirement Window)
+  - ✅ One keystore, one password and one provider per key, all named `realm-signing-<kid>` (Q3); the
+    image's start check applied to every keystore, refusing a second entry; the ceremony makes every key
+    (`scripts/signing-key-ceremony.sh`, `scripts/signing-key-generate.sh`)
+  - ✅ The steps own the providers (Q4): `realm-apply` creates the first on an empty realm, from the one
+    certificate in custody, and checks the invariants on every run
+  - ✅ `scripts/signing-key-rotation.sh`: stage, approve, activate (the new key active before the old one
+    is demoted), retire, abandon and revoke, each refused without the registry's approval and each
+    recorded through identity-control's `identity-signing-key` (Q5, Q6, Q7, Q9); the destruction in Q8's
+    order, with its evidence. Needs identity-control#121 (the registry)
+  - ✅ Proved end to end in the `rotation` job of `compat.yml`, with identity-control at `identity_ref`
+    (`compat/rotation_steps_test.go`)
+  - ✅ The production pair per key in `docs/production/` and the steps' production commands in
+    `docs/runbooks/signing-key-rotation.md`. **Not yet:** run, which waits on a production environment
 - ✅ Question 4 executed and recorded — **path form retained**. `iss` is
   `{frontend URL}/realms/{realm name}`, and a realm rename moves it too (compat run 36113564506).
   The production hostname and realm name are therefore fixed together before the first token.
@@ -616,7 +620,7 @@ key, one per environment and realm, delivered by the AWS Secrets and Configurati
 - Runbooks: [signing-key ceremony](docs/runbooks/signing-key-ceremony.md),
   [custody outage](docs/runbooks/custody-outage.md), [database restore](docs/runbooks/database-restore.md).
 
-**Not yet:** the rotation steps, which wait on TDD-identity-kernel-002 1.4.0 Open Questions 3 to 9 and which the ceremony refuses until they are built (the mechanism and the retirement floor are, §Rotation as Built); the
+**Not yet:** the
 production delivery, which waits on a production environment; replica consistency, which needs a
 second replica.
 
@@ -885,7 +889,9 @@ by the same sweep.
   (axe-core, WCAG 2.2 A and AA, both schemes, both locales) and the keyboard paths pass in the
   `browser` job. **Not yet:** the screen-reader pass, which TDD-004 §Testing Strategy makes manual
   release evidence
-- Rotation rehearsed end to end, including the retirement window
+- ✅ Rotation rehearsed end to end, including the retirement window, in the `rotation` job of
+  `compat.yml` (2026-10-25, TDD-identity-kernel-002 1.5.0 §Rotation as Built), with a `ci` environment's
+  shortened windows. The 7-day window on a long-lived environment is the production gate's rehearsal
 - ✅ Upgrade compatibility suite: apply realm to a clean instance, assert the declared
   contract, assert the closed creation paths, rehearse rollback — see below
 
@@ -1091,7 +1097,8 @@ key ceremony, console drift, failed upgrade, and consumer reporting an unknown `
 - ✅ The key ceremony runbook, [`docs/runbooks/signing-key-ceremony.md`](docs/runbooks/signing-key-ceremony.md),
   with the custody-outage and database-restore runbooks TDD-identity-kernel-002 adds. Its production
   section has never run.
-- Key rotation and emergency rotation, rehearsed in staging, wait on rotation (Week 2).
+- Key rotation and emergency rotation, rehearsed in staging: the steps are built (Week 2,
+  TDD-identity-kernel-002 1.5.0); the rehearsal waits on a staging environment.
 - ⏳ **The production ingress closes the legacy realm endpoint, and a test proves it** (added
   2026-10-20; ADR-IAM-002 §5.4, amended 2026-10-20; STD-GLB-009 2.0.0 §Security & Access Governance;
   TDD-identity-kernel-002 1.3.0 §The Published Key Set). Before the production realm serves anyone, a

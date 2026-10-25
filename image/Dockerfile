@@ -15,9 +15,9 @@ ENV KC_HEALTH_ENABLED=true
 ENV KC_METRICS_ENABLED=true
 ENV KC_DB=postgres
 # The file vault, a build-time option: "For enabling the file-based vault you need to build Keycloak
-# first using the following build option" (Keycloak, Using a vault). The realm signing keystore's
-# passwords are ${vault.realm-signing-password}, read from $KC_VAULT_DIR (ADR-IAM-002 §5.3,
-# TDD-identity-kernel-002 1.2.0 §Custody as Built).
+# first using the following build option" (Keycloak, Using a vault). Each realm signing keystore's
+# passwords are ${vault.realm-signing-<kid>}, read from $KC_VAULT_DIR (ADR-IAM-002 §5.3 and §5.5 Q3,
+# TDD-identity-kernel-002 1.5.0 §Custody as Built).
 ENV KC_VAULT=file
 COPY --chown=1000:0 themes/scnehaux /opt/keycloak/themes/scnehaux
 RUN /opt/keycloak/bin/kc.sh build

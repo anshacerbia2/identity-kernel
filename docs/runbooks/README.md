@@ -13,6 +13,7 @@ custody outage at startup, and the database restore that keeps the key's `kid`.
 | [Consumer reports an unknown `kid`](unknown-kid.md) | a protected resource rejects tokens with `verify: signing key is unknown` |
 | [Signing-key ceremony](signing-key-ceremony.md) | the realm signing key is made: an operator, a witness, and a reviewer (STD-IAM-001 §3.10) |
 | [Custody outage at startup](custody-outage.md) | the kernel refuses to start without its keystore, or `realm-apply` refuses a realm that does not sign with it |
+| [Signing-key rotation](signing-key-rotation.md) | a key is staged, activated, retired, abandoned or revoked: scheduled and emergency rotation, each step approved by someone other than its operator (ADR-IAM-002 §5.5) |
 | [Database restore](database-restore.md) | the kernel's database is restored from `backup.sh`'s set, and the realm keeps its `kid` |
 
 ## Why these exist
@@ -27,8 +28,8 @@ custody outage at startup, and the database restore that keeps the key's `kid`.
 ## Where they apply today
 
 No production kernel exists. `realm-apply` refuses every environment but `local`, `ci` and
-`development`, because a shared environment also needs the keystore delivered from its secret manager
-and key rotation, and neither is built (`internal/realmdef/definition.go`, `ParseEnvironment`). So each
+`development`, because a shared environment also needs the keystores delivered from its secret
+manager, which is documented and not deployed (`internal/realmdef/definition.go`, `ParseEnvironment`). So each
 runbook is written for the one long-lived server there is, the development server in
 [`deploy/dev/`](../../deploy/dev/README.md), and names what changes for production under "Gaps". The
 ceremony runbook also gives its production steps, which have never run.

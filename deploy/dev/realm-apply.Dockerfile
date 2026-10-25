@@ -16,7 +16,8 @@ COPY go.mod ./
 COPY cmd ./cmd
 COPY internal ./internal
 RUN CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" -o /out/realm-apply ./cmd/realm-apply && \
-    CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" -o /out/client-key ./cmd/client-key
+    CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" -o /out/client-key ./cmd/client-key && \
+    CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" -o /out/signing-key ./cmd/signing-key
 
 # alpine:3.24, resolved 2026-10-10
 FROM alpine@sha256:294b683cb724975bec92580e1e685676bd4b50bda910ddb8c51d4cabeaec77e6
@@ -32,6 +33,7 @@ COPY --from=build /out/realm-apply /usr/local/bin/realm-apply
 # client-key rides in the same image, so a server makes and installs client keys with the Docker
 # it already has: no Go and no openssl on the host (new-client-key.sh, set-client-key.sh).
 COPY --from=build /out/client-key /usr/local/bin/client-key
+COPY --from=build /out/signing-key /usr/local/bin/signing-key
 # The mounted checkout belongs to the host's user, and git refuses a repository owned by someone
 # else. Trusting exactly that path, through the environment, writes no config file.
 ENV GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=safe.directory GIT_CONFIG_VALUE_0=/repo

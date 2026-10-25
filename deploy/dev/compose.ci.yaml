@@ -14,7 +14,7 @@ services:
     ports:
       - "127.0.0.1:8080:8080"
     depends_on:
-      signing-keystore:
+      signing-key-place:
         condition: service_completed_successfully
 
   signing-keystore:
@@ -31,3 +31,20 @@ services:
     volumes:
       - ./keys:/keys
       - ../../scripts/signing-keystore.sh:/opt/ceremony/signing-keystore.sh:ro
+
+  # Names the throwaway key by its kid, as the ceremony does (scripts/signing-key-generate.sh,
+  # ADR-IAM-002 §5.5 Q3): cmd/signing-key place, in the realm-apply image, as root, with no network. A
+  # keystore already in place leaves no new one, and this does nothing.
+  signing-key-place:
+    build:
+      context: ../..
+      dockerfile: deploy/dev/realm-apply.Dockerfile
+    restart: "no"
+    user: "0:0"
+    network_mode: none
+    entrypoint: ["/bin/sh", "-c", "if [ -d /keys/new ]; then signing-key place -keys /keys; fi"]
+    volumes:
+      - ./keys:/keys
+    depends_on:
+      signing-keystore:
+        condition: service_completed_successfully

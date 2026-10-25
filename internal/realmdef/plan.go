@@ -257,8 +257,7 @@ func compare(d Definition, l *live) []Change {
 		return changes
 	}
 
-	changes = append(changes, compareObject(KindRealm, d.Name(), d.Realm, l.realm),
-		compareObject(KindKey, name(d.Key), d.Key, l.keys[name(d.Key)]))
+	changes = append(changes, compareObject(KindRealm, d.Name(), d.Realm, l.realm), compareSigningKeys(d, l))
 	for _, provider := range d.KeyProviders {
 		// A provider deleted is as absent from the key set as one disabled, so its absence is in sync:
 		// creating it again would generate a key only to disable it.
@@ -439,4 +438,17 @@ func show(value any) string {
 		return fmt.Sprint(value)
 	}
 	return strings.TrimSpace(string(encoded))
+}
+
+// compareSigningKeys never compares a signing key provider: the rotation steps own them (ADR-IAM-002
+// §5.5 Q4, TDD-identity-kernel-002 §Rotation as Built). The first is created when the realm has none,
+// from the one keystore in custody; after that every provider is in sync, and the invariants are what
+// VerifySigningKey checks.
+func compareSigningKeys(d Definition, l *live) Change {
+	for _, component := range l.keys {
+		if isSigningProvider(component) {
+			return Change{Kind: KindKey, Name: name(d.Key), Action: InSync}
+		}
+	}
+	return Change{Kind: KindKey, Name: name(d.Key), Action: Create}
 }

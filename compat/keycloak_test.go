@@ -76,20 +76,16 @@ func ensureApplied(client *kcadmin.Client) error {
 	if err != nil {
 		return err
 	}
-	// The kernel loads its signing key from a keystore (TDD-identity-kernel-002 §Custody as Built), and
-	// the provider is created with the kid its certificate gives.
-	kid := ""
-	if path := strings.TrimSpace(os.Getenv("KERNEL_SIGNING_CERTIFICATE")); path != "" {
-		content, err := os.ReadFile(path)
-		if err != nil {
-			return err
-		}
-		if kid, err = realmdef.SigningKeyID(content); err != nil {
+	// The kernel loads its signing keys from keystores (TDD-identity-kernel-002 §Custody as Built), and
+	// the first provider is created from the one certificate in custody, with the kid it gives.
+	var custody map[string]string
+	if dir := strings.TrimSpace(os.Getenv("KERNEL_SIGNING_CERTIFICATES")); dir != "" {
+		if custody, err = realmdef.ReadCustody(dir); err != nil {
 			return err
 		}
 	}
 	return realmdef.Apply(ctx, client, plan, realmdef.Options{Environment: realmdef.Local, Revision: "compat",
-		SigningKeyID: kid})
+		Custody: custody})
 }
 
 // requireKeycloak skips without a Keycloak, unless integration is required.
