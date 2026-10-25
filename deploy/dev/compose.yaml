@@ -133,6 +133,10 @@ services:
     build:
       context: ../..
       dockerfile: deploy/dev/realm-apply.Dockerfile
+    # Named, so the signing-key task below runs this image, and `up --build` rebuilds both with the
+    # release. Built here, never pulled (TDD-identity-kernel-005 §Images the Stack Runs).
+    image: scnehaux/identity-kernel-realm-apply:dev
+    pull_policy: build
     restart: "no"
     command:
       - -environment=${REALM_ENVIRONMENT:-development}
@@ -164,9 +168,10 @@ services:
   # change files the kernel's user owns; everything else it does goes through the Admin API with
   # realm-apply's credentials.
   signing-key:
-    build:
-      context: ../..
-      dockerfile: deploy/dev/realm-apply.Dockerfile
+    # The image realm-apply's build makes on every `up`; never pulled, so a run before the first build
+    # fails instead of running a published image of the same name.
+    image: scnehaux/identity-kernel-realm-apply:dev
+    pull_policy: never
     profiles: ["signing-key"]
     restart: "no"
     user: "0:0"

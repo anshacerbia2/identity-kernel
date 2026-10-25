@@ -92,7 +92,7 @@ jobs:
           docker compose -f compose.yaml up -d postgres keycloak
           refused=0
           for i in $(seq 1 90); do
-            if docker compose -f compose.yaml logs --no-color keycloak 2>&1 | grep -F "refusing to start: the realm signing keystore"; then
+            if docker compose -f compose.yaml logs --no-color keycloak 2>&1 | grep -F "refusing to start: no realm signing keystore is mounted"; then
               refused=1
               break
             fi
