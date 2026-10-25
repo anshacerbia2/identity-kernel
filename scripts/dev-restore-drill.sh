@@ -168,8 +168,8 @@ if find "$backup" -type f \( -name '*.p12' -o -name '*.pfx' -o -name '*.jks' -o 
 	-o -name '*realm-signing*' \) | grep -q .; then
 	no_keystore_file=false
 fi
-password="$(docker run --rm --network none -v "$deploy/keys/vault:/vault:ro" --entrypoint /bin/cat "$upstream" \
-	/vault/scnehaux_realm-signing-password)"
+password="$(docker run --rm --network none -v "$deploy/keys/vault:/vault:ro" --entrypoint /bin/bash "$upstream" \
+	-c 'cat /vault/scnehaux_realm-signing-*')"
 no_keystore_password=false
 if [ -n "$password" ] && ! compose exec -T postgres pg_restore -f - < "$dump" | grep -qF "$password" &&
 	! grep -qF "$password" "$globals"; then
@@ -179,7 +179,7 @@ unset password
 provider_config="$(compose exec -T postgres psql -X -qtA -U keycloak -d "$database" -c \
 	"SELECT coalesce(string_agg(cc.name, ',' ORDER BY cc.name), '') FROM component c
 	   JOIN component_config cc ON cc.component_id = c.id
-	  WHERE c.name = 'realm-signing-ps256' AND c.provider_type = 'org.keycloak.keys.KeyProvider'")"
+	  WHERE c.name LIKE 'realm-signing-%' AND c.provider_type = 'org.keycloak.keys.KeyProvider'")"
 no_private_key=false
 case ",$provider_config," in
 *,privateKey,* | *,certificate,* | ,,) ;;

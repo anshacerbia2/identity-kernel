@@ -7,9 +7,9 @@ Caddy for TLS. The realm is applied by `cmd/realm-apply`, which runs as a one-sh
 It is **development only**:
 
 - `realm-apply` accepts `development` and refuses anything that serves real tokens. The signing
-  key is loaded from a keystore the signing-key ceremony made, as in production, but a shared
-  environment also needs the keystore delivered from its secret manager and key rotation, and
-  neither is built (TDD-identity-kernel-002 1.2.0 §Custody as Built).
+  keys are loaded from keystores the signing-key ceremony made, and rotated through the five states,
+  as in production, but a shared environment also needs the keystores delivered from its secret
+  manager, which is documented and not deployed (TDD-identity-kernel-002 1.5.0 §Custody as Built).
 - The issuer this server gets is not the production issuer.
 - Nothing issued here is evidence of anything.
 
@@ -38,17 +38,18 @@ development server runbook (`docs/runbooks/dev-server.md`). This stack comes fir
 CI brings this exact stack up on every change and asserts:
 
 - The kernel refuses to start before the signing-key ceremony, and the ceremony refuses a witness
-  equal to the operator and a second key.
+  equal to the operator.
 - The realm signs with the ceremony's key: the key set and a token carry the `kid` its record names.
 - The public issuer is served through the proxy.
 - Administration answers `404` to an address outside the allowlist.
 - The restore drill: `backup.sh`, the volume deleted, `restore.sh`, and the restored realm equal to the
   source and signing with the same `kid` ([Backups](#backups)).
 
-`compose.ci.yaml`, which CI layers over `compose.yaml` and a server never does, adds a one-shot
-`signing-keystore` service. It makes a throwaway keystore with the ceremony's generator when `keys/`
-holds none, so a stack another repository's CI starts from this checkout signs as a server does. A
-keystore already there, such as the ceremony's, is left as it is.
+`compose.ci.yaml`, which CI layers over `compose.yaml` and a server never does, adds two one-shot
+services, `signing-keystore` and `signing-key-place`. They make a throwaway keystore with the
+ceremony's generator, named by its `kid`, when `keys/` holds none, so a stack another repository's CI
+starts from this checkout signs as a server does. A keystore already there, such as the ceremony's, is
+left as it is. The rotation steps are proved in this repository's `compat.yml` (`rotation` job).
 
 ### Against the deployment standard
 
@@ -94,13 +95,13 @@ On the server, with the operator and the witness of the signing-key ceremony bot
 ```sh
 git clone https://github.com/anshacerbia2/identity-kernel && cd identity-kernel
 cp deploy/dev/.env.example deploy/dev/.env   # fill it in: hostname, your IP, two generated secrets
-# The realm signing key: the keystore in deploy/dev/keys/signing, its password in deploy/dev/keys/vault,
-# its certificate and the ceremony record beside them. Before the first up: without it the kernel
-# refuses to start.
+# The realm's first signing key: its keystore in deploy/dev/keys/signing, its password in
+# deploy/dev/keys/vault, its certificate and the ceremony record beside them, all named by its kid.
+# Before the first up: without it the kernel refuses to start.
 scripts/signing-key-ceremony.sh deploy/dev/keys "<operator>" "<witness>" "<change ticket>"
 cd deploy/dev
 docker compose up -d
-docker compose logs realm-apply   # the plan it applied, ending in "applied revision ... signs with the keystore's key"
+docker compose logs realm-apply   # the plan it applied, ending in "applied revision ... signs with the custody key"
 ./new-client-key.sh realm-apply   # the service account's key pair, in ./keys; the private key stays here
 ./create-apply-client.sh          # the service account, authenticating with that key; then set
                                   # KEYCLOAK_ADMIN_CLIENT_ID in .env and docker compose up -d again
@@ -120,6 +121,11 @@ download nothing but their pinned bases and, for realm-apply, `git` from Alpine'
 The issuer is then `https://<KEYCLOAK_HOSTNAME>/realms/scnehaux`. The service is ready when its
 discovery document answers:
 `curl -fsS https://<KEYCLOAK_HOSTNAME>/realms/scnehaux/.well-known/openid-configuration`.
+
+`realm-apply` made the first key active on the empty realm. Once identity-control runs beside this
+server (its `deploy/dev/README.md`), register that key in identity-control's registry, as
+[Signing-key rotation](../../docs/runbooks/signing-key-rotation.md) §The first key says. Every later key
+is staged, activated and retired by that runbook's steps.
 
 ### Behind a dev tunnel instead of a DNS name
 
@@ -287,8 +293,10 @@ recovery is restoring that backup.
 
 ## One-off tasks
 
-No task here sits behind a profile. The stack's one-off task, `realm-apply`, runs on every `up`
-([What runs](#what-runs)). Two forms of it are run by hand.
+The stack's one-off task, `realm-apply`, runs on every `up` ([What runs](#what-runs)). Two forms of it
+are run by hand. One task sits behind a profile, so `up` never runs it: `signing-key`, the kernel's half
+of each rotation step, run by `scripts/signing-key-rotation.sh` and never alone
+([Signing-key rotation](../../docs/runbooks/signing-key-rotation.md)).
 
 **A read-only plan.** To see a plan without changing anything, run the job on the server without `-apply`:
 
@@ -324,26 +332,28 @@ Nothing is run here for the wiring.
 
 ## Keys
 
-**The realm signing key** is made once, by the signing-key ceremony, before the first `up`
-([First start](#first-start), ADR-IAM-002 §5.3, TDD-identity-kernel-002 1.2.0 §Custody as Built):
+**The realm signing keys** are each made by the signing-key ceremony: the first before the first `up`
+([First start](#first-start)), each later one for a rotation (ADR-IAM-002 §5.3 and §5.5,
+TDD-identity-kernel-002 1.5.0 §Custody as Built). Each key's files carry its `kid`:
 
 | File | Holds | Owned by | Read by |
 | :-- | :-- | :-- | :-- |
-| `keys/signing/realm-signing.p12` | the PKCS#12 keystore: one RSA-3072 key pair, alias `realm-signing` | 1000, the kernel's user, mode 0400, in a directory of mode 0500 | the kernel, mounted read-only at `/opt/keycloak/data/scnehaux` |
-| `keys/vault/scnehaux_realm-signing-password` | its password, for Keycloak's file vault | the same | the kernel, mounted read-only at `/opt/keycloak/vault` |
-| `keys/realm-signing.crt` | its certificate, the public half | root, mode 0644 | `realm-apply`, which creates the provider with its `kid` and checks the realm signs with it |
-| `keys/realm-signing.ceremony.json` | the ceremony record: operator, witness, reason, times, `kid`. No secret | root, mode 0644 | the change ticket it is attached to |
+| `keys/signing/realm-signing-<kid>.p12` | the PKCS#12 keystore: exactly one RSA-3072 key pair, alias `realm-signing` | 1000, the kernel's user, mode 0400, in a directory of mode 0500 | the kernel, mounted read-only at `/opt/keycloak/data/scnehaux` |
+| `keys/vault/scnehaux_realm-signing-<kid>` | its password, for Keycloak's file vault; underscores in the `kid` doubled | the same | the kernel, mounted read-only at `/opt/keycloak/vault` |
+| `keys/realm-signing-<kid>.crt` | its certificate, the public half | root, mode 0644 | `realm-apply`, which creates the first key's provider and checks the realm publishes custody keys alone, and the rotation steps |
+| `keys/realm-signing-<kid>.ceremony.json` | the ceremony record: operator, witness, reason, times, `kid`. No secret | root, mode 0644 | the change ticket it is attached to |
 
-- The realm's provider reads both passwords as `${vault.realm-signing-password}`, never as literal
-  configuration. Its `kid` is the RFC 7638 thumbprint of the key, so it is the same after every
-  restart and every restore.
-- The image's entrypoint refuses to start the kernel without the keystore and its password, or when
-  they do not open together, so it can never sign with a key it generated. `docker compose logs
-  keycloak` says which ([Custody outage](../../docs/runbooks/custody-outage.md)).
-- **Neither file is ever copied**, to a backup or anywhere else ([Backups](#backups)). A lost keystore
-  is replaced by building the server from zero, with a new ceremony and a new `kid`.
-- A second key is a rotation, which is not built. The ceremony refuses a keys directory that holds
-  one.
+- Each key's provider, `realm-signing-<kid>`, reads both passwords as `${vault.realm-signing-<kid>}`,
+  never as literal configuration. Its `kid` is the RFC 7638 thumbprint of the key, so it is the same
+  after every restart and every restore.
+- The image's entrypoint refuses to start the kernel without a keystore, when one does not open with
+  its password, or when one holds more than one entry, so it can never sign with a key it generated.
+  `docker compose logs keycloak` says which ([Custody outage](../../docs/runbooks/custody-outage.md)).
+- **No keystore or password is ever copied**, to a backup or anywhere else ([Backups](#backups)). A lost
+  keystore is replaced by building the server from zero, with a new ceremony and a new `kid`.
+- **A key's files are removed only by its retirement, abandonment or revocation**
+  ([Signing-key rotation](../../docs/runbooks/signing-key-rotation.md)), which takes its provider out of
+  the realm first and records the removal in identity-control's registry. The ceremony record stays.
 
 **No client here holds a client secret** (`STD-IAM-001 §3.2`). Every confidential client on this
 server authenticates with its own key by signed JWT. That covers realm-apply's account,
@@ -474,8 +484,9 @@ rule 9). The development server is redeployed from zero, so it records the gap a
   output exists. Replacing a key is a rotation ([Keys](#keys)).
 - **Copy `keys/signing` or `keys/vault` anywhere**, a backup included. A copy of the keystore is a copy
   that can sign; the key is never restored, only replaced from zero ([Keys](#keys)).
-- **Delete `keys/signing` or `keys/vault`.** The kernel stops signing, and the key cannot come back:
-  the server is rebuilt from zero with a new ceremony and a new `kid`.
+- **Delete `keys/signing` or `keys/vault`, or a key's files by hand.** The kernel stops signing with
+  it, and the key cannot come back: the server is rebuilt from zero with a new ceremony and a new
+  `kid`. A key leaves only by the rotation steps.
 - **Change the realm in the Admin Console and expect it to stay.** The next `up` refuses it
   ([Changing the realm](#changing-the-realm)).
 

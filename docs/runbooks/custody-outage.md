@@ -13,13 +13,14 @@ One of these, on the development server, in `deploy/dev`:
 
 | Where | Line | Meaning |
 | :-- | :-- | :-- |
-| `docker compose logs keycloak` | `identity-kernel: refusing to start: the realm signing keystore ... is not mounted or not readable` | `keys/signing/realm-signing.p12` is missing, or not readable by the kernel's user (1000) |
-| same | `... its password ... is not mounted or not readable` | `keys/vault/scnehaux_realm-signing-password` is missing or unreadable |
-| same | `... does not open with the password ..., or holds no entry realm-signing` | the two files do not belong together, or the keystore is damaged |
+| `docker compose logs keycloak` | `identity-kernel: refusing to start: no realm signing keystore is mounted ...` | `keys/signing/` holds no `realm-signing-<kid>.p12`: the ceremony has not run, or the files are gone |
+| same | `... the realm signing keystore ... is not readable` | a `keys/signing/realm-signing-<kid>.p12` is not readable by the kernel's user (1000) |
+| same | `... the password of ..., ..., is not mounted or not readable` | its `keys/vault/scnehaux_realm-signing-<kid>` (underscores doubled) is missing or unreadable |
+| same | `... does not open with the password ...`, `... holds more or fewer than one entry ...` or `... holds no entry realm-signing` | the two files do not belong together, the keystore is damaged, or it holds a second key |
 | same | `... KC_VAULT_DIR is empty` | the image's default was overridden |
-| `docker compose logs realm-apply` | `the key provider realm-signing-ps256 serves 0 keys, want 1: its keystore did not load` | the kernel started, and the provider failed to load the keystore |
-| same | `the realm holds PS256 keys other than the keystore's: ... fallback-PS256` | Keycloak generated a key in-process |
-| same | `the realm's signing key is ..., and the keystore's certificate gives ...` | the kernel loaded another keystore than the certificate in `keys/` describes |
+| `docker compose logs realm-apply` | `the signing key provider realm-signing-<kid> serves 0 keys, want 1: its keystore did not load` | the kernel started, and the provider failed to load the keystore |
+| same | `the realm holds PS256 keys other than the custody keys: ... fallback-PS256` | Keycloak generated a key in-process |
+| same | `the realm publishes the key ..., which is not in custody` | the realm publishes a key whose certificate is not in `keys/` |
 
 The kernel's container restarts on each refusal (`restart: unless-stopped`), so `docker compose ps`
 shows it restarting and never healthy. Nothing signs while it does.
@@ -35,9 +36,9 @@ shows it restarting and never healthy. Nothing signs while it does.
    sudo ls -la keys/ keys/signing keys/vault
    ```
 
-   Expected: `keys/signing/realm-signing.p12` and `keys/vault/scnehaux_realm-signing-password`, each
-   owned by 1000, mode `0400`, in directories of mode `0500`, and `keys/realm-signing.crt`, mode
-   `0644`. Never print the password file or copy either file anywhere.
+   Expected, for each key: `keys/signing/realm-signing-<kid>.p12` and
+   `keys/vault/scnehaux_realm-signing-<kid>`, each owned by 1000, mode `0400`, in directories of mode
+   `0500`, and `keys/realm-signing-<kid>.crt`, mode `0644`. Never print the password file or copy either file anywhere.
 
 3. **A file missing, or both missing.** On a server built from zero this means the ceremony has not
    run: run it ([Signing-key ceremony](signing-key-ceremony.md)). If the ceremony ran and the files
@@ -49,8 +50,8 @@ shows it restarting and never healthy. Nothing signs while it does.
 4. **Wrong owner or mode.** Restore them, then start again:
 
    ```sh
-   sudo chown 1000:0 keys/signing keys/vault keys/signing/realm-signing.p12 keys/vault/scnehaux_realm-signing-password
-   sudo chmod 0400 keys/signing/realm-signing.p12 keys/vault/scnehaux_realm-signing-password
+   sudo chown 1000:0 keys/signing keys/vault keys/signing/realm-signing-*.p12 keys/vault/scnehaux_realm-signing-*
+   sudo chmod 0400 keys/signing/realm-signing-*.p12 keys/vault/scnehaux_realm-signing-*
    sudo chmod 0500 keys/signing keys/vault
    docker compose up -d --wait
    ```

@@ -14,11 +14,13 @@
 // tool -- console drift -- and the run refuses to apply over it (exit 2). Revert the change in
 // Keycloak, or commit it to realm/ and apply with -adopt.
 //
-// The realm signs with a key loaded from a keystore (TDD-identity-kernel-002 §Custody as Built).
-// -signing-certificate names the keystore's certificate, its public half: the provider is created
-// with the certificate's RFC 7638 thumbprint as its kid, and every run checks that the realm signs with
-// that key and no other. It is needed when the provider is created; without it, the check still holds
-// the realm's one PS256 key to a kid equal to its own thumbprint. Every run also computes the key
+// The realm signs with keys loaded from keystores (TDD-identity-kernel-002 §Custody as Built and
+// §Rotation as Built). -signing-certificates names the directory of their certificates, the public
+// halves, realm-signing-<kid>.crt. The rotation steps own the signing key providers (ADR-IAM-002 §5.5
+// Q4): realm-apply creates the first, active, from the one certificate there when the realm has none,
+// and every run checks the invariants: exactly one active PS256 key, every published key a key in
+// custody under its own thumbprint, and no other key. Without the directory, the check still holds
+// every key to a kid equal to its own thumbprint. Every run also computes the key
 // retirement floor from the live token lifetimes and fails when it exceeds the 7-day retirement window
 // (TDD-identity-kernel-002 §Retirement Window).
 //
@@ -60,8 +62,9 @@ func run(args []string, stdout, stderr io.Writer) int {
 	apply := flags.Bool("apply", false, "apply the plan; without it the run only reads and reports")
 	adopt := flags.Bool("adopt", false, "accept the live realm as the baseline instead of refusing drift")
 	requireInSync := flags.Bool("require-in-sync", false, "exit 3 when the plan has changes pending")
-	certificate := flags.String("signing-certificate", os.Getenv("KERNEL_SIGNING_CERTIFICATE"),
-		"the realm signing keystore's certificate, PEM (default $KERNEL_SIGNING_CERTIFICATE)")
+	certificates := flags.String("signing-certificates", os.Getenv("KERNEL_SIGNING_CERTIFICATES"),
+		"the directory of the realm signing keys' certificates, realm-signing-<kid>.crt (default "+
+			"$KERNEL_SIGNING_CERTIFICATES)")
 	if err := flags.Parse(args); err != nil {
 		return exitError
 	}
@@ -86,14 +89,13 @@ func run(args []string, stdout, stderr io.Writer) int {
 	if err != nil {
 		return fail("%v", err)
 	}
-	kid := ""
-	if *certificate != "" {
-		content, err := os.ReadFile(*certificate)
-		if err != nil {
-			return fail("reading the signing certificate: %v", err)
+	var custody map[string]string
+	if *certificates != "" {
+		if custody, err = realmdef.ReadCustody(*certificates); err != nil {
+			return fail("reading the signing certificates: %v", err)
 		}
-		if kid, err = realmdef.SigningKeyID(content); err != nil {
-			return fail("%s: %v", *certificate, err)
+		if len(custody) == 0 {
+			return fail("%s holds no realm-signing-<kid>.crt; run the signing-key ceremony first", *certificates)
 		}
 	}
 
@@ -144,11 +146,11 @@ func run(args []string, stdout, stderr io.Writer) int {
 	}
 	if !*apply {
 		if recorded.RealmExists {
-			signing, err := realmdef.VerifySigningKey(ctx, client, definition, kid)
+			signing, err := realmdef.VerifySigningKey(ctx, client, definition, custody)
 			if err != nil {
 				return fail("the signing key: %v", err)
 			}
-			fmt.Fprintf(stdout, "\nthe realm signs with the keystore's key, kid %s\n", signing)
+			fmt.Fprintf(stdout, "\nthe realm signs with the custody key %s\n", signing)
 			floor, err := realmdef.VerifyRetirementWindow(ctx, client, definition)
 			if err != nil {
 				return fail("the retirement window: %v", err)
@@ -167,7 +169,7 @@ func run(args []string, stdout, stderr io.Writer) int {
 		return fail("%v", err)
 	}
 	err = realmdef.Apply(ctx, client, plan, realmdef.Options{Environment: environment, Revision: revision,
-		Adopt: *adopt, SigningKeyID: kid})
+		Adopt: *adopt, Custody: custody})
 	switch {
 	case errors.Is(err, realmdef.ErrDrift), errors.Is(err, realmdef.ErrUnmanaged):
 		fmt.Fprintf(stderr, "realm-apply: refusing: %v\n", err)

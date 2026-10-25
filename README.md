@@ -139,14 +139,15 @@ Credentials come from the environment, never from a flag:
 - **Bootstrap administrator:** `KEYCLOAK_ADMIN_USER` and `KEYCLOAK_ADMIN_PASSWORD`, for a
   throwaway instance such as CI's.
 
-The realm signs with a key the kernel loads from a keystore (TDD-identity-kernel-002 1.2.0 §Custody as
-Built). `-signing-certificate` (default `$KERNEL_SIGNING_CERTIFICATE`) names the keystore's
-certificate, its public half. The signing key provider is created with the certificate's RFC 7638
-thumbprint as its `kid`, which Keycloak would otherwise make up, so the flag is required when the
-provider is created. Every run then checks the key as it signs: the provider's one key is the realm's
-active `PS256` key, its `kid` is its own thumbprint, and the certificate's when given, no other
-`PS256` key exists, a `fallback-PS256` above all, and no other key is published. A run that fails the check exits 1, and an apply
-records nothing.
+The realm signs with keys the kernel loads from keystores, one per key (TDD-identity-kernel-002 1.5.0
+§Custody as Built). `-signing-certificates` (default `$KERNEL_SIGNING_CERTIFICATES`) names the directory
+of their certificates, `realm-signing-<kid>.crt`. The rotation steps own the signing key providers
+(`scripts/signing-key-rotation.sh`, §Rotation as Built). On an empty realm, `realm-apply` creates the
+first, active, from the one certificate there, with its RFC 7638 thumbprint as its `kid`, which Keycloak
+would otherwise make up. Every run then checks the invariants: exactly one active `PS256` key, the
+realm's; every published key a custody key under its own thumbprint, served by its own provider; no
+other `PS256` key, a `fallback-PS256` above all, and no other key published. A run that fails the check
+exits 1, and an apply records nothing.
 
 ### Client keys: `cmd/client-key`
 

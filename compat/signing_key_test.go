@@ -35,8 +35,6 @@ import (
 	"github.com/anshacerbia2/identity-kernel/internal/realmdef"
 )
 
-const signingProvider = "realm-signing-ps256"
-
 func TestTokensAreSignedByTheKeystoreKeyUnderItsThumbprint(t *testing.T) {
 	a := requireKeycloak(t)
 	path := strings.TrimSpace(os.Getenv("KERNEL_SIGNING_CERTIFICATE"))
@@ -63,6 +61,8 @@ func TestTokensAreSignedByTheKeystoreKeyUnderItsThumbprint(t *testing.T) {
 	if fromTool, err := realmdef.SigningKeyID(content); err != nil || fromTool != kid {
 		t.Fatalf("realmdef.SigningKeyID gives %q (%v), the thumbprint is %s", fromTool, err, kid)
 	}
+	// Each key's provider is named by its kid (ADR-IAM-002 §5.5 Q3).
+	signingProvider := realmdef.SigningKeyName(kid)
 
 	// The provider, as configured.
 	var components []struct {

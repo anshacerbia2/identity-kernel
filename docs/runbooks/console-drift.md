@@ -71,9 +71,10 @@ reconciled by identity-control (its ROADMAP §Proof B), not by `realm-apply`.
    Record the administrator (`authDetails`), the time and the representation. A change older than
    7 days has no event left: record it as unexplained.
 
-3. **Check the signing key first.** If a drift line names `signing key realm-signing-ps256`, read
-   [Consumer reports an unknown `kid`](unknown-kid.md) before you act. The provider loads the keystore
-   the ceremony made, and its `kid` is set once, when it is created. While the key is disabled or does
+3. **Check the signing key first.** The signing keys are not compared as drift: the rotation steps own
+   them (TDD-identity-kernel-002 §Rotation as Built). If `realm-apply` refuses with `the signing key:`,
+   read [Consumer reports an unknown `kid`](unknown-kid.md) before you act. Each provider loads a
+   keystore a ceremony made, and its `kid` is set once, when it is created. While the key is disabled or does
    not load, Keycloak signs with a 2048-bit `fallback-PS256` key that no consumer accepts, and every
    `realm-apply` run refuses the realm ([Custody outage](custody-outage.md)).
 

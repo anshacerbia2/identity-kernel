@@ -36,11 +36,11 @@ const (
 	Development Environment = "development"
 )
 
-// ParseEnvironment refuses every environment that would serve real tokens. The realm signs with a key
-// loaded from a keystore in every environment (TDD-identity-kernel-002 1.2.0 §Custody as Built), but a
-// shared environment also needs what is not built yet: the keystore delivered from AWS Secrets Manager
-// (docs/production/), and rotation through the five key states (§Rotation). Refusing here keeps a
-// realm that cannot rotate its key from serving anyone.
+// ParseEnvironment refuses every environment that would serve real tokens. The realm signs with keys
+// loaded from keystores in every environment, and rotates them through the five states
+// (TDD-identity-kernel-002 1.5.0 §Custody as Built, §Rotation as Built), but a shared environment also
+// needs the keystores delivered from AWS Secrets Manager, which is documented (docs/production/) and
+// not deployed. Refusing here keeps a realm without that custody from serving anyone.
 func ParseEnvironment(name string) (Environment, error) {
 	switch environment := Environment(name); environment {
 	case Local, CI, Development:
@@ -48,9 +48,8 @@ func ParseEnvironment(name string) (Environment, error) {
 	case "":
 		return "", errors.New("an environment is required: local, ci, or development")
 	default:
-		return "", fmt.Errorf("environment %q is refused: a shared environment needs the keystore delivered "+
-			"from its secret manager and key rotation (TDD-identity-kernel-002 §Custody as Built, §Rotation), "+
-			"and neither is built", name)
+		return "", fmt.Errorf("environment %q is refused: a shared environment needs the keystores delivered "+
+			"from its secret manager (TDD-identity-kernel-002 §Custody as Built), which is not deployed", name)
 	}
 }
 

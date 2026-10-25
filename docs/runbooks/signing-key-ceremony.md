@@ -1,11 +1,11 @@
 # Signing-key ceremony
 
-Version 1.0.0. Last reviewed 2026-10-20.
+Version 1.1.0. Last reviewed 2026-10-25.
 
-The realm's signing key is made once per environment, by two people, under this script. It follows
-STD-IAM-001 2.9.0 §3.10 and ADR-IAM-002 §5.3, and TDD-identity-kernel-002 1.2.0 §Key Ceremony
-describes the design. A server is built from zero, so the ceremony runs once, before the kernel's first
-start. A second key in a running realm is a rotation, which is not built.
+Every realm signing key is made by two people, under this script. It follows STD-IAM-001 2.9.0 §3.10
+and ADR-IAM-002 §5.3 and §5.5, and TDD-identity-kernel-002 1.5.0 §Key Ceremony describes the design. A
+server is built from zero, so the first ceremony runs before the kernel's first start. Each later key is
+made the same way, and [signing-key rotation](signing-key-rotation.md) stages it.
 
 ## Who performs it
 
@@ -41,23 +41,27 @@ anyone else, and at most two working days after the ceremony.
    scripts/signing-key-ceremony.sh deploy/dev/keys "<operator>" "<witness>" "<change ticket>"
    ```
 
-   It refuses a witness equal to the operator, compared case-folded and trimmed, and a keys directory
-   that already holds a keystore. It makes the keystore in the pinned upstream image, as root, with
-   no network, and prints each step.
+   It refuses a witness equal to the operator, compared case-folded and trimmed. It makes the keystore
+   in the pinned upstream image, as root, with no network, names it by its `kid`
+   (`signing/realm-signing-<kid>.p12`, its password and `realm-signing-<kid>.crt`), and prints each step.
 
 3. **The witness reads the record** it prints, and finds in it: both names, the reason, the
    generator's image digest, which equals `image/keycloak.ref`, and the `kid`. The record is also
-   written to `deploy/dev/keys/realm-signing.ceremony.json`.
+   written to `deploy/dev/keys/realm-signing-<kid>.ceremony.json`.
 
-4. **Start the kernel,** as `deploy/dev/README.md` §First start continues:
+4. **Put the key in the realm.** The first key: start the kernel, as `deploy/dev/README.md` §First start
+   continues:
 
    ```sh
    cd deploy/dev && docker compose up -d --wait
-   docker compose logs realm-apply   # ends in "... and signs with the keystore's key"
+   docker compose logs realm-apply   # ends in "... and signs with the custody key"
    ```
 
-   `realm-apply` creates the signing key provider with the certificate's `kid`, and refuses unless the
-   realm signs with that key alone (TDD-identity-kernel-002 §Custody as Built).
+   `realm-apply` creates its provider, active, with the certificate's `kid`, on the empty realm, and
+   refuses unless the realm publishes that key alone (TDD-identity-kernel-002 §Rotation as Built). It is
+   registered in identity-control's registry once identity-control runs
+   ([signing-key rotation](signing-key-rotation.md) §The first key). A later key: stage it
+   ([signing-key rotation](signing-key-rotation.md) §Scheduled rotation).
 
 5. **The witness compares the `kid`** in the record with the one the key set publishes:
 
@@ -65,10 +69,11 @@ anyone else, and at most two working days after the ceremony.
    curl -fsS https://$KEYCLOAK_HOSTNAME/realms/scnehaux/protocol/openid-connect/certs
    ```
 
-   Exactly one key has `"alg": "PS256"`, and its `kid` is the record's. Any other `PS256` key, such as
+   The first key: exactly one key has `"alg": "PS256"`, and its `kid` is the record's. A staged key: its
+   `kid` is there beside the active key's. Any other `PS256` key, such as
    `fallback-PS256`, stops the ceremony: [Custody outage](custody-outage.md).
 
-6. **Attach the record** (`realm-signing.ceremony.json`) and the terminal output of steps 2 to 5 to
+6. **Attach the record** (`realm-signing-<kid>.ceremony.json`) and the terminal output of steps 2 to 5 to
    the change ticket. Never paste them in chat. They hold no secret: the keystore and its password
    stay in `deploy/dev/keys/signing` and `deploy/dev/keys/vault`, and are never copied, to the ticket
    or to a backup (STD-GLB-009 rule 9).
@@ -84,17 +89,18 @@ The same steps, with two differences, and none of them is run by CI:
 
 - **Where the key is made.** On an operator workstation without network access, from the release's
   checkout, into a directory on encrypted storage that is destroyed after step 3 below.
-- **Where it goes.** Into the environment's two secrets in AWS Secrets Manager, encrypted under the
-  environment's customer-managed KMS key, never `aws/secretsmanager` (ADR-IAM-002 §5.3). With the
-  operator's credentials for that environment, after step 3:
+- **Where it goes.** Into the key's own two secrets in AWS Secrets Manager, encrypted under the
+  environment's customer-managed KMS key, never `aws/secretsmanager` (ADR-IAM-002 §5.3, §5.5 Q3). Each is
+  created once and never written again: the policy denies `PutSecretValue` and `UpdateSecret` (Q8). With
+  the operator's credentials for that environment, after step 3:
 
   ```sh
   aws secretsmanager create-secret --region <region> --kms-key-id <environment key ARN> \
-    --name scnehaux/<environment>/identity-kernel/scnehaux/realm-signing-keystore \
-    --secret-binary fileb://<dir>/signing/realm-signing.p12
+    --name scnehaux/<environment>/identity-kernel/scnehaux/realm-signing-<kid>-keystore \
+    --secret-binary fileb://<dir>/signing/realm-signing-<kid>.p12
   aws secretsmanager create-secret --region <region> --kms-key-id <environment key ARN> \
-    --name scnehaux/<environment>/identity-kernel/scnehaux/realm-signing-password \
-    --secret-string file://<dir>/vault/scnehaux_realm-signing-password
+    --name scnehaux/<environment>/identity-kernel/scnehaux/realm-signing-<kid>-password \
+    --secret-string file://<dir>/vault/scnehaux_realm-signing-<kid, underscores doubled>
   ```
 
   `fileb://` passes the file's bytes unchanged [R1]. The kernel's pods mount both through the AWS
@@ -107,8 +113,6 @@ The same steps, with two differences, and none of them is run by CI:
 
 - **No production environment exists.** The production section is written ahead of it and has never
   run. Its first run is the first production ceremony.
-- **Rotation is not built.** A second key in a realm has no staged state, so the script refuses one
-  (TDD-identity-kernel-002 §Rotation).
 - **The review record is a ticket entry.** identity-control's insert-only ceremony and review records
   hold the bootstrap ceremony; a signing-key ceremony is not recorded there yet.
 

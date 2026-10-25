@@ -13,8 +13,15 @@ on:
   pull_request:
   schedule:
     - cron: "41 4 * * 1"
-  # Run by hand on a branch, to answer a question before its pull request exists.
+  # Run by hand on a branch, to answer a question before its pull request exists. identity_ref names the
+  # identity-control the rotation job's registry is built from, so a change to both is proved before
+  # either merges.
   workflow_dispatch:
+    inputs:
+      identity_ref:
+        description: identity-control branch, tag or commit, for the rotation job's registry
+        required: false
+        default: main
 
 permissions:
   contents: read
@@ -59,42 +66,20 @@ jobs:
       - name: unit tests
         run: go test ./internal/... -count=1
 
-      # The kernel loads its signing key from a keystore in every environment and refuses to start
-      # without one (TDD-identity-kernel-002 1.2.0 §Custody as Built). A test run's is a throwaway, made
-      # by the generator the ceremony runs, in the pinned upstream image with no network, and mounted
-      # read-only with its vault file as a server mounts them (deploy/dev/compose.yaml).
+      # The kernel loads its signing keys from keystores in every environment and refuses to start
+      # without one (TDD-identity-kernel-002 1.5.0 §Custody as Built). A test run's is a throwaway, made
+      # by the generator the ceremony runs, in the pinned upstream image with no network, named by its kid
+      # (scripts/signing-key-generate.sh), and mounted read-only with its vault file as a server mounts
+      # them (deploy/dev/compose.yaml).
       - name: a throwaway signing keystore
         run: |
-          image="$(grep -v '^[[:space:]]*#' image/keycloak.ref | grep -v '^[[:space:]]*$' | head -n 1 | tr -d '[:space:]')"
           keys="$RUNNER_TEMP/kernel-keys"
-          mkdir -p "$keys"
-          docker run --rm --network none --user 0:0 -v "$keys:/keys" \
-            -v "$PWD/scripts/signing-keystore.sh:/opt/ceremony/signing-keystore.sh:ro" \
-            --entrypoint /bin/bash "$image" /opt/ceremony/signing-keystore.sh /keys
+          kid="$(scripts/signing-key-generate.sh "$keys")"
           echo "KERNEL_KEYS=$keys" >> "$GITHUB_ENV"
-          # realm-apply and compat/ read the kid from the certificate, the keystore's public half.
-          echo "KERNEL_SIGNING_CERTIFICATE=$keys/realm-signing.crt" >> "$GITHUB_ENV"
-
-      # compat/key_rotation_test.go asks the pinned image what the key states rely on (TDD-identity-kernel-002
-      # 1.4.0 §Rotation as Built). It needs a second key the kernel can load: a test fixture beside the
-      # realm's keystore, under its own alias, with the realm keystore's password. A fixture, never a
-      # custody layout; the test removes its provider again.
-      - name: a second throwaway key, for the key-state test
-        run: |
-          image="$(grep -v '^[[:space:]]*#' image/keycloak.ref | grep -v '^[[:space:]]*$' | head -n 1 | tr -d '[:space:]')"
-          docker run --rm --network none --user 0:0 -v "$KERNEL_KEYS:/keys" --entrypoint /bin/bash "$image" -c '
-            set -euo pipefail
-            password=/keys/vault/scnehaux_realm-signing-password
-            keytool -genkeypair -alias rotation-fixture -keyalg RSA -keysize 3072 -sigalg SHA256withRSA -validity 1 \
-              -dname "CN=rotation fixture" -storetype PKCS12 -keystore /tmp/rotation-fixture.p12 \
-              -storepass:file "$password" >/dev/null 2>&1
-            keytool -exportcert -rfc -alias rotation-fixture -storetype PKCS12 -keystore /tmp/rotation-fixture.p12 \
-              -storepass:file "$password" -file /keys/rotation-fixture.crt >/dev/null 2>&1
-            chmod u+w /keys/signing
-            install -m 0400 -o 1000 -g 0 /tmp/rotation-fixture.p12 /keys/signing/rotation-fixture.p12
-            chmod 0500 /keys/signing
-            chmod 0644 /keys/rotation-fixture.crt'
-          echo "KERNEL_ROTATION_FIXTURE_CERTIFICATE=$KERNEL_KEYS/rotation-fixture.crt" >> "$GITHUB_ENV"
+          # realm-apply reads the custody keys from their certificates, the keystores' public halves, and
+          # compat/ the first key's kid from its own.
+          echo "KERNEL_SIGNING_CERTIFICATES=$keys" >> "$GITHUB_ENV"
+          echo "KERNEL_SIGNING_CERTIFICATE=$keys/realm-signing-$kid.crt" >> "$GITHUB_ENV"
 
       # A step rather than a service container: services cannot be given a command, and Keycloak
       # needs one (start-dev). The reference is read from the file and checked for the digest form,
@@ -115,7 +100,7 @@ jobs:
             echo "::error::the kernel image started without its signing keystore"
             exit 1
           fi
-          grep -F "refusing to start: the realm signing keystore" "$RUNNER_TEMP/no-keystore.txt"
+          grep -F "refusing to start: no realm signing keystore is mounted" "$RUNNER_TEMP/no-keystore.txt"
           # start-dev builds again in development mode, on its own file database: the image's
           # postgres is named back to dev-file here, and health and metrics stay on.
           # host.docker.internal is the runner, where compat/back_channel_logout_test.go listens for the
@@ -212,21 +197,20 @@ jobs:
           pnpm install --frozen-lockfile
           pnpm exec playwright install --with-deps chromium
 
-      # The kernel loads its signing key from a keystore in every environment and refuses to start
-      # without one (TDD-identity-kernel-002 1.2.0 §Custody as Built). A test run's is a throwaway, made
-      # by the generator the ceremony runs, in the pinned upstream image with no network, and mounted
-      # read-only with its vault file as a server mounts them (deploy/dev/compose.yaml).
+      # The kernel loads its signing keys from keystores in every environment and refuses to start
+      # without one (TDD-identity-kernel-002 1.5.0 §Custody as Built). A test run's is a throwaway, made
+      # by the generator the ceremony runs, in the pinned upstream image with no network, named by its kid
+      # (scripts/signing-key-generate.sh), and mounted read-only with its vault file as a server mounts
+      # them (deploy/dev/compose.yaml).
       - name: a throwaway signing keystore
         run: |
-          image="$(grep -v '^[[:space:]]*#' image/keycloak.ref | grep -v '^[[:space:]]*$' | head -n 1 | tr -d '[:space:]')"
           keys="$RUNNER_TEMP/kernel-keys"
-          mkdir -p "$keys"
-          docker run --rm --network none --user 0:0 -v "$keys:/keys" \
-            -v "$PWD/scripts/signing-keystore.sh:/opt/ceremony/signing-keystore.sh:ro" \
-            --entrypoint /bin/bash "$image" /opt/ceremony/signing-keystore.sh /keys
+          kid="$(scripts/signing-key-generate.sh "$keys")"
           echo "KERNEL_KEYS=$keys" >> "$GITHUB_ENV"
-          # realm-apply and compat/ read the kid from the certificate, the keystore's public half.
-          echo "KERNEL_SIGNING_CERTIFICATE=$keys/realm-signing.crt" >> "$GITHUB_ENV"
+          # realm-apply reads the custody keys from their certificates, the keystores' public halves, and
+          # compat/ the first key's kid from its own.
+          echo "KERNEL_SIGNING_CERTIFICATES=$keys" >> "$GITHUB_ENV"
+          echo "KERNEL_SIGNING_CERTIFICATE=$keys/realm-signing-$kid.crt" >> "$GITHUB_ENV"
 
       - name: start the kernel image
         run: |
@@ -347,21 +331,20 @@ jobs:
           echo "CANDIDATE_UPSTREAM=$candidate" >> "$GITHUB_ENV"
           echo "PREVIOUS_UPSTREAM=$previous" >> "$GITHUB_ENV"
 
-      # The kernel loads its signing key from a keystore in every environment and refuses to start
-      # without one (TDD-identity-kernel-002 1.2.0 §Custody as Built). A test run's is a throwaway, made
-      # by the generator the ceremony runs, in the pinned upstream image with no network, and mounted
-      # read-only with its vault file as a server mounts them (deploy/dev/compose.yaml).
+      # The kernel loads its signing keys from keystores in every environment and refuses to start
+      # without one (TDD-identity-kernel-002 1.5.0 §Custody as Built). A test run's is a throwaway, made
+      # by the generator the ceremony runs, in the pinned upstream image with no network, named by its kid
+      # (scripts/signing-key-generate.sh), and mounted read-only with its vault file as a server mounts
+      # them (deploy/dev/compose.yaml).
       - name: a throwaway signing keystore
         run: |
-          image="$(grep -v '^[[:space:]]*#' image/keycloak.ref | grep -v '^[[:space:]]*$' | head -n 1 | tr -d '[:space:]')"
           keys="$RUNNER_TEMP/kernel-keys"
-          mkdir -p "$keys"
-          docker run --rm --network none --user 0:0 -v "$keys:/keys" \
-            -v "$PWD/scripts/signing-keystore.sh:/opt/ceremony/signing-keystore.sh:ro" \
-            --entrypoint /bin/bash "$image" /opt/ceremony/signing-keystore.sh /keys
+          kid="$(scripts/signing-key-generate.sh "$keys")"
           echo "KERNEL_KEYS=$keys" >> "$GITHUB_ENV"
-          # realm-apply and compat/ read the kid from the certificate, the keystore's public half.
-          echo "KERNEL_SIGNING_CERTIFICATE=$keys/realm-signing.crt" >> "$GITHUB_ENV"
+          # realm-apply reads the custody keys from their certificates, the keystores' public halves, and
+          # compat/ the first key's kid from its own.
+          echo "KERNEL_SIGNING_CERTIFICATES=$keys" >> "$GITHUB_ENV"
+          echo "KERNEL_SIGNING_CERTIFICATE=$keys/realm-signing-$kid.crt" >> "$GITHUB_ENV"
 
       # One Keycloak at a time, on the host network so it reaches the service's port. start-dev for
       # the reason the job above gives; the migrations a release applies are the same under start.
@@ -464,3 +447,106 @@ jobs:
       - name: Keycloak logs
         if: failure()
         run: tail -n 200 "$RUNNER_TEMP"/keycloak-*.log 2>/dev/null || docker logs keycloak
+
+  # The five key states, end to end, through the steps an operator runs (TDD-identity-kernel-002 1.5.0
+  # §Rotation as Built, ADR-IAM-002 §5.5): the ceremony makes each key, scripts/signing-key-rotation.sh
+  # moves it, and identity-control's registry, built from identity_ref, holds every approval and
+  # transition. compat/rotation_steps_test.go drives it and asserts the key set and the tokens between
+  # steps. The windows are a ci environment's throwaway ones, so the proof takes minutes; any other
+  # environment refuses them (realmdef.StepWindows).
+  rotation:
+    runs-on: ubuntu-latest
+
+    env:
+      KEYCLOAK_URL: http://localhost:8080
+      KEYCLOAK_MANAGEMENT_URL: http://localhost:9000
+      KEYCLOAK_ADMIN_USER: admin
+      KEYCLOAK_ADMIN_PASSWORD: admin
+      REQUIRE_INTEGRATION: "1"
+      KERNEL_ROTATION_PROOF: "1"
+      IDENTITY_REF: ${{ inputs.identity_ref || 'main' }}
+      REALM_ENVIRONMENT: ci
+      SIGNING_KEY_CACHE_WINDOW: 20s
+      SIGNING_KEY_RETIREMENT_WINDOW: 20s
+
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+
+      - name: identity-control, the registry
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          repository: anshacerbia2/identity-control
+          ref: ${{ env.IDENTITY_REF }}
+          path: .identity
+
+      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          check-latest: false
+
+      - name: the first key, a throwaway
+        run: |
+          keys="$RUNNER_TEMP/kernel-keys"
+          kid="$(scripts/signing-key-generate.sh "$keys")"
+          echo "KERNEL_KEYS=$keys" >> "$GITHUB_ENV"
+          echo "KERNEL_SIGNING_CERTIFICATES=$keys" >> "$GITHUB_ENV"
+          echo "KERNEL_SIGNING_CERTIFICATE=$keys/realm-signing-$kid.crt" >> "$GITHUB_ENV"
+
+      - name: start the kernel image
+        run: |
+          image="$(grep -v '^[[:space:]]*#' image/keycloak.ref | grep -v '^[[:space:]]*$' | head -n 1 | tr -d '[:space:]')"
+          docker build -q -f image/Dockerfile --build-arg KEYCLOAK_IMAGE="$image" -t identity-kernel:ci . >/dev/null
+          docker run -d --name keycloak -p 8080:8080 -p 9000:9000 \
+            -v "$KERNEL_KEYS/signing:/opt/keycloak/data/scnehaux:ro" -v "$KERNEL_KEYS/vault:/opt/keycloak/vault:ro" \
+            -e KC_VAULT=file \
+            -e KC_BOOTSTRAP_ADMIN_USERNAME="$KEYCLOAK_ADMIN_USER" \
+            -e KC_BOOTSTRAP_ADMIN_PASSWORD="$KEYCLOAK_ADMIN_PASSWORD" \
+            -e KC_DB=dev-file -e KC_HEALTH_ENABLED=true \
+            identity-kernel:ci start-dev
+          for i in $(seq 1 90); do
+            if curl -fsS http://localhost:9000/health/ready >/dev/null 2>&1; then exit 0; fi
+            sleep 2
+          done
+          docker logs keycloak
+          exit 1
+
+      - name: apply the realm definition, which activates the first key
+        run: go run ./cmd/realm-apply -environment ci -apply
+
+      # The registry as the development server runs it: identity-control's postgres and migrate
+      # services, and its signing-key one-off service.
+      - name: identity-control's Control Database and registry command
+        working-directory: .identity/deploy/dev
+        run: |
+          {
+            echo "POSTGRES_PASSWORD=$(openssl rand -hex 16)"
+            echo "IDENTITY_APP_PASSWORD=$(openssl rand -hex 16)"
+            echo "KEYCLOAK_ISSUER=http://localhost:8080/realms/scnehaux"
+          } > .env
+          docker network create scnehaux-identity-api >/dev/null
+          docker compose up -d --wait postgres
+          docker compose run --rm migrate
+          docker compose run --rm --no-deps -T signing-key state -realm scnehaux
+
+      - name: the kernel's step tool
+        run: |
+          docker build -q -f deploy/dev/realm-apply.Dockerfile -t realm-apply:ci . > "$RUNNER_TEMP/tool.txt"
+          {
+            echo "SIGNING_KEY_REGISTRY=docker compose --project-directory $PWD/.identity/deploy/dev run --rm --no-deps -T signing-key"
+            echo "SIGNING_KEY_TOOL=docker run --rm -i --network host -u 0:0 -v $KERNEL_KEYS:/keys -v $PWD:/repo:ro -e KEYCLOAK_URL -e KEYCLOAK_ADMIN_USER -e KEYCLOAK_ADMIN_PASSWORD -e SIGNING_KEY_CACHE_WINDOW -e SIGNING_KEY_RETIREMENT_WINDOW --entrypoint signing-key realm-apply:ci"
+            echo "SIGNING_KEY_CHECK=docker run --rm -v $KERNEL_KEYS/signing:/opt/keycloak/data/scnehaux:ro -v $KERNEL_KEYS/vault:/opt/keycloak/vault:ro identity-kernel:ci check-keystores"
+          } >> "$GITHUB_ENV"
+
+      - name: rotation through the five states
+        run: go test ./compat -count=1 -v -run 'TestTheFiveStatesThroughTheRotationSteps'
+
+      # realm-apply's invariants hold after the rotation: one active key, every published key in custody,
+      # no other key (ADR-IAM-002 §5.5 Q4).
+      - name: the realm still meets the invariants
+        run: go run ./cmd/realm-apply -environment ci -require-in-sync
+
+      - name: logs
+        if: failure()
+        run: |
+          docker logs keycloak 2>&1 | tail -n 200
+          (cd .identity/deploy/dev && docker compose logs --no-color) || true

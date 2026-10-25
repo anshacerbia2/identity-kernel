@@ -59,12 +59,13 @@ services:
       KC_PROXY_HEADERS: xforwarded
       KC_BOOTSTRAP_ADMIN_USERNAME: ${KC_BOOTSTRAP_ADMIN_USERNAME:-admin}
       KC_BOOTSTRAP_ADMIN_PASSWORD: ${KC_BOOTSTRAP_ADMIN_PASSWORD:?set KC_BOOTSTRAP_ADMIN_PASSWORD in .env}
-    # The realm signing keystore and its password, both read-only (ADR-IAM-002 §5.3,
-    # TDD-identity-kernel-002 1.2.0 §Custody as Built). The signing-key ceremony makes them
-    # (README.md §Keys). The java-keystore provider reads realm-signing.p12 from the realm's keystore
-    # directory, and the file vault reads the password from KC_VAULT_DIR, /opt/keycloak/vault in the
-    # image. Without them the image's entrypoint refuses to start, so the kernel never signs with a key
-    # it generated. Neither is ever copied to a backup (README.md §Backups).
+    # The realm signing keystores and their passwords, all read-only (ADR-IAM-002 §5.3 and §5.5 Q3,
+    # TDD-identity-kernel-002 1.5.0 §Custody as Built). The signing-key ceremony makes them, one keystore
+    # per key (README.md §Keys). Key <kid>'s java-keystore provider reads realm-signing-<kid>.p12 from
+    # the realm's keystore directory, and the file vault reads its password from KC_VAULT_DIR,
+    # /opt/keycloak/vault in the image. Directories, so a key a rotation stages appears without a
+    # restart. Without them the image's entrypoint refuses to start, so the kernel never signs with a key
+    # it generated. None is ever copied to a backup (README.md §Backups).
     volumes:
       - ./keys/signing:/opt/keycloak/data/scnehaux:ro
       - ./keys/vault:/opt/keycloak/vault:ro
@@ -132,14 +133,19 @@ services:
     build:
       context: ../..
       dockerfile: deploy/dev/realm-apply.Dockerfile
+    # Named, so the signing-key task below runs this image, and `up --build` rebuilds both with the
+    # release. Built here, never pulled (TDD-identity-kernel-005 §Images the Stack Runs).
+    image: scnehaux/identity-kernel-realm-apply:dev
+    pull_policy: build
     restart: "no"
     command:
       - -environment=${REALM_ENVIRONMENT:-development}
       - -definition=/repo/realm
       - -url=http://keycloak:8080
-      # The keystore's certificate, its public half: the signing key provider is created with its kid,
-      # and every run checks the realm signs with that key and no other.
-      - -signing-certificate=/keys/realm-signing.crt
+      # The keys' certificates, their public halves, realm-signing-<kid>.crt: the first key's provider
+      # is created from the one there on an empty realm, and every run checks that the realm publishes
+      # custody keys alone, one of them active (ADR-IAM-002 §5.5 Q4).
+      - -signing-certificates=/keys
       - -apply
     environment:
       KEYCLOAK_ADMIN_CLIENT_ID: ${KEYCLOAK_ADMIN_CLIENT_ID:-}
@@ -154,6 +160,31 @@ services:
     depends_on:
       keycloak:
         condition: service_healthy
+    networks: [internal]
+
+  # The kernel's half of each rotation step (scripts/signing-key-rotation.sh, TDD-identity-kernel-002
+  # §Rotation as Built): cmd/signing-key in the realm-apply image. Run by the script, never by `up`. As
+  # root, with the keys directory writable, because placing a new key and destroying a retired one
+  # change files the kernel's user owns; everything else it does goes through the Admin API with
+  # realm-apply's credentials.
+  signing-key:
+    # The image realm-apply's build makes on every `up`; never pulled, so a run before the first build
+    # fails instead of running a published image of the same name.
+    image: scnehaux/identity-kernel-realm-apply:dev
+    pull_policy: never
+    profiles: ["signing-key"]
+    restart: "no"
+    user: "0:0"
+    entrypoint: ["signing-key"]
+    environment:
+      KEYCLOAK_URL: http://keycloak:8080
+      KEYCLOAK_ADMIN_CLIENT_ID: ${KEYCLOAK_ADMIN_CLIENT_ID:-}
+      KEYCLOAK_ADMIN_CLIENT_KEY_FILE: /keys/${KEYCLOAK_ADMIN_CLIENT_ID:-realm-apply}.pem
+      KEYCLOAK_ADMIN_USER: ${KC_BOOTSTRAP_ADMIN_USERNAME:-admin}
+      KEYCLOAK_ADMIN_PASSWORD: ${KC_BOOTSTRAP_ADMIN_PASSWORD:?set KC_BOOTSTRAP_ADMIN_PASSWORD in .env}
+    volumes:
+      - ../..:/repo:ro
+      - ./keys:/keys
     networks: [internal]
 
 volumes:

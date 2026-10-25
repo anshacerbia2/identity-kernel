@@ -3,12 +3,12 @@ doc_meta:
   id: TDD-identity-kernel-002
   title: Signing Key Custody, Identity, and Rotation
   owner: Identity Platform Team
-  version: 1.4.0
+  version: 1.5.0
   status: approved
   classification: restricted
   review_cycle_days: 90
   created_date: 2026-08-11
-  last_reviewed: 2026-10-24
+  last_reviewed: 2026-10-25
   parent_sad: SAD-001
 ---
 
@@ -120,21 +120,31 @@ Open Question 1 is answered by ADR-IAM-002 §5.3, amended 2026-10-20. The approv
 **AWS Secrets Manager, under a customer-managed AWS KMS key**, one key and one secret per
 environment and realm. The secret holds the sealed keystore, and the kernel loads it as a file.
 
-| Item | In the kernel container | Development server | Production |
+**One keystore per key (1.5.0, ADR-IAM-002 §5.5 Q3).** Each key is its own keystore, holding exactly one
+RSA-3072 pair under the alias `realm-signing`, and its own password; in production, two secrets per key,
+under the environment's one KMS key. Every name carries the key's `kid`. This is the vault-safe
+spelling the ADR leaves to this design: `realm-signing-<kid>`. A `kid` is base64url, `[A-Za-z0-9_-]`,
+so it needs no escaping in a file name, and Keycloak's file vault resolves `${vault.realm-signing-<kid>}`
+to `scnehaux_realm-signing-<kid>` with every underscore doubled: "realm.replaceAll("_", "__") + "_" +
+key.replaceAll("_", "__")" (`AbstractVaultProviderFactory`, `REALM_UNDERSCORE_KEY`) [R4]. The vault
+reads the file on each use, with no cache (`FilesPlainTextVaultProvider.obtainSecretInternal`) [R4].
+
+| Item, for key `<kid>` | In the kernel container | Development server | Production |
 | :-- | :-- | :-- | :-- |
-| Keystore, PKCS#12, one RSA-3072 pair, alias `realm-signing` | `/opt/keycloak/data/scnehaux/realm-signing.p12`, read-only | `deploy/dev/keys/signing/realm-signing.p12`, owned by the kernel's user (1000), mode 0400, in a directory of mode 0500 | a Secrets Manager binary secret, mounted by the AWS Secrets and Configuration Provider (ASCP) |
-| Its password | `/opt/keycloak/vault/scnehaux_realm-signing-password`, read-only | `deploy/dev/keys/vault/`, same owner and modes | a second secret, mounted by the ASCP into the vault directory |
-| Its certificate, the public half | not mounted | `deploy/dev/keys/realm-signing.crt`, mode 0644, read by `realm-apply` | kept with the ceremony record |
+| Keystore, PKCS#12, one RSA-3072 pair, alias `realm-signing` | `/opt/keycloak/data/scnehaux/realm-signing-<kid>.p12`, read-only | `deploy/dev/keys/signing/realm-signing-<kid>.p12`, owned by the kernel's user (1000), mode 0400, in a directory of mode 0500 | the binary secret `…/realm-signing-<kid>-keystore`, mounted by the AWS Secrets and Configuration Provider (ASCP) |
+| Its password | `/opt/keycloak/vault/scnehaux_realm-signing-<kid>` (underscores doubled), read-only | `deploy/dev/keys/vault/`, same owner and modes | the secret `…/realm-signing-<kid>-password`, mounted by the ASCP into the vault directory |
+| Its certificate, the public half | not mounted | `deploy/dev/keys/realm-signing-<kid>.crt`, mode 0644, read by `realm-apply` and the rotation steps | kept with the ceremony record |
+| Its provider | `realm-signing-<kid>`, from the template `realm/signing-key.json` | the same | the same |
 
 - **The provider is `java-keystore`** (`realm/signing-key.json`). The Server Administration Guide:
   "The keystore should be located inside a folder named like the realm name inside the main keystores
   directory (by default data directory under Keycloak's installation folder)" [R1]. Its type is
   PKCS12, one of "JKS, PKCS12 or BCFKS" [R1].
-- **Both passwords are vault references,** `${vault.realm-signing-password}`, never literal realm
+- **Both passwords are vault references,** `${vault.realm-signing-<kid>}` (1.5.0), never literal realm
   configuration. Each "can refer a value from an external vault" [R1]. The image is built with the
   file vault, a build option: "For enabling the file-based vault you need to build Keycloak first
   using the following build option" [R2]. The realm and the secret's name give the file's name,
-  `scnehaux_realm-signing-password` [R2]. One entry serves both fields: keytool sets "the key
+  `scnehaux_realm-signing-<kid>` [R2]. One entry serves both fields: keytool sets "the key
   password ... to the same password as the keystore password" when none is given [R3], and the
   generator gives none. `realmdef` refuses a literal password, a provider other than
   `java-keystore`, and an algorithm other than `PS256`.
@@ -142,16 +152,17 @@ environment and realm. The secret holds the sealed keystore, and the kernel load
   `java-keystore` provider created without a `kid` a random identifier
   (`JavaKeystoreKeyProviderFactory.validateConfiguration`, which puts `KeycloakModelUtils.generateId()`
   in the configuration) [R4]. That identifier is unrelated to the key, which §Key Identity forbids.
-  So `realm-apply -signing-certificate` reads the keystore's certificate, computes the RFC 7638
-  thumbprint, and creates the provider with it. Keycloak leaves `kid` out of every representation it
+  So the provider is created from the keystore's certificate, with its RFC 7638 thumbprint: by
+  `realm-apply -signing-certificates` for the first key, by the rotation's `stage` for each later one
+  (1.5.0). Keycloak leaves `kid` out of every representation it
   returns, because it is not one of the provider's declared properties (`StripSecretsUtils`), and an
   update skips it for the same reason (`RepresentationToModel.updateComponent`) [R4]. So the `kid` is
   never part of the definition or its comparison, and no update can rebind it.
-- **Every run checks the key as it signs** (`realmdef.VerifySigningKey`). The declared provider
-  serves exactly one key: an active RSA `PS256` key of at least 3072 bits, the realm's active
-  `PS256` key, with a `kid` equal to its own thumbprint, and, with the certificate given, equal to
-  the certificate's. No other `PS256` key may exist, and no other key may be published
-  (§The Published Key Set). An apply that fails the check records nothing.
+- **Every run checks the keys as they sign** (`realmdef.VerifySigningKey`; the invariants of 1.5.0,
+  §Rotation as Built). Each signing provider serves exactly one RSA `PS256` key of at least 3072 bits,
+  with a `kid` equal to its own thumbprint and to its provider's name, and, with the certificates given,
+  one in custody. Exactly one is active, and it is the realm's active `PS256` key. No other `PS256` key
+  may exist, and no other key may be published (§The Published Key Set). An apply that fails the check records nothing.
   This is §Startup's thumbprint assertion, made against the live realm.
 - **Keycloak would otherwise fall back silently.** When no active `PS256` key loads, the next token
   makes the pinned release create a `fallback-PS256` provider, a key it generates in-process and
@@ -175,7 +186,8 @@ environment and realm. The secret holds the sealed keystore, and the kernel load
 ### The Published Key Set (1.2.0)
 
 ADR-IAM-002 §5.1 item 2: "the enterprise JWKS advertises `PS256` keys only". The realm's JWKS therefore
-holds one key, the keystore's. Keycloak creates four other providers with every realm, and each is
+holds the custody keys alone: the active one and, during a rotation, a staged or a retiring one
+(§Rotation as Built, 1.5.0). Keycloak creates four other providers with every realm, and each is
 decided by what depends on it:
 
 | Provider | Key | In the JWKS when enabled | Decision | Why |
@@ -222,9 +234,12 @@ decided by what depends on it:
 
 ### Startup as Built (1.2.0)
 
-`image/start.sh` is the image's entrypoint. Before a `start` or `start-dev`, it checks that the
-keystore and its password are mounted and readable, and that the keystore opens with that password
-and holds the entry `realm-signing` (`keytool -list`). On any failure it prints why, names the
+`image/start.sh` is the image's entrypoint. Before a `start` or `start-dev`, it checks every keystore in
+the realm's keystore directory (1.5.0): each is named `realm-signing-<kid>.p12`, its password is mounted
+and readable, it opens with that password, it holds exactly one entry, and that entry is
+`realm-signing` (`keytool -list`). A keystore with a second entry is refused (ADR-IAM-002 §5.5 Q3), and so
+is a directory with none. `check-keystores` runs the same checks and exits, which a rotation step uses
+on a new keystore before it creates its provider. On any failure it prints why, names the
 custody-outage runbook, and exits 1. Keycloak never runs, so it can never reach the fallback above.
 Any other command, such as `kc.sh show-config`, runs unchecked.
 
@@ -257,14 +272,18 @@ The ceremony that generates a key follows STD-IAM-001 2.9.0 §3.10. The runbook,
 
 - The key is generated once, by the JDK that will read it: `keytool -genkeypair` in the pinned
   upstream image, as root, with `--network none` (`scripts/signing-keystore.sh`).
-- The script refuses a keys directory that already holds a keystore. A second key in a realm is a
-  rotation (§Rotation). Its steps are not built; they wait on Open Questions 3 to 9 (§Rotation as
-  Built, 1.4.0).
-- It reads the `kid` from the new certificate with `client-key kid -certificate realm-signing.crt`
-  (1.3.0): the RFC 7638 thumbprint of the public key (§Key Identity). The command ships in the
-  realm-apply image, which the ceremony builds and then runs with `--network none`. realm-apply later
-  creates the provider with the same value.
-- It writes the record, `realm-signing.ceremony.json`: operator, witness, reason, times, the
+- Every key is made this way (1.5.0): the realm's first, and each one a rotation stages. The generator
+  writes into `keys/new`, and `signing-key place` (`cmd/signing-key`, in the realm-apply image, as root,
+  with no network) computes the `kid` and moves the three files to `realm-signing-<kid>`
+  (`scripts/signing-key-generate.sh`). It refuses to replace any file, so a `kid` is placed once. The
+  record is `realm-signing-<kid>.ceremony.json`. The key signs nothing until a step puts it in the realm:
+  `realm-apply` activates the first on an empty realm, and a rotation stages each later one
+  (§Rotation as Built).
+- It reads the `kid` from the new certificate, the RFC 7638 thumbprint of the public key (§Key
+  Identity), with `signing-key place` (1.5.0; `client-key kid` before it). The command ships in the
+  realm-apply image, which the ceremony builds and then runs with `--network none`. The provider is
+  later created with the same value.
+- It writes the record, `realm-signing-<kid>.ceremony.json`: operator, witness, reason, times, the
   generator's digest and the `kid`. It holds no secret. The operator attaches it to the change ticket
   the reason names (STD-IAM-001 §3.10: "kept with the change ticket ... Never in chat"). Names are
   given in the run, on the server, never in this public repository.
@@ -298,6 +317,12 @@ in the identifier.
 
 The registry is operational metadata. It is not authority over the key material, and
 losing it does not lose a key.
+
+**Where it lives (1.5.0, ADR-IAM-002 §5.5 Q5).** In identity-control's Control Database, as insert-only
+transition rows, with `public_jwk`, the algorithm and `custody_ref` written once at staging
+(`TDD-identity-control-001` §The Signing Key Registry). A key's state is its latest completed
+transition, and the fields below are read from its rows: `staged_at` from its staging, each later time
+from the transition that entered the state. The keys directory keeps only the ceremony's file.
 
 ```text
 kid            thumbprint, derived not assigned
@@ -367,68 +392,104 @@ Raising any token lifetime class raises this minimum. The rotation job recompute
 from the live class configuration rather than reading a constant, so a lifetime change
 cannot silently shorten the window below its own requirement.
 
-### Rotation as Built (1.4.0)
+### Rotation as Built (1.5.0)
 
-What is built is the part every open question below leaves fixed: the pinned release's mechanism for
-each state, proved against the image, and the retirement floor, computed from the live realm. The
-ceremony and script steps that move a key from one state to the next are **not built**. Each needs
-an answer this design does not give yet (Open Questions 3 to 9), and none is invented in code.
+1.4.0 built the pinned release's mechanism for each state and the retirement floor, and stopped the
+steps on seven questions. ADR-IAM-002 §5.5, amended 2026-10-24, decides them, and 1.5.0 builds the
+steps. Each is one command an operator runs, `scripts/signing-key-rotation.sh`, and the registry in
+identity-control holds every approval and transition (`TDD-identity-control-001` §The Signing Key
+Registry, called through its `identity-signing-key` command, the `signing-key` service on the development
+server).
 
-**The states on Keycloak 26.7.5.** A state is two flags of a `java-keystore` provider, plus the
+**The states on Keycloak 26.7.5.** A state is two flags of the key's `java-keystore` provider, plus the
 provider's presence. The Server Administration Guide: "Keycloak has a single active key pair at a
 time, but can have several passive keys as well. The active key pair is used to create new
 signatures, while the passive key pair can be used to verify previous signatures" [R10]. The key set
 publishes every enabled key with a public key (`JWKSServerUtils.getRealmJwks`) [R4].
 
-| State | `enabled` | `active` | Provider | In the key set | Signs |
+| State | Provider `realm-signing-<kid>` | In the key set | Signs | Custody | Registry |
 | :-- | :-- | :-- | :-- | :-- | :-- |
-| `staged` | true | false | present | yes | no |
-| `active` | true | true | present, the highest priority among active keys | yes | yes |
-| `retiring` | true | false | present | yes | no |
-| `retired` | — | — | removed | no | no |
-| `revoked` | — | — | removed | no | no |
+| `staged` | enabled, passive | yes | no | keystore and password | `stage` |
+| `active` | enabled, active, the highest priority | yes | yes | keystore and password | `activate` |
+| `retiring` | enabled, passive | yes | no | keystore and password | `demote`, with the next key's activation |
+| `retired` | removed | no | no | destroyed | `retire`, or `abandon` for a staged key |
+| `revoked` | removed | no | no | destroyed | `revoke` |
 
-- **Which active key signs is the priority.** The guide: "The highest number makes the key pair
-  active" [R10]. So the key that becomes `active` carries a higher priority than the one it replaces.
-- **No moment may have no active key.** With none, the next token makes the pinned release generate
-  `fallback-PS256` (§Custody as Built), which STD-IAM-001 §3.5 prohibits. So an activation activates
-  the new key first, at the higher priority, and demotes the previous one after. Between the two
-  calls the new key already signs, because of its priority.
-- **Removing the provider takes the key out of the key set at once**, for `retired` and `revoked`
-  alike. The private material's destruction is the custody half of the same step, and is not built.
+**Who owns the providers (Q4).** The steps alone. `realm-apply` never changes or removes a signing
+provider that exists. On an empty realm it creates the first, active, from the one certificate in
+custody (`-signing-certificates`), and refuses when there is more than one. Every run checks the
+invariants (`realmdef.VerifySigningKey`): exactly one active `PS256` key, which is the realm's active
+key; every key a signing provider serves is RSA `PS256` of at least 3072 bits, under its own RFC 7638
+thumbprint, named by it, active or passive, and in custody; every signing provider serves its one key;
+and no other `PS256` key and no other published key exists, so no `fallback-PS256` and no RS256 key.
 
-**Proved.** `compat/key_rotation_test.go`, in the `contract` job, against a second throwaway key the
-job makes beside the realm's (a test fixture, not a custody layout). A staged key is published and
-signs nothing. Once active, new tokens carry its `kid`, and a token the previous key signed still
-verifies against the published key set while that key is retiring. A key leaves the key set when its
-provider is removed and not before, and a token it signed then fails verification against the key
-set. At every step the key set holds RSA `PS256` keys alone, and no step makes a fallback or an RS256
-key. To leave the realm as the definition describes it, the test rotates back to the realm's key and
-removes the fixture's provider; that cleanup is not a transition this design defines.
+**The steps.** Each reads the key's provider and its registry state first and refuses when they
+disagree, as after a restore of either. Each asks the registry's `check` for its approval and records
+the outcome with `record`; a step that fails part way records `failed` with its error, which changes no
+state and leaves the approval unused.
 
-**The retirement floor is computed on every `realm-apply` run** (`realmdef.VerifyRetirementWindow`).
+| Step | Waits | Kernel side (`cmd/signing-key`) | Then |
+| :-- | :-- | :-- | :-- |
+| `stage <kid> <operator> <witness> <reason> <correlation>` | — | registers the key from its certificate (`jwk`), checks the keystores (`check-keystores`), creates the provider enabled and passive (`stage`), checks the invariants | the key is published and signs nothing |
+| `approve <kid> <transition> <operator> <approver> …` | — | — | an approval row, `--emergency` for an activation after a compromise |
+| `activate <kid> <operator>` | the cache window since staging, unless the approval is an emergency (Q7) | makes the key active above every other key's priority, then demotes every other active key, then checks that it is the one active key | the registry writes the activation and the previous key's demotion in one transaction |
+| `retire <kid> <operator>` | the retirement window since it became `retiring` | removes the provider (Q8 step 1), then destroys the keystore, password and certificate and reads them back absent | the registry records `retired` with that evidence, and not before (Q8 step 5) |
+| `abandon <kid> <operator>` | — | the same, for a staged key | `retired`, reason `abandoned` (Q6) |
+| `revoke <kid> <operator>` | — | the same, for a staged or retiring key | `revoked` |
+
+- **No moment has no active key.** With none, the next token makes the pinned release generate
+  `fallback-PS256` (§Custody as Built), so the new key is made active first, at a priority above every
+  other: "The highest number makes the key pair active" [R10]. No step removes the active key: a
+  compromised active key is demoted by a replacement's emergency activation, then revoked (Q7).
+- **A retiring key is never active again** (Q6): the registry lets a key enter each state once.
+- **The windows** are §Configuration's: 10 minutes of consumer cache before an activation, and the
+  7-day retirement window, whose floor every run recomputes from the live token lifetimes
+  (`realmdef.VerifyRetirementWindow`, below). The registry measures each from the time the key entered
+  its state, on the database's clock. Only a throwaway environment, `local` or `ci`, may shorten them,
+  through `SIGNING_KEY_CACHE_WINDOW` and `SIGNING_KEY_RETIREMENT_WINDOW`: ADR-IAM-002 §5.3 lets a test
+  run's kernel sign with a key of its own, because "nothing outside that run verifies its tokens". Any
+  other environment refuses either variable (`realmdef.StepWindows`).
+- **The first key.** `realm-apply` activates it on the empty realm, before identity-control can run,
+  because identity-control needs the realm (Q4). Once the Control Database exists, the operator stages it
+  in the registry and records its activation under an approval; the step sees the provider already
+  active and alone, so it changes nothing in the realm and does not wait.
+- **Staging on the development server** needs no restart: the keys directories are bind-mounted, the
+  `java-keystore` provider reads its keystore when a session uses it, and the vault reads the password on
+  each use [R4]. In production a staged key's two secrets are added to the `SecretProviderClass` objects
+  and the replicas rolled before `stage` runs, and removed and rolled before a destruction deletes them
+  (Q3, Q8 step 2; `docs/production/`).
+- **Destruction in production** is Q8's five steps, in order, after the approval and the registry's
+  state check: remove the provider; remove the key's two objects and roll the replicas; delete both
+  secrets with `ForceDeleteWithoutRecovery`; read each until Secrets Manager no longer returns it and
+  take both `DeleteSecret` events from CloudTrail; record `retired_at` or `revoked_at` with those events
+  as the evidence. `docs/runbooks/signing-key-rotation.md` gives the commands. No production
+  environment exists, so they have never run, and no CI job calls AWS.
+
+**The retirement floor is computed on every `realm-apply` run** (1.4.0, `realmdef.VerifyRetirementWindow`).
 The longest access token lifetime is the largest of the realm's `accessTokenLifespan`, every
 client's `access.token.lifespan` override, which identity-control sets from the client's lifetime
 class (STD-IAM-002 §3.3), and, for a client with the implicit flow enabled, the realm's
 `accessTokenLifespanForImplicitFlow`. The floor adds the 10-minute consumer cache and the 60-second
-skew allowance (§Configuration). The run fails when the floor exceeds the 7-day window, and prints
-the floor and the lifetime that sets it otherwise. Unit tests in
-`internal/realmdef/retirement_test.go` cover this section's own example (L2 at 15 minutes gives 26
-minutes), a raised lifetime raising the floor, and a floor past the window failing. The retire step
-that holds a key for the window is not built, so the check guards the configuration until it is.
+skew allowance (§Configuration). The run fails when the floor exceeds the 7-day window. The `retire`
+step waits the window, and the `windows` command it reads it from computes the floor first.
 
-**Not built,** each waiting on its open question:
+**Proved.**
 
-| Step | Waits on |
-| :-- | :-- |
-| Generate and stage: a second key into custody, its provider created passive, its registry record | Questions 3, 4, 5 |
-| Activate, after the consumer cache window, approved by someone other than the generating operator | Questions 4, 9 |
-| Demote the previous key to `retiring` | Question 4 |
-| Retire after the window: remove the provider and destroy the private material, every stored version included | Questions 3, 4, 8, 9 |
-| Revoke on compromise | Questions 4, 7, 8, 9 |
-| Any backward step | Question 6 |
-
-So the ceremony still refuses a second key, and the realm still signs with one key.
+- `compat/rotation_steps_test.go`, in the `rotation` job of `compat.yml`, with identity-control built
+  from `identity_ref` (its `main` by default; a branch by `workflow_dispatch`). Four keys made by the
+  ceremony go through every state by the steps above. A staged key is published and signs nothing. An
+  activation is refused without its approval and before the cache window, and an emergency one is not
+  delayed. After an activation, new tokens carry the new `kid`, and a token the old key signed verifies
+  against the key set while that key is retiring. A retirement is refused before its window, and the key
+  stays published until it runs; then the key leaves the key set, a token it signed fails, and its files
+  are gone. An abandoned key and a revoked key leave at once, and the active key cannot be revoked
+  first. At every step the key set holds RSA `PS256` keys alone, and no step makes a fallback or an
+  RS256 key. The registry ends with the states each step recorded, and `realm-apply -require-in-sync`
+  passes after the rotation.
+- `internal/realmdef/signingkey_test.go`: each invariant `VerifySigningKey` holds, the template's
+  rendering, custody read from certificates named by their kids, and the windows only a throwaway
+  environment may shorten.
+- The registry's own refusals are identity-control's tests (`internal/signingkey`).
 
 ## API / Interface
 
@@ -512,7 +573,8 @@ signed by that key as valid.
 - Key generation requires two people, an operator and a witness who is never the operator
   (STD-IAM-001 §3.10); neither alone can complete a ceremony. As built (1.2.0),
   `scripts/signing-key-ceremony.sh` refuses a witness equal to the operator and records both, and
-  a third person, the reviewer, reviews the record (§Key Ceremony).
+  a third person, the reviewer, reviews the record (§Key Ceremony). The registry refuses the same
+  pair when the key is staged (1.5.0).
 - The operator who generates a key does not approve its activation.
 - Retiring or revoking a key, which destroys its private material, requires an approval
   distinct from the operator performing it.
@@ -522,12 +584,22 @@ signed by that key as valid.
 No individual can generate, activate, and destroy a key alone, which is what EAD-006
 §5.4 requires for high-impact key operations.
 
+**As built (1.5.0, ADR-IAM-002 §5.5 Q9).** Each approval is an insert-only registry row by a holder of the
+ceremony role, for one transition of one `kid` and one operator. The registry refuses an approver
+equal to the operator, and for an activation one who generated the key; an approval completes one
+transition and is never reused. Each step asks the registry for its approval before it acts and records
+its transition after, with actor, approval, reason, correlation identifier and outcome: that row is the
+privileged-administration event, kept until Audit & Evidence has it (STD-IAM-001 §3.8). The kernel's
+admin events and, in production, CloudTrail corroborate it by the correlation identifier. Who holds
+the ceremony role stays the owner's to name (STD-IAM-001 §3.10).
+
 ## Configuration
 
 | Setting | Value | Reason |
 | :-- | :-- | :-- |
-| Key source | AWS Secrets Manager, customer-managed KMS key, one secret per environment and realm, mounted by the ASCP; on the development server, `deploy/dev/keys/signing` | Custody is external to the artifact (ADR-IAM-002 §5.3) |
-| Key provider | `java-keystore`, PKCS#12, alias `realm-signing`, passwords `${vault.realm-signing-password}` | §Custody as Built |
+| Key source | AWS Secrets Manager, one customer-managed KMS key per environment and realm, two secrets per key, each written once, mounted by the ASCP; on the development server, `deploy/dev/keys/signing` and `deploy/dev/keys/vault` | Custody is external to the artifact (ADR-IAM-002 §5.3, §5.5 Q3, Q8) |
+| Key provider | one per key: `java-keystore`, `realm-signing-<kid>`, PKCS#12 `realm-signing-<kid>.p12`, alias `realm-signing`, passwords `${vault.realm-signing-<kid>}` | §Custody as Built |
+| Who owns the providers | the rotation steps; `realm-apply` creates the first on an empty realm and checks the invariants | ADR-IAM-002 §5.5 Q4 |
 | Signing algorithm | `PS256` | STD-IAM-002 §3.2.2 baseline; candidate release must prove support |
 | RSA modulus | at least 3072 bits | Algorithm profile minimum |
 | Key generation in process | Prohibited, including as fallback | STD-IAM-001 §3.5 |
@@ -557,13 +629,15 @@ backup holds neither the keystore, nor its password, nor a private key. Unit tes
 `VerifySigningKey`. Not built: replica consistency, which needs more than one replica, and everything
 under §Rotation and §Separation of Duties beyond the ceremony.
 
-**As built (1.4.0).** `compat/key_rotation_test.go` proves the pinned release's mechanism under each
-state, and `internal/realmdef/retirement_test.go` the floor's computation and its failure
-(§Rotation as Built). Of §Rotation below, these hold: a token issued before a rotation verifies while
-its key is retiring, a staged key is published and signs nothing, a key leaves the key set only when
-its provider is removed, and a raised lifetime raises the floor and a floor past the window fails.
-The timings (staged for the cache window, retiring for the computed window), the destruction of
-private material, and §Separation of Duties wait on the steps.
+**As built (1.4.0).** The mechanism under each state, against a fixture key, and the retirement floor's
+computation and its failure (`internal/realmdef/retirement_test.go`).
+
+**As built (1.5.0).** `compat/rotation_steps_test.go` replaces 1.4.0's fixture test: it takes four keys
+through all five states by the steps an operator runs, with identity-control's registry
+(§Rotation as Built, Proved). Every line of §Rotation below now holds, the timings included, with the
+windows a `ci` environment shortens; so do §Separation of Duties' first two lines, by the registry's
+refusals, and §Compromise and Recovery's first. Not built: the privileged-administration event's
+delivery to Audit & Evidence, which waits on that platform, and replica consistency.
 
 ### Identity and Custody
 
@@ -684,6 +758,7 @@ exercised.
 | Conforms to | STD-IAM-001 2.9.0 §3.10 — the ceremony: operator, witness, independent review |
 | Conforms to | STD-GLB-009 1.10.0 rule 9 — the keystore and its vault files are never copied |
 | Governed by | ADR-IAM-002 §5.4, amended 2026-10-20 — every ingress that serves the realm closes the legacy realm endpoint (1.3.0) |
+| Governed by | ADR-IAM-002 §5.5, amended 2026-10-24 — rotation decisions Q3 to Q9: a keystore and two secrets per key, steps that own the providers, the registry in identity-control, abandonment, emergency activation, one-version secrets deleted whole, approvals by someone other than the operator (1.5.0) |
 | Conforms to | STD-GLB-009 2.0.0 §Security & Access Governance — the production gate on the legacy realm endpoint (1.3.0) |
 
 ### Open Questions
@@ -698,44 +773,24 @@ exercised.
    has no retention period. It is destroyed when the key leaves JWKS, and the evidence kept
    is the public key and the record, which NIST SP 800-57 Part 1 permits.
 
-Questions 3 to 9 were found building rotation (1.4.0). Each stops a step of §Rotation as Built.
+Questions 3 to 9 were found building rotation (1.4.0). ADR-IAM-002 §5.5, amended 2026-10-24, answers
+each, and 1.5.0 builds the answers (§Rotation as Built).
 
-3. **Custody of more than one key** (§Custody as Built, §Rotation, §Configuration; ADR-IAM-002
-   §5.3). From staging to retirement, two keys are in custody at once, and three when a key is staged
-   while another is retiring. §Custody as Built has one keystore holding one pair under the alias
-   `realm-signing`, and ADR-IAM-002 §5.3 one secret per environment and realm, sized for "one
-   RSA-3072 pair". §Rotation removes a retired key "from the keystore", which reads as one keystore
-   with an entry per key. Is that the layout, and what alias does each entry carry (the image's start
-   check requires `realm-signing`)? Or is it a keystore per key, which needs a secret per key?
-4. **Who owns the signing providers' state** (§Custody as Built; `realm/signing-key.json`,
-   `realmdef.VerifySigningKey`). The realm definition declares one provider with `active: true`;
-   `realm-apply` treats any other value as drift and refuses a second `PS256` key. A rotated realm
-   holds a provider per key, with flags that depend on its state and differ per environment. Does the
-   definition keep declaring the providers, and from what per-environment source? Or do the rotation
-   steps own them, and `realm-apply` checks only the invariants: exactly one active `PS256` key, every
-   published key a custody key in a published state, no other key?
-5. **Where the registry lives** (§Key Registry; §Rotation, "register it staged"). Today the ceremony
-   record is a file in the keys directory, which is never backed up, and an entry on the change
-   ticket. Is the registry those records, or a store of its own? Where are `public_jwk` and the record
-   kept as evidence after retirement?
-6. **Rollback** (§Rotation State Machine; ADR-IAM-002 §5.2). The machine has no backward transition.
-   May a staged key that never signed be abandoned, leaving the key set with its material destroyed,
-   and is it then `retired`, `revoked`, or a state of its own? May a `retiring` key be activated again
-   within its window when the new key fails?
-7. **Activation after a compromise** (§Compromise). Does the replacement wait the 10-minute consumer
-   cache window as a scheduled activation does, while the compromised key keeps signing, or activate
-   at once, relying on consumers refetching on an unknown `kid` (ADR-IAM-002 §5.2)?
-8. **Destroying every stored version in production** (§Rotation, "every stored version of the
-   sealed keystore in the secret manager"). AWS: "Secrets Manager never removes labeled versions, but
-   unlabeled versions are considered deprecated. Secrets Manager removes deprecated versions when there
-   are more than 100. Secrets Manager doesn't remove versions created less than 24 hours ago" [R11].
-   Which procedure destroys the versions that carry a retired key: deleting the secret without
-   recovery and creating it again, which gives it a new ARN [R11], or another?
-9. **The approval and the event** (§Separation of Duties). Activation needs an approver other than
-   the generating operator, and retirement or revocation an approver other than the operator who
-   performs it. Every key operation "is emitted as a privileged-administration event". Where is an
-   approval recorded (the ceremony keeps its review on the change ticket), and which channel carries
-   the event for a step that runs outside Keycloak?
+3. ~~Custody of more than one key.~~ One keystore per key, alias `realm-signing`, two secrets per key
+   named by the `kid` (Q3). The spelling is `realm-signing-<kid>` (§Custody as Built).
+4. ~~Who owns the signing providers' state.~~ The rotation steps. `realm-apply` checks the invariants and
+   creates the first provider on an empty realm alone (Q4).
+5. ~~Where the registry lives.~~ identity-control's Control Database, as insert-only transition rows, with
+   `public_jwk` written once at staging (Q5, §Key Registry).
+6. ~~Rollback.~~ A staged key may be abandoned, as `retired` with the reason `abandoned`, or `revoked`
+   when suspect. A retiring key is never activated again (Q6).
+7. ~~Activation after a compromise.~~ At once, then the compromised key is revoked (Q7).
+8. ~~Destroying every stored version in production.~~ Each signing secret is written once and has one
+   version. A destruction deletes the key's two secrets with `ForceDeleteWithoutRecovery`, in Q8's
+   order, and records the CloudTrail events (Q8).
+9. ~~The approval and the event.~~ An insert-only registry row by a holder of the ceremony role who is
+   not the operator, which the step refuses to run without. The transition row is the event. The
+   mechanism is a command on the Identity Control deployable (Q9).
 
 ## References
 
@@ -746,7 +801,7 @@ Accessed 2026-10-20. Each quote was read on the page or in the source file named
 | R1 | Keycloak, *Server Administration Guide* 26.7.5, "Loading keys from a Java Keystore", <https://www.keycloak.org/docs/26.7.5/server_admin/index.html>: "The keystore should be located inside a folder named like the realm name inside the main keystores directory (by default data directory under Keycloak's installation folder)"; "Enter the Keystore Password. The option can refer a value from an external vault."; "Enter a value for Keystore Type (JKS, PKCS12 or BCFKS)."; "Enter the Key Password. The option can refer a value from an external vault." |
 | R2 | Keycloak, *Using a vault*, <https://www.keycloak.org/server/vault>: "For enabling the file-based vault you need to build Keycloak first using the following build option"; the file is named `${vault.<realmname>_<secretname>}`, and "To process the secret correctly, you double all underscores in the <secretname>"; "The file-based vault implementation is especially useful for Kubernetes/OpenShift secrets." |
 | R3 | Oracle, *The keytool Command*, JDK 21, <https://docs.oracle.com/en/java/javase/21/docs/specs/man/keytool.html>: for `-keypass`, "If you press the Return key at the prompt, then the key password is set to the same password as the keystore password"; "file: Retrieve the password from the file named argument"; "In JDK 9 and later, the default keystore implementation is PKCS12." |
-| R4 | Keycloak 26.7.5 source, <https://github.com/keycloak/keycloak/tree/26.7.5>: `services/.../keys/JavaKeystoreKeyProviderFactory.java`, `validateConfiguration`: `if (kid == null) { kid = KeycloakModelUtils.generateId(); model.put(KID_KEY, kid); }`; `server-spi-private/.../models/utils/StripSecretsUtils.java`, `stripComponentConfigMap`, which removes every configuration key that is not a declared property; `RepresentationToModel.updateComponent`, which skips such a key (`if (!internal && !providerConfiguration.containsKey(k)) { continue; }`); `services/.../keys/DefaultKeyManager.java`, `getActiveKey`, which on no active key creates fallback keys and logs "No keys found for realm={0} and algorithm={1} for use={2}. Generating keys.", and `getActiveRsaKey`, `getActiveKey(realm, KeyUse.SIG, Algorithm.RS256)`; `services/.../resources/PublicRealmResource.java`, `rep.setPublicKeyPem(PemUtils.encodeKey(session.keys().getActiveRsaKey(realm).getPublicKey()))`; `services/.../protocol/oidc/utils/JWKSServerUtils.java`, `getRealmJwks`, `.filter(k -> k.getStatus().isEnabled() && k.getPublicKey() != null)`; `server-spi-private/.../models/Constants.java`, `INTERNAL_SIGNATURE_ALGORITHM = Algorithm.HS512`; `services/.../jose/jws/DefaultTokenManager.java`, `cekManagementAlgorithm`, `case INTERNAL: return Algorithm.AES`; `services/.../protocol/RestartLoginCookie.java`, `encodeAndEncrypt`, `getActiveKey(..., KeyUse.ENC, algAlgorithm)`. |
+| R4 | Keycloak 26.7.5 source, <https://github.com/keycloak/keycloak/tree/26.7.5>: `services/.../keys/JavaKeystoreKeyProviderFactory.java`, `validateConfiguration`: `if (kid == null) { kid = KeycloakModelUtils.generateId(); model.put(KID_KEY, kid); }`; `server-spi-private/.../models/utils/StripSecretsUtils.java`, `stripComponentConfigMap`, which removes every configuration key that is not a declared property; `RepresentationToModel.updateComponent`, which skips such a key (`if (!internal && !providerConfiguration.containsKey(k)) { continue; }`); `services/.../keys/DefaultKeyManager.java`, `getActiveKey`, which on no active key creates fallback keys and logs "No keys found for realm={0} and algorithm={1} for use={2}. Generating keys.", and `getActiveRsaKey`, `getActiveKey(realm, KeyUse.SIG, Algorithm.RS256)`; `services/.../resources/PublicRealmResource.java`, `rep.setPublicKeyPem(PemUtils.encodeKey(session.keys().getActiveRsaKey(realm).getPublicKey()))`; `services/.../protocol/oidc/utils/JWKSServerUtils.java`, `getRealmJwks`, `.filter(k -> k.getStatus().isEnabled() && k.getPublicKey() != null)`; `server-spi-private/.../models/Constants.java`, `INTERNAL_SIGNATURE_ALGORITHM = Algorithm.HS512`; `services/.../jose/jws/DefaultTokenManager.java`, `cekManagementAlgorithm`, `case INTERNAL: return Algorithm.AES`; `services/.../protocol/RestartLoginCookie.java`, `encodeAndEncrypt`, `getActiveKey(..., KeyUse.ENC, algAlgorithm)`. Read 2026-10-25 for 1.5.0: `services/.../vault/AbstractVaultProviderFactory.java`, `REALM_UNDERSCORE_KEY((realm, key) -> realm.replaceAll("_", "__") + "_" + key.replaceAll("_", "__"))`; `services/.../vault/FilesPlainTextVaultProvider.java`, `obtainSecretInternal`, which reads `Files.readAllBytes(secretPath)` on each call; `services/.../keys/JavaKeystoreKeyProvider.java`, whose constructor loads the keystore (`loadKey`) for each provider instance a session creates. |
 | R5 | AWS, *Use AWS Secrets and Configuration Provider CSI with IAM Roles for Service Accounts (IRSA)*, <https://docs.aws.amazon.com/secretsmanager/latest/userguide/integrating_csi_driver.html>: "To determine which secrets the ASCP mounts in Amazon EKS as files on the filesystem, you create a SecretProviderClass YAML file"; and *AWS Secrets and Configuration Provider code examples*, <https://docs.aws.amazon.com/secretsmanager/latest/userguide/ascp-examples.html>: `objectAlias`, "The file name of the secret in the Amazon EKS Pod"; `filePermission`, "If you don't specify this field it will default to "0644"". |
 | R6 | AWS, `secrets-store-csi-driver-provider-aws`, `provider/secrets_manager_provider.go` at a8f9f58, <https://github.com/aws/secrets-store-csi-driver-provider-aws/blob/a8f9f58f9dc951766134cc60a04c00b2c1a67a6a/provider/secrets_manager_provider.go>: "// Use either secret string or secret binary.", then `sValue = rsp.SecretBinary` when the secret has no string. |
 | R7 | AWS CLI, `secretsmanager create-secret`, <https://docs.aws.amazon.com/cli/latest/reference/secretsmanager/create-secret.html>: `--secret-binary`, "We recommend that you store your binary data in a file and then pass the contents of the file as a parameter", "Constraints: min 1, max 65536"; `--kms-key-id`, "If you don't specify this value, then Secrets Manager uses the key aws/secretsmanager"; `fileb://` "will always be treated as binary and use the file contents directly". |

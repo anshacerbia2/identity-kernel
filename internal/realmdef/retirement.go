@@ -121,3 +121,43 @@ func VerifyRetirementWindow(ctx context.Context, c *admin.Client, d Definition) 
 	f := retirementFloor(realm, clients)
 	return f, checkRetirementWindow(f, RetirementWindow)
 }
+
+// Windows are how long a rotation step waits: a staged key for the consumer cache before it is
+// activated, and a retiring key for the retirement window before it is retired (TDD-identity-kernel-002
+// §Rotation, §Retirement Window).
+type Windows struct {
+	Cache      time.Duration
+	Retirement time.Duration
+}
+
+// The two variables a test run may shorten the windows by.
+const (
+	CacheWindowVariable      = "SIGNING_KEY_CACHE_WINDOW"
+	RetirementWindowVariable = "SIGNING_KEY_RETIREMENT_WINDOW"
+)
+
+// StepWindows returns the windows for an environment. Only a throwaway one, local or ci, may shorten
+// them, so a proof runs in minutes rather than a week: nothing outside that run verifies its tokens
+// (ADR-IAM-002 §5.3). Anywhere else a variable set is refused, never ignored.
+func StepWindows(env Environment, getenv func(string) string) (Windows, error) {
+	windows := Windows{Cache: ConsumerKeySetCache, Retirement: RetirementWindow}
+	for _, w := range []struct {
+		variable string
+		into     *time.Duration
+	}{{CacheWindowVariable, &windows.Cache}, {RetirementWindowVariable, &windows.Retirement}} {
+		value := getenv(w.variable)
+		if value == "" {
+			continue
+		}
+		if env != Local && env != CI {
+			return Windows{}, fmt.Errorf("%s is set in environment %s; only a throwaway environment, local or ci, "+
+				"may shorten a rotation window", w.variable, env)
+		}
+		parsed, err := time.ParseDuration(value)
+		if err != nil || parsed < 0 {
+			return Windows{}, fmt.Errorf("%s=%q is not a duration", w.variable, value)
+		}
+		*w.into = parsed
+	}
+	return windows, nil
+}
