@@ -3,7 +3,7 @@
 # the database keycloak, read from the running postgres container into a directory outside the Docker
 # volume.
 #
-#   ./backup.sh /mnt/imam-storage/scnehaux-backups/identity-kernel
+#   ./backup.sh /mnt/dev-storage/scnehaux-backups/identity-kernel
 #
 # Writes one set: globals-<date>.sql (pg_dumpall --globals-only) and keycloak-<date>.dump
 # (pg_dump --format=custom), <date> the UTC date. Prints the two paths, roles first: restore.sh takes
