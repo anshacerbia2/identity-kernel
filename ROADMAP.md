@@ -1122,3 +1122,40 @@ key ceremony, console drift, failed upgrade, and consumer reporting an unknown `
   discovery and the key set, and the custody key alone in the key set. It runs again after every
   Keycloak upgrade. `deploy-dev` already runs the same test for the development server; no production
   ingress exists yet.
+
+### Information security gates (ISMS-005, 2026-11-01)
+
+The approved risk treatment plan
+([ISMS-005](https://github.com/anshacerbia2/scnehaux-architecture/blob/main/07-isms/ISMS-005-risk-treatment-and-soa.md#treatment-plan))
+makes these production gate items for this repository. Each risk (R) is rated in
+[ISMS-004](https://github.com/anshacerbia2/scnehaux-architecture/blob/main/07-isms/ISMS-004-risk-register.md#the-register);
+each action (T) has its owner role and target date there. When an action completes, this list and
+the SoA in ISMS-005 change together.
+
+- ⏳ **The witness and the approver of a signing-key ceremony sign in** (T8, R2; before production),
+  instead of being names the operator types into `scripts/signing-key-ceremony.sh`.
+- ⏳ **The production keystore in cloud custody** (T12, R1; before production), as Week 2's key
+  custody item and ADR-IAM-002 §5.3 design it. On the development server, whoever holds root on the
+  host can read the keystore.
+- ⏳ **No fixed bootstrap administrator in production, and a second factor on the master
+  administrator** (T15, R12). Development: whether the master administrator has a second factor is
+  checked by 30 November 2026.
+- ⏳ **A password policy with a minimum length and a blocklist** (T16, R13; before production).
+  `realm/scnehaux.json` holds `passwordHistory(3)` only.
+- ⏳ **The kernel database archives continuously, with copies off the host** (T11, R4; before
+  production). `deploy/dev/backup.sh` writes a daily dump to a disk in the same machine.
+- ⏳ **A failed backup is reported** (T9, R18; by 30 November 2026). The scheduled backup discards
+  its output today.
+- ⏳ **Production secrets come from a managed store, never from `.env`** (T23, R7; before
+  production).
+- ⏳ **A failed scheduled run alerts the Information Security Officer** (T4, R21; by 30 November
+  2026). Today a failed run of `image-scan`, `compat` or `deploy-dev` alerts nobody; it shows only
+  to someone who opens the Actions tab. From 26 to 31 October 2026 this repository's daily image
+  scan failed unread, and a 3-day remediation time passed.
+- ⏳ **Secret scanning in CI** (T5, R7; by 15 December 2026), as STD-IAM-001 §5 lists. Today nothing
+  scans a change for a secret before it reaches this public repository.
+- ⏳ **The shared workflows are called at a pinned commit** (T6, R14; by 31 December 2026). Today
+  `linter.yml` and `deploy-dev-skeleton.yml` are called from scnehaux-architecture's `main` branch,
+  so a change there changes what this repository's CI runs.
+- ⏳ **A second person's approval on `main`** (T19, R19 and R23; before production). A ruleset
+  requires one approval once a second maintainer exists; until then each merge is a recorded risk.
