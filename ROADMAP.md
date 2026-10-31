@@ -98,7 +98,9 @@ and context switch mechanism — are exercised here but decided in `identity-con
   Stack Runs). The daily scan failed from 2026-10-26 on `curl`/`libcurl` 8.22.0-r0 in the proxy, seven
   Critical and 17 High, fixed in 8.23.0-r0. Two are Automatable with total impact on a publicly exposed
   image: BOD 26-04 gave 3 days, to 2026-10-29, which passed before the failure was read.
-  `caddy.Dockerfile` adds `curl` and `libcurl` to its upgrade line
+  `caddy.Dockerfile` adds `curl` and `libcurl` to its upgrade line. From 2026-10-28 the proxy's
+  binary also failed on `go-jose/v4` v4.1.5 (GHSA-mgcc-cww5-fp2q; Automatable, partial: 14 days, by
+  2026-11-11); the source build replaces it with v4.1.6, as it replaces `x/net`
 - ⏳ **Two findings in Keycloak 26.7.5 wait for the next `image/keycloak.ref` move** (added 2026-10-31;
   TDD-005 1.15.0). `.grype.yaml` holds an `affected` statement for each, reviewed by 2026-11-30:
   - `guava` 33.5.0-jre, CVE-2026-102554, fixed in 33.7.2, which no Keycloak release carries yet

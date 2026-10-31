@@ -21,14 +21,20 @@ FROM caddy@sha256:aa705b1e8e4bce41a7a30de934c1e00f6821667c1d1206424465065c92cb76
 # and the checksum database verify each one whichever way it arrives.
 ARG GOPROXY=https://proxy.golang.org,direct
 ENV GOPROXY=${GOPROXY}
-RUN xcaddy build v2.11.7 --replace golang.org/x/net=golang.org/x/net@v0.60.0 --output /usr/bin/caddy
-# The build fails unless the binary carries what it is built for: x/net v0.60.0 as the module compiled
-# in (the replace line, `=>`, when there is one), and a standard library no older than go1.26.9.
+# go-jose v4.1.5, which Caddy 2.11.7 resolves, is GHSA-mgcc-cww5-fp2q (CVE-2026-116587, found
+# 2026-10-28): a crafted RSA key in a JWK makes parsing use excess CPU. v4.1.6 fixes it, and no Caddy
+# release carries it yet, so the build replaces it the same way.
+RUN xcaddy build v2.11.7 --replace golang.org/x/net=golang.org/x/net@v0.60.0 \
+      --replace github.com/go-jose/go-jose/v4=github.com/go-jose/go-jose/v4@v4.1.6 --output /usr/bin/caddy
+# The build fails unless the binary carries what it is built for: x/net v0.60.0 and go-jose v4.1.6 as
+# the modules compiled in (the replace line, `=>`, when there is one), and a standard library no older
+# than go1.26.9.
 RUN go version -m /usr/bin/caddy | awk ' \
       NR == 1 { go = $2 } \
-      $1 == "dep" { x = ($2 == "golang.org/x/net"); if (x) v = $3 } \
-      $1 == "=>" && x { v = $3 } \
-      END { print go, "golang.org/x/net", v; exit (v != "v0.60.0") }' && \
+      $1 == "dep" { m = $2; if (m == "golang.org/x/net" || m == "github.com/go-jose/go-jose/v4") v[m] = $3; else m = "" } \
+      $1 == "=>" && m != "" { v[m] = $3 } \
+      END { print go, "golang.org/x/net", v["golang.org/x/net"], "go-jose/v4", v["github.com/go-jose/go-jose/v4"]; \
+            exit (v["golang.org/x/net"] != "v0.60.0" || v["github.com/go-jose/go-jose/v4"] != "v4.1.6") }' && \
     [ "$(printf 'go1.26.9\n%s\n' "$(go version -m /usr/bin/caddy | head -n 1 | awk '{print $2}')" | sort -V | head -n 1)" = go1.26.9 ]
 
 # caddy:2.11.7-alpine, resolved 2026-10-07
