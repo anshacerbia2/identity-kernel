@@ -409,7 +409,7 @@ provider's configuration. Back it up daily to storage outside the Docker volume,
 Keycloak upgrade, with `backup.sh` (STD-GLB-009 1.10.0 rule 9):
 
 ```sh
-./backup.sh /mnt/imam-storage/scnehaux-backups/identity-kernel   # another disk; mode 700, the operator's
+./backup.sh /mnt/dev-storage/scnehaux-backups/identity-kernel   # another disk; mode 700, the operator's
 ```
 
 - It writes one set: `globals-<date>.sql`, the cluster's roles (`pg_dumpall --globals-only`), and
@@ -430,7 +430,7 @@ Keycloak upgrade, with `backup.sh` (STD-GLB-009 1.10.0 rule 9):
 The daily line, in the operator's crontab:
 
 ```text
-45 2 * * * /path/to/identity-kernel/deploy/dev/backup.sh /mnt/imam-storage/scnehaux-backups/identity-kernel >/dev/null
+45 2 * * * /path/to/identity-kernel/deploy/dev/backup.sh /mnt/dev-storage/scnehaux-backups/identity-kernel >/dev/null
 ```
 
 Check it runs: the line is in `crontab -l`, `journalctl -u cron` shows today's run, and today's set is
@@ -440,7 +440,7 @@ in the directory.
 vault file**. `keys/` belongs to the containers' users:
 
 ```sh
-dir=/mnt/imam-storage/scnehaux-backups/identity-kernel
+dir=/mnt/dev-storage/scnehaux-backups/identity-kernel
 cp .env "$dir/env-$(date -u +%F)"
 sudo tar -C . --exclude=keys/signing --exclude=keys/vault -cf "$dir/keys-$(date -u +%F).tar" keys
 sudo chown "$(id -u):$(id -g)" "$dir/keys-$(date -u +%F).tar"
