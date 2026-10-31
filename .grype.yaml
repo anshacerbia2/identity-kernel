@@ -39,3 +39,36 @@ ignore:
       own image from the pinned one with the upgrade line (rule 10). Reviewed 2026-10-19: both tags
       still resolve to the pinned digest; the next PostgreSQL minor release is 2026-11-12, so the review
       moves to 2026-11-16, as in identity-control and organization-control.
+  # The kernel image: two findings in what Keycloak 26.7.5 ships, which no rebuild here can fix.
+  - vulnerability: GHSA-xxph-c9ww-hj94
+    package:
+      name: guava
+      version: 33.5.0-jre
+      type: java-archive
+      location: /opt/keycloak/lib/lib/main/com.google.guava.guava-33.5.0-jre.jar
+    reason: >-
+      review-by 2026-11-30: affected: detected 2026-10-28: the kernel image (image/Dockerfile on
+      image/keycloak.ref, Keycloak 26.7.5): CVE-2026-102554, deserialization of Guava's compact
+      collections allocates memory without bound; fixed in Guava 33.7.2, which no Keycloak release
+      carries on 2026-10-31 (26.8.1, 2026-10-13, is the newest). Rule 8 inputs: not publicly exposed
+      (reached only through the proxy); not in the KEV (catalog 2026.10.30); Vulnrichment (CISA ADP,
+      2026-10-09) Automatable no, Technical Impact partial, Exploitation poc. Table 1 gives fix on
+      system upgrade: the next move of image/keycloak.ref, within 90 days of detection, by 2027-01-26.
+      Asked upstream: keycloak/keycloak#54110, open. Reviewed by this date for a Keycloak release that
+      carries the fix. TDD-identity-kernel-005 1.15.0 §Images the Stack Runs.
+  - vulnerability: CVE-2026-91415
+    package:
+      name: java-21-openjdk-headless
+      version: 1:21.0.12.1.1-1.2.el9
+      type: rpm
+    reason: >-
+      review-by 2026-11-30: affected: detected 2026-10-31: the kernel image (image/Dockerfile on
+      image/keycloak.ref, Keycloak 26.7.5): Oracle's October 2026 CPU, font rendering; RHEL 9 ships
+      the fix as 1:21.0.13.0.9-1.2.el9 (RHSA-2026:88349, 2026-10-30). Not upgraded in the ubi9 stage:
+      the JDK lives in a directory named for its version, and a COPY onto the Keycloak image cannot
+      remove the old one or move the alternatives links, so the rpm database would report the new
+      version while the old JVM may still run. Rule 8 inputs: not publicly exposed; not in the KEV
+      (catalog 2026.10.30); Vulnrichment (CISA ADP) Automatable no, Technical Impact partial,
+      Exploitation none. Table 1 gives fix on system upgrade: the next move of image/keycloak.ref,
+      within 90 days of detection, by 2027-01-29. Not yet asked of the upstream: Keycloak rebuilds its
+      image on each release. TDD-identity-kernel-005 1.15.0 §Images the Stack Runs.

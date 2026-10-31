@@ -3,12 +3,12 @@ doc_meta:
   id: TDD-identity-kernel-005
   title: Image Build, Digest Pinning, and Upgrade Compatibility
   owner: Identity Platform Team
-  version: 1.14.0
+  version: 1.15.0
   status: approved
   classification: restricted
   review_cycle_days: 90
   created_date: 2026-08-11
-  last_reviewed: 2026-10-24
+  last_reviewed: 2026-10-31
   parent_sad: SAD-001
 ---
 
@@ -219,8 +219,8 @@ daily.
 
 | Image | Source | Publicly exposed (rule 8) | Remedy in 1.8.0 |
 | :-- | :-- | :-- | :-- |
-| kernel | `image/Dockerfile` on `image/keycloak.ref` | no: reached only through the proxy | none needed in 1.8.0; since 1.9.0 `pcre2`, and since 1.14.0 `ca-certificates`, upgraded where it is built (rule 10) |
-| `caddy` | `deploy/dev/caddy.Dockerfile`: Caddy 2.11.7 built from source on `caddy:2.11.7-builder-alpine`, overlaid on `caddy:2.11.7-alpine`, both by digest | **yes**: ports 80 and 443, or the tunnel's anonymous port | rebuilt from source (rule 9); `zlib`, and since 1.14.0 `brotli-libs`, upgraded (rule 10) |
+| kernel | `image/Dockerfile` on `image/keycloak.ref` | no: reached only through the proxy | none needed in 1.8.0; since 1.9.0 `pcre2`, and since 1.14.0 `ca-certificates`, upgraded where it is built (rule 10); since 1.15.0 two `affected` statements, `guava` and `java-21-openjdk-headless`, until the Keycloak pin moves |
+| `caddy` | `deploy/dev/caddy.Dockerfile`: Caddy 2.11.7 built from source on `caddy:2.11.7-builder-alpine`, overlaid on `caddy:2.11.7-alpine`, both by digest | **yes**: ports 80 and 443, or the tunnel's anonymous port | rebuilt from source (rule 9); `zlib`, since 1.14.0 `brotli-libs`, and since 1.15.0 `curl` and `libcurl`, upgraded (rule 10) |
 | `realm-apply` | `deploy/dev/realm-apply.Dockerfile`: `alpine:3.24` by digest with `git`, binaries from `golang:1.26.9-alpine` by digest | no: a one-shot job on the internal network | base replaced (rule 10); `zlib` upgraded |
 | `postgres` | `postgres:17.11-alpine`, pulled by digest | no: the internal network, no published port | `affected` exception until the upstream rebuild (rules 5, 8, 10) |
 
@@ -352,6 +352,40 @@ else; two `--no-cache` builds of one commit write the same patch files, byte for
 `update-ca-trust` honours `SOURCE_DATE_EPOCH`; the Java trust store (`/etc/pki/java/cacerts`) holds 118
 CA certificates in place of 146, the anchors the new package keeps, and the OpenSSL hash directory
 loses none of its 335 entries. Both lines go when their pins move to images that carry the fixes.
+
+**The proxy's `curl` is upgraded where it is built; two findings in the kernel wait for the Keycloak pin
+(1.15.0).** The daily scan failed from 2026-10-26 with nothing in this repository changed. The first
+finding of each package on main:
+
+| Image | Package | Installed | Fixed in | Findings | First found | Exposed (rule 8) | Vulnrichment, KEV [R36] | Fixed within |
+| :-- | :-- | :-- | :-- | :-- | :-- | :-- | :-- | :-- |
+| `caddy` | `curl`, `libcurl` | 8.22.0-r0 | 8.23.0-r0 | seven Critical, 17 High | 2026-10-26 | **yes** | CVE-2026-87866 and CVE-2026-94265 Automatable yes, Technical Impact total; not in the KEV | 3 days (2026-10-29), passed |
+| `caddy` | `github.com/go-jose/go-jose/v4` in `/usr/bin/caddy` | v4.1.5 | v4.1.6 | GHSA-mgcc-cww5-fp2q (CVE-2026-116587), High | 2026-10-28 | **yes** | Automatable yes, Technical Impact partial; not in the KEV | 14 days (2026-11-11) |
+| kernel | `guava` (in Keycloak's `lib/lib/main`) | 33.5.0-jre | 33.7.2 | CVE-2026-102554 (GHSA-xxph-c9ww-hj94), High | 2026-10-28 | no | Automatable no, Technical Impact partial; not in the KEV | fix on system upgrade, by 2027-01-26 |
+| kernel | `java-21-openjdk-headless` | 1:21.0.12.1.1-1.2.el9 | 1:21.0.13.0.9-1.2.el9 | CVE-2026-91415, High | 2026-10-31 | no | Automatable no, Technical Impact partial; not in the KEV | fix on system upgrade, by 2027-01-29 |
+
+- **The proxy** adds `'curl>=8.23.0-r0' 'libcurl>=8.23.0-r0'` to its upgrade line. Its time had passed
+  when this was found: the scan failed for five days before anyone read it, because nothing alerts on
+  a failed scheduled run yet.
+- **The proxy's `go-jose` is replaced in its source build**, as `x/net` is (rule 9): `xcaddy build`
+  takes `--replace github.com/go-jose/go-jose/v4=github.com/go-jose/go-jose/v4@v4.1.6`, and the build
+  fails unless `go version -m` shows v4.1.6 compiled in. Caddy 2.11.7 resolves v4.1.5, and no Caddy
+  release carries the fix. The binary also holds `go-jose/v3` v3.0.5, whose advisories have no fixed
+  version, so they are not in the gate.
+- **`guava` is not the kernel's to rebuild.** It is a jar inside Keycloak's distribution, found by the
+  zip's directory at `/opt/keycloak/lib/lib/main/com.google.guava.guava-33.5.0-jre.jar`. No Keycloak
+  release carries 33.7.2 on 2026-10-31: the advisory is from 2026-10-27, and 26.8.1 from 2026-10-13.
+  keycloak/keycloak#54110 asks for it. `.grype.yaml` holds an `affected` statement, reviewed by
+  2026-11-30.
+- **`java-21-openjdk-headless` is not upgraded in the ubi9 stage**, unlike `pcre2` and
+  `ca-certificates`. The JDK is installed in a directory named for its version, and the stage's `COPY`
+  adds and replaces files: it cannot remove the old directory or move the `alternatives` links that
+  point into it. The rpm database would then report 21.0.13 while the old JVM may still be the one that
+  runs, and the scan would pass on a claim the image does not keep. `.grype.yaml` holds an `affected`
+  statement, reviewed by 2026-11-30. CVE-2026-91403 (Critical) has no fix and is not in the gate.
+
+Both statements end with the next move of `image/keycloak.ref` to an image that carries the fixes,
+through the compatibility suite and the upgrade job.
 
 **The trade-off of an upgrade line.** apk resolves `git` and the `zlib` constraint against Alpine's
 index on the day of the build, not against the digest. apk keeps the installed version "unless an
@@ -626,7 +660,7 @@ defer yet. Its release record is the `upgrade` job's summary, which every run wr
 | Reverse proxy (1.8.0) | Caddy 2.11.7 built from source, x/net v0.60.0, Go 1.27.2 | §Images the Stack Runs; until a Caddy release carries the fix |
 | realm-apply base (1.8.0) | `alpine:3.24` by digest, with `git` | Only what the job runs (§Images the Stack Runs) |
 | Built images and the registry (1.8.0) | `pull_policy: build` on every service with `build:` and an `image:` name | A built image is never pulled under its name (§Images the Stack Runs) |
-| Upgrade lines (1.8.0) | `apk add --no-cache 'zlib>=1.3.2-r1'` in the proxy and realm-apply; since 1.14.0 `'brotli-libs>=1.2.1-r0'` in the proxy and `ca-certificates` in the kernel's ubi9 stage | CVE-2026-85091, CVE-2026-111497, CVE-2026-114406; each goes when its pin moves |
+| Upgrade lines (1.8.0) | `apk add --no-cache 'zlib>=1.3.2-r1'` in the proxy and realm-apply; since 1.14.0 `'brotli-libs>=1.2.1-r0'` in the proxy and `ca-certificates` in the kernel's ubi9 stage; since 1.15.0 `curl` and `libcurl` in the proxy | CVE-2026-85091, CVE-2026-111497, CVE-2026-114406, the `curl` findings of 2026-10-26; each goes when its pin moves |
 
 The database credential, the administration client's credential, and the signing keystore
 are resolved at runtime from the approved secret manager and are never present in the
@@ -919,3 +953,4 @@ so the backup is part of the upgrade path. On the development server it follows 
 | R33 | Docker, _containerd image store_, <https://docs.docker.com/engine/storage/containerd/>, accessed 2026-10-22. "The containerd image store is the default storage backend for Docker Engine 29.0 and later on fresh installations." "Working with images that include attestations (provenance, SBOM). These use image indices that the classic store doesn't support." |
 | R34 | Docker, *Build variables*, §BUILDX_NO_DEFAULT_ATTESTATIONS, <https://docs.docker.com/build/building/variables/#buildx_no_default_attestations>, accessed 2026-10-22: "By default, BuildKit v0.11 and later adds provenance attestations to images you build. Set `BUILDX_NO_DEFAULT_ATTESTATIONS=1` to disable the default provenance attestations." Docker, *Provenance attestations*, <https://docs.docker.com/build/metadata/attestations/slsa-provenance/>, accessed 2026-10-22: "The provenance attestations include facts about the build process, including details such as: Build timestamps". |
 | R35 | CISA, *Vulnrichment*, `cisagov/vulnrichment`, branch `develop`, accessed 2026-10-24, ADP "CISA-ADP" SSVC options: CVE-2026-111497 (2026-10-23T13:25Z) Exploitation none, Automatable no, Technical Impact total; no record for CVE-2026-114406. <https://github.com/cisagov/vulnrichment/tree/develop/2026>. CISA, *Known Exploited Vulnerabilities Catalog*, version 2026.10.23, <https://www.cisa.gov/sites/default/files/feeds/known_exploited_vulnerabilities.json>: neither is listed. |
+| R36 | CISA, *Vulnrichment*, `cisagov/vulnrichment`, branch `develop`, accessed 2026-10-31, ADP "CISA-ADP" SSVC options: CVE-2026-87866 and CVE-2026-94265 Exploitation poc, Automatable yes, Technical Impact total; CVE-2026-86409, -86410, -86411, -86412, -92386, -92387 and -92392 Exploitation poc, Automatable no, Technical Impact total; CVE-2026-102554 (2026-10-09) Exploitation poc, Automatable no, Technical Impact partial; CVE-2026-91415 Exploitation none, Automatable no, Technical Impact partial; CVE-2026-116587 (GHSA-mgcc-cww5-fp2q) Automatable yes, Technical Impact partial. <https://github.com/cisagov/vulnrichment/tree/develop/2026>. CISA, *Known Exploited Vulnerabilities Catalog*, version 2026.10.30: none is listed. Red Hat, RHSA-2026:88349 (2026-10-30), `java-21-openjdk` 1:21.0.13.0.9-1.2.el9. GitHub Advisory Database, GHSA-xxph-c9ww-hj94 (2026-10-27), patched in `com.google.guava:guava` 33.7.2. |
