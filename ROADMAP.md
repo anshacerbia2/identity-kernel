@@ -94,6 +94,20 @@ and context switch mechanism — are exercised here but decided in `identity-con
     allows the package's public anchors;
   - not fixable by rebuild yet, so not in the gate: `java-21-openjdk-headless` (CVE-2026-91403,
     CVE-2026-91415) and `libcrypto3`/`libssl3` 3.5.8-r0 (four High), which have no fixed version
+- ✅ **The proxy's `curl` upgraded where it is built** (added 2026-10-31; TDD-005 1.15.0 §Images the
+  Stack Runs). The daily scan failed from 2026-10-26 on `curl`/`libcurl` 8.22.0-r0 in the proxy, seven
+  Critical and 17 High, fixed in 8.23.0-r0. Two are Automatable with total impact on a publicly exposed
+  image: BOD 26-04 gave 3 days, to 2026-10-29, which passed before the failure was read.
+  `caddy.Dockerfile` adds `curl` and `libcurl` to its upgrade line
+- ⏳ **Two findings in Keycloak 26.7.5 wait for the next `image/keycloak.ref` move** (added 2026-10-31;
+  TDD-005 1.15.0). `.grype.yaml` holds an `affected` statement for each, reviewed by 2026-11-30:
+  - `guava` 33.5.0-jre, CVE-2026-102554, fixed in 33.7.2, which no Keycloak release carries yet
+    (keycloak/keycloak#54110). Not exposed, not in the KEV, Automatable no, partial: by 2027-01-26;
+  - `java-21-openjdk-headless` 21.0.12, CVE-2026-91415, fixed in RHEL as 21.0.13
+    (RHSA-2026:88349). Not upgraded in the ubi9 stage, because a `COPY` cannot remove the old JDK
+    directory or move its `alternatives` links. Not exposed, not in the KEV, Automatable no, partial:
+    by 2027-01-29
+- ⏳ **An alert on a failed scheduled scan.** The scan failed for five days before anyone read it
 - ⏳ **Caddy's source build ends with a release.** caddyserver/caddy#8179 moved x/net to v0.60.0 on
   2026-10-09; no release carries it yet (v2.11.7 is the latest). When one does, built with Go 1.26.9 or
   later, compose pulls it by digest again and `caddy.Dockerfile` goes, through `deploy-dev`'s `stack`
