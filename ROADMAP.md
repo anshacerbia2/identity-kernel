@@ -1018,7 +1018,7 @@ change and weekly: it proves the retention rule, that the backup holds no signin
 restored database equals the source, and that the restored realm signs with the same `kid`, within the
 15-minute RTO of PAD-PLT-001 §6.2. **Not met:** the 1-minute RPO, which needs WAL archiving, and a copy
 off the host, required before production. The server's cron line becomes
-`45 2 * * * .../identity-kernel/deploy/dev/backup.sh /mnt/imam-storage/scnehaux-backups/identity-kernel`
+`45 2 * * * .../identity-kernel/deploy/dev/backup.sh /mnt/dev-storage/scnehaux-backups/identity-kernel`
 (`deploy/dev/README.md` §Backups).
 
 ### Clients on the development server

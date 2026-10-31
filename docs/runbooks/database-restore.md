@@ -23,7 +23,7 @@ STD-GLB-002 §Restore Evidence), and keeps its `restore-evidence` artifact.
 1. **Pick the set.** The newest complete one, unless the fault is older:
 
    ```sh
-   ls -l /mnt/imam-storage/scnehaux-backups/identity-kernel/
+   ls -l /mnt/dev-storage/scnehaux-backups/identity-kernel/
    ```
 
    A set is `globals-<date>.sql` and `keycloak-<date>.dump`, both present. `backup.sh` keeps the newest
@@ -48,8 +48,8 @@ STD-GLB-002 §Restore Evidence), and keeps its `restore-evidence` artifact.
    holds anything, applies the roles, then the database, and stops on the first error:
 
    ```sh
-   ./restore.sh /mnt/imam-storage/scnehaux-backups/identity-kernel/globals-<date>.sql \
-                /mnt/imam-storage/scnehaux-backups/identity-kernel/keycloak-<date>.dump
+   ./restore.sh /mnt/dev-storage/scnehaux-backups/identity-kernel/globals-<date>.sql \
+                /mnt/dev-storage/scnehaux-backups/identity-kernel/keycloak-<date>.dump
    ```
 
 5. **Start the stack** and let `realm-apply` check it:

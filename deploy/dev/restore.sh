@@ -2,8 +2,8 @@
 # Restores the kernel database into an empty stack (README.md §Backups, STD-GLB-009 1.10.0 rule 9,
 # STD-GLB-002 §Restore Evidence).
 #
-#   ./restore.sh /mnt/imam-storage/scnehaux-backups/identity-kernel/globals-2026-10-20.sql \
-#                /mnt/imam-storage/scnehaux-backups/identity-kernel/keycloak-2026-10-20.dump
+#   ./restore.sh /mnt/dev-storage/scnehaux-backups/identity-kernel/globals-2026-10-20.sql \
+#                /mnt/dev-storage/scnehaux-backups/identity-kernel/keycloak-2026-10-20.dump
 #   docker compose up -d --build --wait
 #
 # 1. Starts postgres alone and waits until it accepts TCP connections, which the image's first-start
