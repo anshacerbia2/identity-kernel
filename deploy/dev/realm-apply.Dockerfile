@@ -28,7 +28,9 @@ FROM alpine@sha256:294b683cb724975bec92580e1e685676bd4b50bda910ddb8c51d4cabeaec7
 # floor. CVE-2026-85091: alpine:3.24 carries zlib 1.3.2-r0, and Alpine ships the fix as 1.3.2-r1. The
 # build fails when no repository has it, and the constraint goes when the pin moves to an image that
 # carries the fix.
-RUN apk add --no-cache git 'zlib>=1.3.2-r1'
+# CVE-2026-107891 (High, found 2026-11-05): alpine:3.24 carries musl 1.2.6-r2, and Alpine ships the fix
+# as 1.2.6-r3; the constraint goes when the pin moves to an image that carries it.
+RUN apk add --no-cache git 'zlib>=1.3.2-r1' 'musl>=1.2.6-r3' 'musl-utils>=1.2.6-r3'
 COPY --from=build /out/realm-apply /usr/local/bin/realm-apply
 # client-key rides in the same image, so a server makes and installs client keys with the Docker
 # it already has: no Go and no openssl on the host (new-client-key.sh, set-client-key.sh).
