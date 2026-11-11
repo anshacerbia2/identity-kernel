@@ -101,6 +101,12 @@ and context switch mechanism — are exercised here but decided in `identity-con
   `caddy.Dockerfile` adds `curl` and `libcurl` to its upgrade line. From 2026-10-28 the proxy's
   binary also failed on `go-jose/v4` v4.1.5 (GHSA-mgcc-cww5-fp2q; Automatable, partial: 14 days, by
   2026-11-11); the source build replaces it with v4.1.6, as it replaces `x/net`
+- ✅ **The findings of 2026-11-05 fixed where they are built** (added 2026-11-10; TDD-005 1.16.0 §Images the
+  Stack Runs; ISMS-008 NC-4). The daily scan failed from 2026-11-05 unread. The proxy's source build replaces
+  x/net (v0.62.0, GO-2026-6860) and compress (v1.20.2, GO-2026-6865) and requires musl 1.2.5-r24; realm-apply
+  requires musl 1.2.6-r3; the PostgreSQL pin moved to the 17.11-alpine3.24 rebuild of 2026-11-06, closing
+  CVE-2026-85091. The proxy is publicly exposed and the fix came five days after detection. Open: zlib
+  CVE-2026-4738 in the database image, `affected` until the PostgreSQL 17.12 image, review 2026-11-20
 - ⏳ **Two findings in Keycloak 26.7.5 wait for the next `image/keycloak.ref` move** (added 2026-10-31;
   TDD-005 1.15.0). `.grype.yaml` holds an `affected` statement for each, reviewed by 2026-11-30:
   - `guava` 33.5.0-jre, CVE-2026-102554, fixed in 33.7.2, which no Keycloak release carries yet

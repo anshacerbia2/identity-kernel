@@ -24,17 +24,20 @@ ENV GOPROXY=${GOPROXY}
 # go-jose v4.1.5, which Caddy 2.11.7 resolves, is GHSA-mgcc-cww5-fp2q (CVE-2026-116587, found
 # 2026-10-28): a crafted RSA key in a JWK makes parsing use excess CPU. v4.1.6 fixes it, and no Caddy
 # release carries it yet, so the build replaces it the same way.
-RUN xcaddy build v2.11.7 --replace golang.org/x/net=golang.org/x/net@v0.60.0 \
-      --replace github.com/go-jose/go-jose/v4=github.com/go-jose/go-jose/v4@v4.1.6 --output /usr/bin/caddy
-# The build fails unless the binary carries what it is built for: x/net v0.60.0 and go-jose v4.1.6 as
+# 2026-11-10: golang.org/x/net v0.60.0 is GO-2026-6860 (High) and klauspost/compress v1.20.1 is
+# GO-2026-6865 (High); v0.62.0 and v1.20.2 fix them, so both are replaced too.
+RUN xcaddy build v2.11.7 --replace golang.org/x/net=golang.org/x/net@v0.62.0 \
+      --replace github.com/go-jose/go-jose/v4=github.com/go-jose/go-jose/v4@v4.1.6 \
+      --replace github.com/klauspost/compress=github.com/klauspost/compress@v1.20.2 --output /usr/bin/caddy
+# The build fails unless the binary carries what it is built for: x/net v0.62.0, go-jose v4.1.6 and compress v1.20.2 as
 # the modules compiled in (the replace line, `=>`, when there is one), and a standard library no older
 # than go1.26.9.
 RUN go version -m /usr/bin/caddy | awk ' \
       NR == 1 { go = $2 } \
-      $1 == "dep" { m = $2; if (m == "golang.org/x/net" || m == "github.com/go-jose/go-jose/v4") v[m] = $3; else m = "" } \
+      $1 == "dep" { m = $2; if (m == "golang.org/x/net" || m == "github.com/go-jose/go-jose/v4" || m == "github.com/klauspost/compress") v[m] = $3; else m = "" } \
       $1 == "=>" && m != "" { v[m] = $3 } \
-      END { print go, "golang.org/x/net", v["golang.org/x/net"], "go-jose/v4", v["github.com/go-jose/go-jose/v4"]; \
-            exit (v["golang.org/x/net"] != "v0.60.0" || v["github.com/go-jose/go-jose/v4"] != "v4.1.6") }' && \
+      END { print go, "golang.org/x/net", v["golang.org/x/net"], "go-jose/v4", v["github.com/go-jose/go-jose/v4"], "compress", v["github.com/klauspost/compress"]; \
+            exit (v["golang.org/x/net"] != "v0.62.0" || v["github.com/go-jose/go-jose/v4"] != "v4.1.6" || v["github.com/klauspost/compress"] != "v1.20.2") }' && \
     [ "$(printf 'go1.26.9\n%s\n' "$(go version -m /usr/bin/caddy | head -n 1 | awk '{print $2}')" | sort -V | head -n 1)" = go1.26.9 ]
 
 # caddy:2.11.7-alpine, resolved 2026-10-07
@@ -45,5 +48,7 @@ FROM caddy@sha256:d8542f48d34a9cf4e4c11a478865229840e87e4c96ea3f439101f31a5d35f7
 # them CVE-2026-87866 and CVE-2026-94265, Automatable yes): Alpine ships the fixes as 8.23.0-r0. A
 # constraint fails the build when no repository has it. Each goes when the pin moves to an image that
 # carries its fix.
-RUN apk add --no-cache 'zlib>=1.3.2-r1' 'brotli-libs>=1.2.1-r0' 'curl>=8.23.0-r0' 'libcurl>=8.23.0-r0'
+# CVE-2026-107891 (High, found 2026-11-05): musl 1.2.5-r23; Alpine ships the fix as 1.2.5-r24.
+RUN apk add --no-cache 'zlib>=1.3.2-r1' 'brotli-libs>=1.2.1-r0' 'curl>=8.23.0-r0' 'libcurl>=8.23.0-r0' \
+      'musl>=1.2.5-r24' 'musl-utils>=1.2.5-r24'
 COPY --from=build /usr/bin/caddy /usr/bin/caddy

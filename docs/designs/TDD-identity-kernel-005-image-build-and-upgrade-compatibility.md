@@ -3,12 +3,12 @@ doc_meta:
   id: TDD-identity-kernel-005
   title: Image Build, Digest Pinning, and Upgrade Compatibility
   owner: Identity Platform Team
-  version: 1.15.0
+  version: 1.16.0
   status: approved
   classification: restricted
   review_cycle_days: 90
   created_date: 2026-08-11
-  last_reviewed: 2026-10-31
+  last_reviewed: 2026-11-10
   parent_sad: SAD-001
 ---
 
@@ -475,6 +475,23 @@ with a wildcard, because Grype reads it as a glob [R26]; on a reason that is not
 detected …: <images>: <statement>` with `affected` or one of the three justifications rule 7 accepts;
 on a review date that has passed, is more than 90 days ahead, or, for `affected`, is more than 90 days
 after detection. Whether a statement is true, and whether Table 1 was read correctly, is left to review.
+
+**1.16.0: the findings of 2026-11-05.** The daily scan failed from 2026-11-05 and nobody read it
+(ISMS-008 NC-4). With a fix and at High or Critical, it found:
+
+- **In the proxy, the publicly exposed image:** `golang.org/x/net` v0.60.0 (GO-2026-6860, High) and
+  `klauspost/compress` v1.20.1 (GO-2026-6865, High) in `/usr/bin/caddy`, and musl 1.2.5-r23
+  (CVE-2026-107891, High). The build path of rule 9 already in `caddy.Dockerfile` takes two more
+  `--replace` lines, x/net v0.62.0 and compress v1.20.2, and the build check now fails unless the
+  binary carries x/net v0.62.0, go-jose v4.1.6 and compress v1.20.2. The runtime stage requires
+  `musl>=1.2.5-r24` (rule 10). Fixed on 2026-11-10, five days after detection: for an exposed image
+  that can pass a rule 8 time of 3 days, which NC-4 records.
+- **In realm-apply:** musl 1.2.6-r2 (CVE-2026-107891); the stage requires `musl>=1.2.6-r3`.
+- **In the database:** zlib (CVE-2026-4738, Critical). The pin moves to the `17.11-alpine3.24`
+  rebuild of 2026-11-06, in compose and in `compat.yml`, which carries zlib 1.3.2-r1 and so closes
+  CVE-2026-85091; CVE-2026-4738 waits for the PostgreSQL 17.12 image (scheduled 2026-11-12) under an
+  `affected` rule reviewed by 2026-11-20: not exposed, not in the KEV, Automatable no, Technical
+  Impact total, so fix on system upgrade.
 
 ### The Build Context (1.12.0)
 

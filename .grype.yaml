@@ -15,30 +15,30 @@
 #
 # One file serves every image scanned here, and Alpine's package database is the same path in each, so
 # a rule for an apk package matches that package in every Alpine image. The version is what keeps it to
-# the image it is written for: the proxy and realm-apply carry zlib 1.3.2-r1, which the rule below does
-# not match.
+# the image it is written for: on 2026-11-10 the proxy and realm-apply carry a fixed zlib, and only the
+# database carries 1.3.2-r1, the version the rule below matches.
 check-for-app-update: false
 ignore:
-  - vulnerability: CVE-2026-85091
+  # The database, which runs the official image without building it (rule 10). On 2026-11-10 zlib
+  # 1.3.2-r1 is found in this image alone, so the version keeps the rule to it.
+  - vulnerability: CVE-2026-4738
     package:
       name: zlib
-      version: 1.3.2-r0
+      version: 1.3.2-r1
       type: apk
+      location: /lib/apk/db/installed
     reason: >-
-      review-by 2026-11-16: affected: detected 2026-10-07:
-      postgres:17.11-alpine (postgres@sha256:b0f9560a2de083e2cc7382e75f808c7381a32852a7ec49117deedb300e552b24): Rule 8
-      inputs: not publicly exposed (the database is on the stack's internal network only, no published
-      port); not in the KEV (catalog 2026.10.08); Vulnrichment (CISA ADP, 2026-09-03) Automatable no,
-      Technical Impact total, Exploitation poc. Table 1 gives fix on system upgrade, for an image run
-      without building the next pin move, within 90 days of detection: by 2027-01-05. Waits for the
-      official image to be rebuilt on an Alpine base with zlib 1.3.2-r1, which Alpine already ships;
-      on 2026-10-10 postgres:17.11-alpine still resolves to the pinned digest and alpine:3.24 (3.24.2,
-      built 2026-09-17) still carries 1.3.2-r0, and no rebuild date is announced. Not yet asked of the
-      upstream: no docker-library/postgres issue names it on 2026-10-10. Reviewed on this date to move
-      the pin as soon as the rebuild lands; when the rule 8 date would pass first, the stack builds its
-      own image from the pinned one with the upgrade line (rule 10). Reviewed 2026-10-19: both tags
-      still resolve to the pinned digest; the next PostgreSQL minor release is 2026-11-12, so the review
-      moves to 2026-11-16, as in identity-control and organization-control.
+      review-by 2026-11-20: affected: detected 2026-11-05: postgres:17.11-alpine3.24
+      (postgres@sha256:3540c0362c809df084ffac0ae69fe794515f9de92692f02178bcdce0ef0302ac, rebuilt
+      upstream 2026-11-06), the database in deploy/dev/compose.yaml: action: move the pin to the
+      official image that carries zlib 1.4-r0, expected with PostgreSQL 17.12, scheduled for
+      2026-11-12. The 2026-11-06 rebuild carries zlib 1.3.2-r1, which closed CVE-2026-85091 (ISMS-005
+      T1). BOD 26-04: not publicly exposed (internal network only, no published port); not in the KEV
+      (catalog 2026.11.09); Vulnrichment Automatable no, Technical Impact total, so fix on system
+      upgrade, the next pin move, within 90 days of detection. Reviewed by 2026-11-20 to move the pin
+      once the rebuild lands; if it has not, the stack builds its own image from the pinned one with
+      the upgrade line (rule 10). Not asked of the upstream: the official images rebuild on their
+      maintainers' schedule. TDD-identity-kernel-005 §Images the Stack Runs.
   # The kernel image: two findings in what Keycloak 26.7.5 ships, which no rebuild here can fix.
   - vulnerability: GHSA-xxph-c9ww-hj94
     package:
