@@ -3,12 +3,12 @@ doc_meta:
   id: TDD-identity-kernel-005
   title: Image Build, Digest Pinning, and Upgrade Compatibility
   owner: Identity Platform Team
-  version: 1.16.0
+  version: 1.16.1
   status: approved
   classification: restricted
   review_cycle_days: 90
   created_date: 2026-08-11
-  last_reviewed: 2026-11-10
+  last_reviewed: 2026-11-11
   parent_sad: SAD-001
 ---
 
@@ -492,6 +492,8 @@ after detection. Whether a statement is true, and whether Table 1 was read corre
   CVE-2026-85091; CVE-2026-4738 waits for the PostgreSQL 17.12 image (scheduled 2026-11-12) under an
   `affected` rule reviewed by 2026-11-20: not exposed, not in the KEV, Automatable no, Technical
   Impact total, so fix on system upgrade.
+
+**1.16.1: libxslt and krb5-libs (2026-11-11).** The scan of 2026-11-11 found libxslt 1.1.43-r3 (CVE-2026-125350, in the KEV since 2026-11-10; CVE-2026-87636; CVE-2026-9947) and krb5-libs 1.22.2-r1 (nine High) in the PostgreSQL base. The proxy and realm-apply do not carry either package at a vulnerable version. The database image waits under `affected` rules reviewed by 2026-11-14: CVE-2026-125350 has no Vulnrichment record yet, so the strictest row for an image not exposed and in the KEV applies, 3 days. The pin moves to the PostgreSQL 17.12 image, scheduled for 2026-11-12, if it carries the fixes; if it is not published by 2026-11-13, the database runs an image built from the pinned one with the upgrade line (rule 10).
 
 ### The Build Context (1.12.0)
 
