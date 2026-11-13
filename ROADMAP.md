@@ -106,7 +106,7 @@ and context switch mechanism — are exercised here but decided in `identity-con
   x/net (v0.62.0, GO-2026-6860) and compress (v1.20.2, GO-2026-6865) and requires musl 1.2.5-r24; realm-apply
   requires musl 1.2.6-r3; the PostgreSQL pin moved to the 17.11-alpine3.24 rebuild of 2026-11-06, closing
   CVE-2026-85091. The proxy is publicly exposed and the fix came five days after detection. Open: zlib
-  CVE-2026-4738 in the database image, `affected` until the PostgreSQL 17.12 image, review 2026-11-20 Added 2026-11-11: libxslt (CVE-2026-125350, in the KEV) and krb5-libs in the PostgreSQL base; the migrate stage upgrades both, and the database image waits under `affected` rules until 2026-11-14 for the PostgreSQL 17.12 image, or runs an image built from the pin with the upgrade line.
+  CVE-2026-4738 in the database image, `affected` until the PostgreSQL 17.12 image, review 2026-11-20. Added 2026-11-11: libxslt (CVE-2026-125350, in the KEV) and krb5-libs in the PostgreSQL base; the migrate stage upgrades both, and the database image waits under `affected` rules until 2026-11-14 for the PostgreSQL 17.12 image, or runs an image built from the pin with the upgrade line. Closed here on 2026-11-13: the pin moved to PostgreSQL 17.12, which carries the zlib, libxslt and krb5-libs fixes, and the database exceptions went (TDD-005 1.16.2); each closes on the development server when it runs the new pin (STD-GLB-009 rule 8, ISMS-008 NC-5).
 - ⏳ **Two findings in Keycloak 26.7.5 wait for the next `image/keycloak.ref` move** (added 2026-10-31;
   TDD-005 1.15.0). `.grype.yaml` holds an `affected` statement for each, reviewed by 2026-11-30:
   - `guava` 33.5.0-jre, CVE-2026-102554, fixed in 33.7.2, which no Keycloak release carries yet
@@ -120,9 +120,8 @@ and context switch mechanism — are exercised here but decided in `identity-con
   2026-10-09; no release carries it yet (v2.11.7 is the latest). When one does, built with Go 1.26.9 or
   later, compose pulls it by digest again and `caddy.Dockerfile` goes, through `deploy-dev`'s `stack`
   and `tunnel` jobs
-- ⏳ **Postgres's `zlib`** waits for the official `postgres:17.11-alpine` rebuild on an Alpine base with
-  zlib 1.3.2-r1. The pin moves and the rule goes when it lands; by 2027-01-05 at the latest, or the
-  stack builds its own Postgres image with the upgrade line
+- ✅ **Postgres's `zlib`**: the pin moved to the 17.11-alpine3.24 rebuild of 2026-11-06 (zlib 1.3.2-r1),
+  then on 2026-11-13 to `postgres:17.12-alpine3.24` (TDD-005 1.16.2), and the rule went
 - ✅ Realm definition applied and diffed by the pipeline — `cmd/realm-apply`, which the development
   server runs as a one-shot job on every `docker compose up`, so a pulled change reaches the realm without
   a remembered command, and console drift fails the next up instead of being overwritten. CI applies the realm
