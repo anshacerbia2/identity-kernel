@@ -3,12 +3,12 @@ doc_meta:
   id: TDD-identity-kernel-005
   title: Image Build, Digest Pinning, and Upgrade Compatibility
   owner: Identity Platform Team
-  version: 1.16.1
+  version: 1.16.2
   status: approved
   classification: restricted
   review_cycle_days: 90
   created_date: 2026-08-11
-  last_reviewed: 2026-11-11
+  last_reviewed: 2026-11-13
   parent_sad: SAD-001
 ---
 
@@ -494,6 +494,8 @@ after detection. Whether a statement is true, and whether Table 1 was read corre
   Impact total, so fix on system upgrade.
 
 **1.16.1: libxslt and krb5-libs (2026-11-11).** The scan of 2026-11-11 found libxslt 1.1.43-r3 (CVE-2026-125350, in the KEV since 2026-11-10; CVE-2026-87636; CVE-2026-9947) and krb5-libs 1.22.2-r1 (nine High) in the PostgreSQL base. The proxy and realm-apply do not carry either package at a vulnerable version. The database image waits under `affected` rules reviewed by 2026-11-14: CVE-2026-125350 has no Vulnrichment record yet, so the strictest row for an image not exposed and in the KEV applies, 3 days. The pin moves to the PostgreSQL 17.12 image, scheduled for 2026-11-12, if it carries the fixes; if it is not published by 2026-11-13, the database runs an image built from the pinned one with the upgrade line (rule 10).
+
+**1.16.2: PostgreSQL 17.12 (2026-11-13).** `postgres:17.12-alpine3.24` was published on 2026-11-12 (`sha256:34261f594522cf41dfcb76aefd42b9d201098b0e6b23c9c68733f169e4218b6f`), the upstream rebuild rule 10 waited for. The pin moves to it in `deploy/dev/compose.yaml` and the `compat` workflow. The image scan of the branch ([run 43410490762](https://github.com/anshacerbia2/identity-kernel/actions/runs/43410490762)) finds none of zlib CVE-2026-4738, libxslt CVE-2026-125350 (in the KEV), CVE-2026-87636 and CVE-2026-9947, or the nine krb5-libs findings, so the thirteen database exceptions go. Under STD-GLB-009 rule 8 as changed on 2026-11-12, the findings close on the development server when it runs this pin, not at this merge; libxslt's time ends on 2026-11-14 (ISMS-008 NC-5).
 
 ### The Build Context (1.12.0)
 
