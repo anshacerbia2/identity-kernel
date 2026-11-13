@@ -289,8 +289,8 @@ jobs:
 
     services:
       postgres:
-        # postgres:17.11-alpine, the digest deploy/dev/compose.yaml runs.
-        image: postgres@sha256:3540c0362c809df084ffac0ae69fe794515f9de92692f02178bcdce0ef0302ac
+        # postgres:17.12-alpine3.24, the digest deploy/dev/compose.yaml runs.
+        image: postgres@sha256:34261f594522cf41dfcb76aefd42b9d201098b0e6b23c9c68733f169e4218b6f
         env:
           POSTGRES_USER: keycloak
           POSTGRES_PASSWORD: keycloak
